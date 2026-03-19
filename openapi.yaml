@@ -1,0 +1,773 @@
+openapi: 3.1.0
+info:
+  title: FCN Idea Generation API
+  version: 1.0.0
+  summary: REST API contract for daily FCN idea screening used by PB RMs and ICs.
+  description: >
+    This API serves a mobile React Native app and a Node.js backend backed by PostgreSQL.
+    It exposes the daily push screen and single-symbol pull-mode analysis for FCN idea generation.
+servers:
+  - url: https://api.example.com
+    description: Production
+  - url: https://staging-api.example.com
+    description: Staging
+tags:
+  - name: Ideas
+    description: Daily FCN idea screening endpoints.
+paths:
+  /ideas/today:
+    get:
+      tags:
+        - Ideas
+      operationId: getTodayIdeas
+      summary: Get the latest completed daily idea screen
+      description: >
+        Returns the latest completed scoring run split into recommended, caution, and not recommended sections.
+        Recommended and caution entries are sorted by composite score descending.
+      responses:
+        '200':
+          description: Latest completed daily screen.
+          headers:
+            Cache-Control:
+              description: >
+                Today screen should normally be served from the latest completed run with short private caching.
+              schema:
+                type: string
+                example: private, max-age=60
+            X-Data-Stale:
+              description: Present and true if the service had to fall back to the previous completed run.
+              schema:
+                type: string
+                example: "true"
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TodayIdeasResponse'
+              examples:
+                todayIdeas:
+                  summary: Example daily push screen
+                  value:
+                    run_date: "2026-03-17"
+                    run_id: "7a9fbe7b-780f-4c36-96ec-b2a11d3d94d2"
+                    market_context:
+                      vix: 21.4
+                      hk_vix: 19.1
+                      notable_macro: "US-Iran tensions elevated · Oil +2.3%"
+                    recommended:
+                      - symbol: "AMZN"
+                        exchange: "NASDAQ"
+                        sector: "Consumer Discretionary"
+                        grade: "GO"
+                        composite_score: 0.74
+                        recommended_strike: 185
+                        recommended_tenor_days: 30
+                        ref_coupon_pct: 15.8
+                        moneyness_pct: 89.4
+                        reasoning_text: "AMZN remains structurally usable for FCN discussion. The preferred setup is a 30-day tenor around the 185 strike, where premium remains attractive without forcing an aggressive entry level. Trend and event signals are supportive, with no immediate catalyst inside the tenor window."
+                        flags:
+                          - type: "LOWER_HIGH_RISK"
+                            severity: "WARN"
+                            message: "Price remains moderately below the 52-week high"
+                        current_price: 206.9
+                        pct_from_52w_high: -11.7
+                        iv_rank: 63
+                    caution:
+                      - symbol: "TSLA"
+                        exchange: "NASDAQ"
+                        sector: "Consumer Discretionary"
+                        grade: "CAUTION"
+                        composite_score: 0.57
+                        recommended_strike: 155
+                        recommended_tenor_days: 30
+                        ref_coupon_pct: 21.6
+                        moneyness_pct: 87.9
+                        reasoning_text: "TSLA is usable only with tighter risk discipline. Premium is rich at the selected strike, but trend quality and event sensitivity are weaker than top-ranked names. This is more suitable for clients already comfortable owning the stock on assignment."
+                        flags:
+                          - type: "BEARISH_STRUCTURE"
+                            severity: "WARN"
+                            message: "Spot is near the 200-day moving average"
+                          - type: "EARNINGS_PROXIMITY"
+                            severity: "WARN"
+                            message: "Earnings fall within the next 21 days"
+                        current_price: 176.3
+                        pct_from_52w_high: -28.9
+                        iv_rank: 79
+                    not_recommended:
+                      - symbol: "CRCL"
+                        primary_flag_type: "BROKEN_TREND"
+                        primary_flag_detail: "Price is more than 50% below the 52-week high, indicating falling-knife risk"
+        '503':
+          $ref: '#/components/responses/ScoringEngineUnavailable'
+  /ideas/{symbol}:
+    get:
+      tags:
+        - Ideas
+      operationId: getIdeaForSymbol
+      summary: Get a single-symbol idea analysis
+      description: >
+        Returns the full pull-mode analysis for a single symbol.
+        If a result already exists for today, the cached result is returned.
+        If no result exists for today and synchronous scoring is disabled or unavailable within the request budget,
+        the API returns 202 Accepted with a scoring job payload. Clients should poll the job status endpoint.
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          description: Ticker symbol in the FCN screening universe.
+          schema:
+            type: string
+            example: CRCL
+      responses:
+        '200':
+          description: Cached or freshly completed symbol analysis.
+          headers:
+            Cache-Control:
+              description: >
+                Cached responses should be privately cacheable for a short period.
+                Freshly completed responses may return no-cache.
+              schema:
+                type: string
+                example: private, max-age=300
+            X-Cache:
+              description: Indicates whether the response came from today's cached score or a freshly completed pass.
+              schema:
+                type: string
+                enum: [HIT, MISS]
+                example: HIT
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SymbolIdeaResponse'
+              examples:
+                crclAvoid:
+                  summary: Example symbol analysis
+                  value:
+                    symbol: "CRCL"
+                    exchange: "NYSE"
+                    run_date: "2026-03-17"
+                    cached: false
+                    grade: "AVOID"
+                    verdict_headline: "Not recommended"
+                    verdict_sub: "Trend damage and unstable downside profile outweigh coupon attractiveness"
+                    recommended_strike: null
+                    recommended_tenor_days: null
+                    ref_coupon_pct: null
+                    moneyness_pct: null
+                    reasoning_text: "CRCL is not suitable for FCN pitching today. Although option premium remains elevated, the name still exhibits broken-trend behavior and poor assignment quality for PB clients. Elevated downside instability means lower strikes do not adequately solve the risk-control problem."
+                    flags:
+                      - type: "BROKEN_TREND"
+                        severity: "BLOCK"
+                        message: "Price is more than 50% below the 52-week high"
+                      - type: "BEARISH_STRUCTURE"
+                        severity: "WARN"
+                        message: "Spot remains below the 200-day moving average"
+                    signals:
+                      - name: "Trend structure"
+                        value: "Broken below long-term trend"
+                        color: "red"
+                        priority: 100
+                      - name: "52-week position"
+                        value: "-59.7% from 52-week high"
+                        color: "red"
+                        priority: 95
+                      - name: "Put skew"
+                        value: "Steep downside skew"
+                        color: "red"
+                        priority: 88
+                      - name: "IV rank"
+                        value: "91"
+                        color: "amber"
+                        priority: 65
+                      - name: "Earnings risk"
+                        value: "No earnings inside 21 days"
+                        color: "green"
+                        priority: 20
+                    price_context:
+                      current_price: 120.4
+                      ma20: 114.8
+                      ma50: 132.2
+                      ma200: 168.5
+                      pct_from_52w_high: -59.7
+                      iv_rank: 91
+                      earnings_date: null
+                      days_to_earnings: null
+        '202':
+          description: Scoring job accepted and running asynchronously.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: private, no-cache
+            Retry-After:
+              description: Suggested poll interval in seconds.
+              schema:
+                type: integer
+                example: 2
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AsyncScoringAcceptedResponse'
+              examples:
+                accepted:
+                  summary: Fresh scoring accepted
+                  value:
+                    symbol: "CRCL"
+                    run_date: "2026-03-17"
+                    cached: false
+                    status: "PENDING"
+                    job_id: "bb34d6f1-6a2d-44d2-8a50-415bf5b71181"
+                    poll_url: "/ideas/CRCL/status/bb34d6f1-6a2d-44d2-8a50-415bf5b71181"
+                    message: "Fresh scoring has started. Poll the status endpoint for completion."
+        '404':
+          $ref: '#/components/responses/SymbolNotFound'
+        '503':
+          $ref: '#/components/responses/ScoringEngineUnavailable'
+  /ideas/{symbol}/status/{job_id}:
+    get:
+      tags:
+        - Ideas
+      operationId: getSymbolIdeaJobStatus
+      summary: Get asynchronous symbol scoring job status
+      description: >
+        Poll this endpoint after a 202 response from GET /ideas/{symbol}. When the job is complete,
+        the completed result is embedded in the payload.
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema:
+            type: string
+            example: CRCL
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            example: bb34d6f1-6a2d-44d2-8a50-415bf5b71181
+      responses:
+        '200':
+          description: Job status response.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: private, no-cache
+            Retry-After:
+              description: Suggested poll interval in seconds when status is pending or running.
+              schema:
+                type: integer
+                example: 2
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AsyncScoringStatusResponse'
+              examples:
+                running:
+                  summary: Job still running
+                  value:
+                    symbol: "CRCL"
+                    job_id: "bb34d6f1-6a2d-44d2-8a50-415bf5b71181"
+                    status: "RUNNING"
+                    run_date: "2026-03-17"
+                    cached: false
+                    progress_pct: 65
+                    result: null
+                completed:
+                  summary: Job completed
+                  value:
+                    symbol: "CRCL"
+                    job_id: "bb34d6f1-6a2d-44d2-8a50-415bf5b71181"
+                    status: "COMPLETED"
+                    run_date: "2026-03-17"
+                    cached: false
+                    progress_pct: 100
+                    result:
+                      symbol: "CRCL"
+                      exchange: "NYSE"
+                      run_date: "2026-03-17"
+                      cached: false
+                      grade: "AVOID"
+                      verdict_headline: "Not recommended"
+                      verdict_sub: "Trend damage and unstable downside profile outweigh coupon attractiveness"
+                      recommended_strike: null
+                      recommended_tenor_days: null
+                      ref_coupon_pct: null
+                      moneyness_pct: null
+                      reasoning_text: "CRCL is not suitable for FCN pitching today. Although option premium remains elevated, the name still exhibits broken-trend behavior and poor assignment quality for PB clients. Elevated downside instability means lower strikes do not adequately solve the risk-control problem."
+                      flags:
+                        - type: "BROKEN_TREND"
+                          severity: "BLOCK"
+                          message: "Price is more than 50% below the 52-week high"
+                      signals:
+                        - name: "Trend structure"
+                          value: "Broken below long-term trend"
+                          color: "red"
+                          priority: 100
+                      price_context:
+                        current_price: 120.4
+                        ma20: 114.8
+                        ma50: 132.2
+                        ma200: 168.5
+                        pct_from_52w_high: -59.7
+                        iv_rank: 91
+                        earnings_date: null
+                        days_to_earnings: null
+        '404':
+          $ref: '#/components/responses/SymbolNotFound'
+        '503':
+          $ref: '#/components/responses/ScoringEngineUnavailable'
+components:
+  headers:
+    XRateLimitLimit:
+      description: Token bucket limit per user.
+      schema:
+        type: integer
+        example: 60
+    XRateLimitRemaining:
+      description: Remaining requests in the current rate-limit window.
+      schema:
+        type: integer
+        example: 42
+    XRateLimitReset:
+      description: Unix timestamp when the current token bucket window refills.
+      schema:
+        type: integer
+        example: 1773739260
+  responses:
+    SymbolNotFound:
+      description: Symbol was not found in the FCN screening universe.
+      headers:
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            notFound:
+              value:
+                error:
+                  code: "NOT_FOUND"
+                  message: "Symbol CRCLX was not found in the FCN screening universe."
+                  request_id: "9d3ac52d-8df0-4db0-8f8f-e8b3570f0ac9"
+    ScoringEngineUnavailable:
+      description: Scoring engine or upstream market-data dependency is temporarily unavailable.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            example: 10
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            unavailable:
+              value:
+                error:
+                  code: "SCORING_ENGINE_UNAVAILABLE"
+                  message: "The scoring engine is temporarily unavailable. Please retry shortly."
+                  request_id: "2c6a3b02-1db1-4c97-b3c3-a2eb52d8fc9f"
+  schemas:
+    Grade:
+      type: string
+      enum: [GO, CAUTION, AVOID]
+    FlagSeverity:
+      type: string
+      enum: [WARN, BLOCK]
+    FlagType:
+      type: string
+      enum:
+        - BROKEN_TREND
+        - EARNINGS_PROXIMITY
+        - HOUSE_OVERRIDE
+        - BEARISH_STRUCTURE
+        - LOWER_HIGH_RISK
+        - LOW_LIQUIDITY
+        - NO_APPROVED_TENOR
+        - NO_APPROVED_STRIKE
+    Flag:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - severity
+        - message
+      properties:
+        type:
+          $ref: '#/components/schemas/FlagType'
+        severity:
+          $ref: '#/components/schemas/FlagSeverity'
+        message:
+          type: string
+    IdeaCard:
+      type: object
+      additionalProperties: false
+      required:
+        - symbol
+        - exchange
+        - sector
+        - grade
+        - composite_score
+        - recommended_strike
+        - recommended_tenor_days
+        - ref_coupon_pct
+        - moneyness_pct
+        - reasoning_text
+        - flags
+        - current_price
+        - pct_from_52w_high
+        - iv_rank
+      properties:
+        symbol:
+          type: string
+        exchange:
+          type: string
+        sector:
+          type:
+            - string
+            - "null"
+        grade:
+          type: string
+          enum: [GO, CAUTION]
+        composite_score:
+          type: number
+          minimum: 0
+          maximum: 1
+        recommended_strike:
+          type: number
+        recommended_tenor_days:
+          type: integer
+        ref_coupon_pct:
+          type: number
+        moneyness_pct:
+          type: number
+        reasoning_text:
+          type: string
+        flags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Flag'
+        current_price:
+          type: number
+        pct_from_52w_high:
+          type: number
+        iv_rank:
+          type: number
+          minimum: 0
+          maximum: 100
+    AvoidEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - symbol
+        - primary_flag_type
+        - primary_flag_detail
+      properties:
+        symbol:
+          type: string
+        primary_flag_type:
+          $ref: '#/components/schemas/FlagType'
+        primary_flag_detail:
+          type: string
+    MarketContext:
+      type: object
+      additionalProperties: false
+      required:
+        - vix
+        - notable_macro
+      properties:
+        vix:
+          type: number
+        hk_vix:
+          type: number
+        notable_macro:
+          type: string
+    TodayIdeasResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - run_date
+        - run_id
+        - market_context
+        - recommended
+        - caution
+        - not_recommended
+      properties:
+        run_date:
+          type: string
+          format: date
+        run_id:
+          type: string
+          format: uuid
+        market_context:
+          $ref: '#/components/schemas/MarketContext'
+        recommended:
+          type: array
+          items:
+            $ref: '#/components/schemas/IdeaCard'
+        caution:
+          type: array
+          items:
+            $ref: '#/components/schemas/IdeaCard'
+        not_recommended:
+          type: array
+          items:
+            $ref: '#/components/schemas/AvoidEntry'
+    SignalColor:
+      type: string
+      enum: [green, amber, red]
+    SignalRow:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - value
+        - color
+        - priority
+      properties:
+        name:
+          type: string
+        value:
+          type: string
+        color:
+          $ref: '#/components/schemas/SignalColor'
+        priority:
+          type: integer
+          description: >
+            Dynamic ranking priority. Higher values should appear first in the array so the mobile app
+            shows the most decision-relevant risk or strength signal first.
+    PriceContext:
+      type: object
+      additionalProperties: false
+      required:
+        - current_price
+        - ma20
+        - ma50
+        - ma200
+        - pct_from_52w_high
+        - iv_rank
+        - earnings_date
+        - days_to_earnings
+      properties:
+        current_price:
+          type: number
+        ma20:
+          type: number
+        ma50:
+          type: number
+        ma200:
+          type: number
+        pct_from_52w_high:
+          type: number
+        iv_rank:
+          type: number
+          minimum: 0
+          maximum: 100
+        earnings_date:
+          type:
+            - string
+            - "null"
+          format: date
+        days_to_earnings:
+          type:
+            - integer
+            - "null"
+    SymbolIdeaResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - symbol
+        - exchange
+        - run_date
+        - cached
+        - grade
+        - verdict_headline
+        - verdict_sub
+        - recommended_strike
+        - recommended_tenor_days
+        - ref_coupon_pct
+        - moneyness_pct
+        - reasoning_text
+        - flags
+        - signals
+        - price_context
+      properties:
+        symbol:
+          type: string
+        exchange:
+          type: string
+        run_date:
+          type: string
+          format: date
+        cached:
+          type: boolean
+        grade:
+          $ref: '#/components/schemas/Grade'
+        verdict_headline:
+          type: string
+        verdict_sub:
+          type: string
+        recommended_strike:
+          type:
+            - number
+            - "null"
+        recommended_tenor_days:
+          type:
+            - integer
+            - "null"
+        ref_coupon_pct:
+          type:
+            - number
+            - "null"
+        moneyness_pct:
+          type:
+            - number
+            - "null"
+        reasoning_text:
+          type: string
+        flags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Flag'
+        signals:
+          type: array
+          description: >
+            Dynamically ranked signals sorted by descending priority, with the most critical red or most useful
+            decision-driving signal first.
+          items:
+            $ref: '#/components/schemas/SignalRow'
+        price_context:
+          $ref: '#/components/schemas/PriceContext'
+    AsyncScoringAcceptedResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - symbol
+        - run_date
+        - cached
+        - status
+        - job_id
+        - poll_url
+        - message
+      properties:
+        symbol:
+          type: string
+        run_date:
+          type: string
+          format: date
+        cached:
+          type: boolean
+        status:
+          type: string
+          enum: [PENDING, RUNNING]
+        job_id:
+          type: string
+          format: uuid
+        poll_url:
+          type: string
+        message:
+          type: string
+    AsyncScoringStatusResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - symbol
+        - job_id
+        - status
+        - run_date
+        - cached
+        - progress_pct
+        - result
+      properties:
+        symbol:
+          type: string
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PENDING, RUNNING, COMPLETED, FAILED]
+        run_date:
+          type: string
+          format: date
+        cached:
+          type: boolean
+        progress_pct:
+          type: integer
+          minimum: 0
+          maximum: 100
+        result:
+          oneOf:
+            - $ref: '#/components/schemas/SymbolIdeaResponse'
+            - type: "null"
+    ErrorBody:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - request_id
+      properties:
+        code:
+          type: string
+          enum: [NOT_FOUND, SCORING_ENGINE_UNAVAILABLE]
+        message:
+          type: string
+        request_id:
+          type: string
+          format: uuid
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - error
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorBody'
+x-notes:
+  caching:
+    - GET /ideas/today should read the latest completed run and return Cache-Control private, max-age=60.
+    - GET /ideas/{symbol} should return cached same-day results when available with Cache-Control private, max-age=300.
+    - If same-day score is missing and fresh scoring would exceed the synchronous request budget, return 202 and start async scoring.
+    - The status endpoint should use Cache-Control private, no-cache.
+  rate_limiting:
+    strategy: token_bucket
+    scope: per-user
+    limit: 60
+    interval: minute
