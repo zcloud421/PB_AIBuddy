@@ -1,5 +1,5 @@
 {
   "deploy": {
-    "startCommand": "npm run seed"
+    "startCommand": "npm run screener"
   }
 }
