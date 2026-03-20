@@ -205,6 +205,18 @@ function buildReasoningText(
     return `${gradeText} ${structureText} ${flagSummary}`;
 }
 
+function deriveOverallGrade(compositeScore: number): OverallGrade {
+    if (compositeScore >= 0.65) {
+        return 'GO';
+    }
+
+    if (compositeScore >= 0.45) {
+        return 'CAUTION';
+    }
+
+    return 'AVOID';
+}
+
 export function checkEligibility(symbolData: SymbolData): { eligible: boolean; flags: Flag[] } {
     const flags: Flag[] = [];
     const hasFullYearHistory = symbolData.price_history.length >= 200;
@@ -387,15 +399,13 @@ export function scoreAndGrade(candidate: {
 
     const premiumScore = adjustedPremiumScore(strikeData);
 
-    const compositeScore = clamp(
+    const baseCompositeScore = clamp(
         (trendScore * 0.40) +
             (eventRiskScore * 0.25) +
             (((ivRankScore * 0.40) + ((premiumScore ?? 0.5) * 0.40) + (skewScore * 0.20)) * 0.35),
         0,
         1
     );
-
-    let overallGrade: OverallGrade = compositeScore >= 0.65 ? 'GO' : 'CAUTION';
 
     if (symbolData.pct_from_52w_high < -30) {
         flags.push({
@@ -429,9 +439,7 @@ export function scoreAndGrade(candidate: {
         });
     }
 
-    if (refCouponPct !== null && refCouponPct < 10 && overallGrade === 'GO') {
-        overallGrade = 'CAUTION';
-    }
+    let compositeScore = baseCompositeScore;
 
     if (
         shouldAvoidResult({
@@ -441,13 +449,14 @@ export function scoreAndGrade(candidate: {
             flags
         })
     ) {
-        overallGrade = 'AVOID';
+        // Hard avoid penalty: multiply final composite score by 0.4
+        // This ensures AVOID grade always scores below CAUTION threshold (0.45)
+        // e.g. original 0.80 → 0.32 after penalty
+        // Penalty factor 0.4 is empirical, review after 30 days of data
+        compositeScore = clamp(compositeScore * 0.4, 0, 1);
     }
 
-    const finalCompositeScore =
-        overallGrade === 'AVOID'
-            ? Math.min(compositeScore, 0.39)
-            : compositeScore;
+    const overallGrade = deriveOverallGrade(compositeScore);
 
     const reasoningText = buildReasoningText(
         symbol,
@@ -461,7 +470,7 @@ export function scoreAndGrade(candidate: {
     return {
         symbol,
         overall_grade: overallGrade,
-        composite_score: Number(finalCompositeScore.toFixed(4)),
+        composite_score: Number(compositeScore.toFixed(4)),
         iv_rank_score: Number(ivRankScore.toFixed(4)),
         trend_score: Number(trendScore.toFixed(4)),
         skew_score: Number(skewScore.toFixed(4)),
@@ -549,13 +558,17 @@ function applyHighVolCautionOverride(input: {
         }
     ]);
 
+    const adjustedCompositeScore = Math.max(input.result.composite_score * 0.65, 0.45);
+    const adjustedGrade = deriveOverallGrade(adjustedCompositeScore);
+
     return {
         ...input.result,
-        overall_grade: 'CAUTION',
+        overall_grade: adjustedGrade,
+        composite_score: Number(adjustedCompositeScore.toFixed(4)),
         flags,
         reasoning_text: buildReasoningText(
             input.result.symbol,
-            'CAUTION',
+            adjustedGrade,
             input.result.recommended_tenor_days,
             input.result.recommended_strike,
             input.result.estimated_coupon_range,
