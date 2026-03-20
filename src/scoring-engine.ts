@@ -444,6 +444,11 @@ export function scoreAndGrade(candidate: {
         overallGrade = 'AVOID';
     }
 
+    const finalCompositeScore =
+        overallGrade === 'AVOID'
+            ? Math.min(compositeScore, 0.39)
+            : compositeScore;
+
     const reasoningText = buildReasoningText(
         symbol,
         overallGrade,
@@ -456,7 +461,7 @@ export function scoreAndGrade(candidate: {
     return {
         symbol,
         overall_grade: overallGrade,
-        composite_score: Number(compositeScore.toFixed(4)),
+        composite_score: Number(finalCompositeScore.toFixed(4)),
         iv_rank_score: Number(ivRankScore.toFixed(4)),
         trend_score: Number(trendScore.toFixed(4)),
         skew_score: Number(skewScore.toFixed(4)),
