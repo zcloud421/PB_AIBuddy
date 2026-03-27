@@ -234,12 +234,18 @@ export async function fetchNewsItemsByQuery(
 
     let response: Response;
     try {
-        response = await fetch(url.toString(), {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)'
-            },
-            signal: AbortSignal.timeout(NEWS_FETCH_TIMEOUT_MS)
-        });
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), NEWS_FETCH_TIMEOUT_MS);
+        try {
+            response = await fetch(url.toString(), {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)'
+                },
+                signal: controller.signal
+            });
+        } finally {
+            clearTimeout(timer);
+        }
     } catch {
         return [];
     }
@@ -250,7 +256,13 @@ export async function fetchNewsItemsByQuery(
 
     let xml: string;
     try {
-        xml = await response.text();
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), NEWS_FETCH_TIMEOUT_MS);
+        try {
+            xml = await response.text();
+        } finally {
+            clearTimeout(timer);
+        }
     } catch {
         return [];
     }
