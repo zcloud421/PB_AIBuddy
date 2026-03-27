@@ -256,11 +256,15 @@ async function main(): Promise<void> {
     }
 }
 
-main().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(message);
-    process.exitCode = 1;
-});
+main()
+    .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(message);
+        process.exitCode = 1;
+    })
+    .finally(() => {
+        process.exit(process.exitCode ?? 0);
+    });
 
 function delay(ms: number): Promise<void> {
     return new Promise((resolve) => {

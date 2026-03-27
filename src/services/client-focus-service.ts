@@ -10,7 +10,7 @@ import { fetchNewsItemsByQuery } from '../data/news-fetcher';
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
 const DEFAULT_DISCLAIMER = '本页内容仅供市场讨论准备，客户沟通请结合所属机构的 house view 与合规要求。';
-const FOCUS_CACHE_TTL_MS = 5 * 60 * 1000;
+const FOCUS_CACHE_TTL_MS = 60 * 60 * 1000;
 const FOCUS_CHAIN_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 interface FocusTopicConfig {
@@ -231,6 +231,21 @@ function formatClockTime(publishedAt: string | undefined): string {
     });
 }
 
+function formatDateOnly(publishedAt: string | undefined): string | undefined {
+    if (!publishedAt) {
+        return undefined;
+    }
+
+    const date = new Date(publishedAt);
+    if (Number.isNaN(date.getTime())) {
+        return undefined;
+    }
+
+    const month = String(date.toLocaleDateString('en-US', { timeZone: 'Asia/Hong_Kong', month: 'numeric' }));
+    const day = String(date.toLocaleDateString('en-US', { timeZone: 'Asia/Hong_Kong', day: 'numeric' }));
+    return `${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+}
+
 function sanitizeLatestUpdates(
     topic: FocusTopicConfig,
     value: unknown,
@@ -341,6 +356,7 @@ function buildFallbackLatestUpdates(topic: FocusTopicConfig, newsItems: NewsItem
 
     return newsItems.slice(0, 3).map((item) => ({
         time: formatClockTime(item.published_at),
+        date: formatDateOnly(item.published_at),
         title: item.title,
         impact: '持续发酵',
         source: item.source
@@ -441,11 +457,12 @@ function buildMiddleEastLatestUpdates(newsItems: NewsItem[]): ClientFocusUpdate[
         .map((item) => {
             return {
                 time: formatClockTime(item.published_at),
+                date: formatDateOnly(item.published_at),
                 title: item.title.trim(),
                 impact: classifyMiddleEastImpact(item.title)
             };
         })
-        .filter((item): item is ClientFocusUpdate => Boolean(item.title));
+        .filter((item) => Boolean(item.title)) as ClientFocusUpdate[];
 }
 
 function dedupeRecentNews(newsItems: NewsItem[]): NewsItem[] {
@@ -616,6 +633,32 @@ function isMiddleEastHardNews(item: NewsItem): boolean {
 
 function classifyMiddleEastImpact(title: string): ClientFocusUpdate['impact'] {
     const normalized = title.toLowerCase();
+
+    const deEscalationSignals = [
+        'extends deadline',
+        'extends pause',
+        'extend deadline',
+        'extend pause',
+        'ceasefire',
+        'truce',
+        'peace proposal',
+        'peace deal',
+        'peace agreement',
+        'diplomatic',
+        'de-escalat',
+        'deescalat',
+        'withdraw',
+        'pullback',
+        'pull back',
+        'stand down',
+        'postpone',
+        'delay strike',
+        'hold fire',
+        'suspend'
+    ];
+    if (deEscalationSignals.some((signal) => normalized.includes(signal))) {
+        return '政策变化';
+    }
 
     if (normalized.includes('talks') || normalized.includes('venue') || normalized.includes('agreed')) {
         return '政策变化';
@@ -1233,7 +1276,7 @@ ${newsSection}
 请输出 JSON，字段如下：
 {
   "status": "只能从以下选一个：持续发酵 / 风险抬升 / 局势缓和 / 逻辑重估 / 压力回升。不可自创。",
-  "summary": "24字以内。必须包含：当前最关键的市场变化 + 对 RM/IC 展业环境的直接影响。",
+  "summary": "24字以内。描述当前最关键的市场变化及其对资产价格的直接影响。禁止出现RM、IC、客户经理等内部角色词汇。",
   "latest_updates": [
     {
       "title": "一句话，必须包含具体机构名称或数据，禁止直译英文标题，禁止使用“市场”“投资者”等主语",

@@ -50,9 +50,6 @@ const KNOWN_CONFERENCE_WINDOWS: Partial<Record<string, ConferenceWindow>> = {
 };
 
 export async function generateNarrative(input: NarrativeInput): Promise<NarrativeOutput> {
-    if (input.grade === 'AVOID' && shouldBypassAvoidNarrativeModel(input)) {
-        return buildAvoidNarrative(input);
-    }
 
     const fallback = buildFallbackNarrative(input);
     const apiKey = process.env.DEEPSEEK_API_KEY;

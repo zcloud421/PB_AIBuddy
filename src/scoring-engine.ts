@@ -290,6 +290,12 @@ export function shouldPreferTenorCandidate(input: {
     }
 
     if (candidateTenorDays === LONG_TENOR_DAYS && bestTenorDays === SHORT_TENOR_DAYS) {
+        // Only recommend a longer tenor if the stock is strongly GO and the coupon
+        // improvement meaningfully compensates for twice the lock-up period and uncertainty
+        if (candidateCompositeScore < 0.70) {
+            return false;
+        }
+
         const couponDistanceImprovement = bestCouponDistance - candidateCouponDistance;
         const compositeScoreImprovement = candidateCompositeScore - bestCompositeScore;
         const couponLevelImprovement = (candidateRefCouponPct ?? Number.NEGATIVE_INFINITY) - (bestRefCouponPct ?? Number.NEGATIVE_INFINITY);
@@ -298,7 +304,7 @@ export function shouldPreferTenorCandidate(input: {
             couponDistanceImprovement >= LONG_TENOR_MIN_COUPON_DISTANCE_IMPROVEMENT ||
             compositeScoreImprovement >= LONG_TENOR_MIN_COMPOSITE_SCORE_IMPROVEMENT ||
             (
-                couponLevelImprovement >= 5 &&
+                couponLevelImprovement >= 8 &&
                 candidateCouponDistance <= bestCouponDistance + 0.5 &&
                 candidateCompositeScore >= bestCompositeScore - 0.02
             )

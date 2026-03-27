@@ -110,6 +110,7 @@ export interface ClientFocusQuestion {
 
 export interface ClientFocusUpdate {
     time: string;
+    date?: string;
     title: string;
     impact: string;
     source?: string;

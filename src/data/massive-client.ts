@@ -7,7 +7,7 @@ const DEFAULT_BASE_URL = 'https://api.massive.com';
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 30000;
 const MIN_REQUEST_INTERVAL_MS = 2000;
-const REQUEST_TIMEOUT_MS = 60000;
+const REQUEST_TIMEOUT_MS = 30000;
 
 export class MassiveApiError extends Error {
     public readonly statusCode: number;
