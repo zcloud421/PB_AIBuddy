@@ -7,6 +7,7 @@ const DEFAULT_BASE_URL = 'https://api.massive.com';
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 30000;
 const MIN_REQUEST_INTERVAL_MS = 2000;
+const REQUEST_TIMEOUT_MS = 60000;
 
 export class MassiveApiError extends Error {
     public readonly statusCode: number;
@@ -53,13 +54,21 @@ export class MassiveClient {
 
         await MassiveClient.waitForRequestSlot();
 
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Request-Id': requestId
-            }
-        });
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+        let response: Response;
+        try {
+            response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Request-Id': requestId
+                },
+                signal: controller.signal
+            });
+        } finally {
+            clearTimeout(timer);
+        }
 
         if (response.status === 401) {
             throw new MassiveApiError(401, 'Massive API authentication failed');
