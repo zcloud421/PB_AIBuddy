@@ -107,7 +107,11 @@ async function main(): Promise<void> {
                 if (!result) {
                     throw new Error(`No scoring result returned for ${symbol}`);
                 }
-                const newsContext = await fetchStockNewsContext(symbol, companyName ?? getCompanyName(symbol));
+                const newsContext = await withTimeout(
+                    fetchStockNewsContext(symbol, companyName ?? getCompanyName(symbol)),
+                    10000,
+                    { items: [], narrativeItems: [], displayItems: [], hasRecentEarnings: false, earningsWeight: 0, daysSinceEarnings: null, sentimentProxy: null, hasMaterialNegativeNews: false }
+                );
                 const narrative = await generateNarrative({
                     symbol,
                     theme: underlying?.themes?.[0] ?? 'Featured',
@@ -266,4 +270,11 @@ function delay(ms: number): Promise<void> {
     return new Promise((resolve) => {
         setTimeout(resolve, ms);
     });
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+    return Promise.race([
+        promise,
+        new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))
+    ]);
 }
