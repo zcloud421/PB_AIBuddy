@@ -23,7 +23,19 @@ interface MassivePreviousCloseResponse {
 interface MassiveTickerReferenceResponse {
     results?: {
         name?: string;
+        market_cap?: number;
+        primary_exchange?: string;
+        sic_description?: string;
     };
+}
+
+export interface DailyPriceBar {
+    date: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
 }
 
 export class MassiveDataFetcher implements DataFetcherInterface {
@@ -58,22 +70,7 @@ export class MassiveDataFetcher implements DataFetcherInterface {
     }
 
     async fetchSymbolData(symbol: string): Promise<SymbolData> {
-        const fromDate = isoDateOffsetDays(-365);
-        const toDate = todayIsoDate();
-
-        const historyResponse = await this.client.get<MassiveAggregatesResponse>(
-            `/v2/aggs/ticker/${symbol}/range/1/day/${fromDate}/${toDate}`,
-            {
-                adjusted: true,
-                sort: 'asc',
-                limit: 365
-            }
-        );
-
-        const history = (historyResponse.results ?? [])
-            .map((row) => mapPriceRow(row))
-            .filter((row): row is { date: string; close: number; high: number } => row !== null)
-            .sort((a, b) => a.date.localeCompare(b.date));
+        const history = await this.fetchPriceHistory(symbol);
 
         if (history.length < 250) {
             console.warn(`[fetcher] only ${history.length} days of history for ${symbol}, proceeding anyway`);
@@ -85,13 +82,11 @@ export class MassiveDataFetcher implements DataFetcherInterface {
         const macd = computeMacd(closes);
         const rsi14 = computeRsi(closes, 14);
 
-        const previousCloseResponse = await this.client.get<MassivePreviousCloseResponse>(
-            `/v2/aggs/ticker/${symbol}/prev`,
-            { adjusted: true }
-        );
         const upcomingEarnings = await getUpcomingEarningsBySymbol(symbol);
 
-        const currentPrice = extractPreviousClose(previousCloseResponse.results) ?? closes[closes.length - 1];
+        // Use the last bar from the range aggregate instead of /prev, because /prev can return
+        // the prior session's data when called shortly after close (Polygon processing lag).
+        const currentPrice = closes[closes.length - 1];
         const high52w = Math.max(...highs);
 
         return {
@@ -113,6 +108,25 @@ export class MassiveDataFetcher implements DataFetcherInterface {
             earnings_date: upcomingEarnings?.report_date ?? null,
             days_to_earnings: upcomingEarnings?.days_until ?? null
         };
+    }
+
+    async fetchPriceHistory(symbol: string): Promise<DailyPriceBar[]> {
+        const fromDate = isoDateOffsetDays(-365);
+        const toDate = todayIsoDate();
+
+        const historyResponse = await this.client.get<MassiveAggregatesResponse>(
+            `/v2/aggs/ticker/${symbol}/range/1/day/${fromDate}/${toDate}`,
+            {
+                adjusted: true,
+                sort: 'asc',
+                limit: 365
+            }
+        );
+
+        return (historyResponse.results ?? [])
+            .map((row) => mapPriceRow(row))
+            .filter((row): row is DailyPriceBar => row !== null)
+            .sort((a, b) => a.date.localeCompare(b.date));
     }
 
     private async fetchEligibleContracts(
@@ -187,6 +201,42 @@ export async function fetchTickerCompanyName(symbol: string): Promise<string | n
     return typeof name === 'string' && name.trim().length > 0 ? name.trim() : null;
 }
 
+export interface TickerReferenceSnapshot {
+    companyName: string | null;
+    exchange: string | null;
+    sector: string | null;
+}
+
+export async function fetchTickerReferenceSnapshot(symbol: string): Promise<TickerReferenceSnapshot> {
+    const client = new MassiveClient();
+    const response = await client.get<MassiveTickerReferenceResponse>(`/v3/reference/tickers/${symbol}`);
+    const companyName =
+        typeof response.results?.name === 'string' && response.results.name.trim().length > 0
+            ? response.results.name.trim()
+            : null;
+    const exchange =
+        typeof response.results?.primary_exchange === 'string' && response.results.primary_exchange.trim().length > 0
+            ? response.results.primary_exchange.trim()
+            : null;
+    const sector =
+        typeof response.results?.sic_description === 'string' && response.results.sic_description.trim().length > 0
+            ? response.results.sic_description.trim()
+            : null;
+
+    return {
+        companyName,
+        exchange,
+        sector
+    };
+}
+
+export async function fetchTickerMarketCap(symbol: string): Promise<number | null> {
+    const client = new MassiveClient();
+    const response = await client.get<MassiveTickerReferenceResponse>(`/v3/reference/tickers/${symbol}`);
+    const marketCap = response.results?.market_cap;
+    return typeof marketCap === 'number' && Number.isFinite(marketCap) ? marketCap : null;
+}
+
 type StrikeDataWithRaw = StrikeData & { raw: Record<string, unknown> };
 
 function mapOptionRow(row: Record<string, unknown>): StrikeDataWithRaw | null {
@@ -248,19 +298,25 @@ function mapOptionRow(row: Record<string, unknown>): StrikeDataWithRaw | null {
     };
 }
 
-function mapPriceRow(row: Record<string, unknown>): { date: string; close: number; high: number } | null {
+function mapPriceRow(row: Record<string, unknown>): DailyPriceBar | null {
     const timestamp = getNumber(row, 't');
+    const open = getNumber(row, 'o');
     const close = getNumber(row, 'c');
     const high = getNumber(row, 'h');
+    const low = getNumber(row, 'l');
+    const volume = getNumber(row, 'v');
 
-    if (timestamp === null || close === null || high === null) {
+    if (timestamp === null || open === null || close === null || high === null || low === null || volume === null) {
         return null;
     }
 
     return {
         date: toIsoDate(timestamp),
+        open,
         close,
-        high
+        high,
+        low,
+        volume
     };
 }
 

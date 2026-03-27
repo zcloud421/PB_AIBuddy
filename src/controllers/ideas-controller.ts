@@ -1,14 +1,34 @@
 import type { Request, Response } from 'express';
 
 import {
+    getClientFocusDetail,
+    getClientFocusList,
     getSymbolIdea,
+    getSymbolPriceHistory,
     getSymbolIdeaStatus,
     getTodayIdeas
 } from '../services/ideas-service';
+import { HttpError } from '../lib/http-error';
 
 export async function getTodayIdeasController(_req: Request, res: Response): Promise<void> {
     const payload = await getTodayIdeas();
     res.setHeader('Cache-Control', 'private, max-age=60');
+    res.status(200).json(payload);
+}
+
+export async function getClientFocusListController(_req: Request, res: Response): Promise<void> {
+    const payload = await getClientFocusList();
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.status(200).json(payload);
+}
+
+export async function getClientFocusDetailController(req: Request, res: Response): Promise<void> {
+    const payload = await getClientFocusDetail(req.params.slug);
+    if (!payload) {
+        throw new HttpError(404, 'NOT_FOUND', 'Client focus topic not found.');
+    }
+
+    res.setHeader('Cache-Control', 'private, max-age=300');
     res.status(200).json(payload);
 }
 
@@ -27,6 +47,12 @@ export async function getSymbolIdeaController(req: Request, res: Response): Prom
     res.status(200).json(payload);
 }
 
+export async function getSymbolPriceHistoryController(req: Request, res: Response): Promise<void> {
+    const payload = await getSymbolPriceHistory(req.params.symbol);
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.status(200).json(payload);
+}
+
 export async function getSymbolIdeaStatusController(req: Request, res: Response): Promise<void> {
     const payload = await getSymbolIdeaStatus(req.params.symbol, req.params.job_id);
     res.setHeader('Cache-Control', 'private, no-cache');
@@ -37,4 +63,3 @@ export async function getSymbolIdeaStatusController(req: Request, res: Response)
 
     res.status(200).json(payload);
 }
-

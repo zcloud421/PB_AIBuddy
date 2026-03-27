@@ -13,13 +13,13 @@ import {
     ensureRiskFlagEnumValues,
     ensureUnderlyingCompanyNameColumn,
     deleteRecommendationTrackerForDate,
+    getUnderlyingBySymbol,
     saveIdeaCandidate,
     saveDailyBest,
     saveRiskFlags,
     upsertRecommendationTracker,
     upsertUnderlyingCompanyName,
     upsertEarningsCalendar,
-    updateIdeaCandidateNarrative,
     updateIdeaRunStatus
 } from '../db/queries/ideas';
 import type { ScoringResult } from '../scoring-engine';
@@ -27,6 +27,8 @@ import { runDailyScreener } from '../scoring-engine';
 import { selectDailyBest } from '../services/ideas-service';
 import { runPriceTracker } from '../services/tracker-service';
 import { generateNarrative } from '../utils/narrative-generator';
+import { sendDowngradeNotifications } from '../utils/push-notifications';
+import { ensureDeviceTables } from '../db/queries/devices';
 
 dotenv.config();
 
@@ -34,8 +36,8 @@ interface ActiveUnderlyingRow {
     symbol: string;
 }
 
-const PER_SYMBOL_DELAY_MS = 8000;
-const BATCH_COOLDOWN_MS = 30000;
+const PER_SYMBOL_DELAY_MS = 3000;
+const BATCH_COOLDOWN_MS = 15000;
 const BATCH_SIZE = 5;
 const FAILURE_COOLDOWN_MS = 60000;
 
@@ -59,7 +61,7 @@ async function main(): Promise<void> {
         }
 
         console.log(`[screener] Starting daily run for ${symbols.length} symbols`);
-        console.log('[screener] Rate limit mode: conservative (8s between symbols)');
+        console.log('[screener] Rate limit mode: standard (3s between symbols)');
 
         await ensureDailyBestHistoryTable();
         await ensureIdeaCandidatePriceColumns();
@@ -67,6 +69,19 @@ async function main(): Promise<void> {
         await ensureRiskFlagEnumValues();
         await ensureRecommendationTrackerTable();
         await ensureUnderlyingCompanyNameColumn();
+        await ensureDeviceTables();
+
+        const previousGradesResult = await client.query<{ symbol: string; grade: string }>(
+            `
+            SELECT ic.symbol, ic.overall_grade AS grade
+            FROM idea_candidates ic
+            JOIN idea_runs ir ON ir.run_id = ic.run_id
+            WHERE ir.status = 'completed'
+              AND ir.run_type = 'DAILY_SCREEN'
+              AND ir.created_at::date = (CURRENT_DATE - INTERVAL '1 day')::date
+            `
+        );
+        const previousGrades = previousGradesResult.rows;
 
         try {
             const earningsRows = await fetchEarningsCalendar(symbols);
@@ -87,12 +102,41 @@ async function main(): Promise<void> {
             try {
                 const companyName = await fetchTickerCompanyName(symbol);
                 await upsertUnderlyingCompanyName(symbol, companyName);
+                const underlying = await getUnderlyingBySymbol(symbol);
 
                 const [result] = await runDailyScreener([symbol], fetcher);
                 if (!result) {
                     throw new Error(`No scoring result returned for ${symbol}`);
                 }
-
+                const newsContext = await fetchStockNewsContext(symbol, companyName ?? getCompanyName(symbol));
+                const narrative = await generateNarrative({
+                    symbol,
+                    theme: underlying?.themes?.[0] ?? 'Featured',
+                    grade: result.overall_grade,
+                    recommended_strike: result.recommended_strike ?? 0,
+                    estimated_coupon_range: result.estimated_coupon_range ?? '',
+                    current_price: result.current_price,
+                    pct_from_52w_high: result.pct_from_52w_high,
+                    ma20: result.ma20,
+                    ma50: result.ma50,
+                    ma200: result.ma200,
+                    iv_level:
+                        result.selected_implied_volatility !== null &&
+                        result.selected_implied_volatility !== undefined
+                            ? result.selected_implied_volatility >= 0.6
+                                ? '高'
+                                : result.selected_implied_volatility >= 0.3
+                                  ? '中'
+                                  : '低'
+                            : '中',
+                    flags: result.flags,
+                    tenor_days: result.recommended_tenor_days ?? 90,
+                    news_headlines: newsContext.narrativeItems.map((item) => item.title),
+                    has_recent_earnings: newsContext.hasRecentEarnings,
+                    earnings_weight: newsContext.earningsWeight,
+                    days_to_earnings: null,
+                    days_since_earnings: newsContext.daysSinceEarnings
+                });
                 results.push(result);
                 await saveIdeaCandidate({
                     runId,
@@ -113,6 +157,11 @@ async function main(): Promise<void> {
                     ma50: result.ma50,
                     ma200: result.ma200,
                     pctFrom52wHigh: result.pct_from_52w_high,
+                    whyNow: narrative?.why_now ?? null,
+                    riskNote: narrative?.risk_note ?? null,
+                    sentimentScore: narrative?.sentiment_score ?? null,
+                    keyEvents: narrative?.key_events ?? [],
+                    newsItems: newsContext.displayItems,
                     reasoningText: result.reasoning_text
                 });
 
@@ -167,102 +216,31 @@ async function main(): Promise<void> {
 
         if (dailyBest) {
             await saveDailyBest(dailyBest.symbol, runId, dailyBest.theme);
-            const dailyBestResult = results.find((result) => result.symbol === dailyBest.symbol);
-            if (dailyBestResult) {
-                const newsContext = await fetchStockNewsContext(dailyBest.symbol, getCompanyName(dailyBest.symbol));
-                const newsItems = newsContext.items;
-                const currentPriceRow = await client.query<{ close: number | null; ma20: number | null; ma50: number | null; ma200: number | null; pct_from_52w_high: number | null; days_to_earnings: number | null }>(
-                    `
-                    WITH latest_price AS (
-                        SELECT close
-                        FROM price_history
-                        WHERE symbol = $1
-                        ORDER BY trade_date DESC
-                        LIMIT 1
-                    ),
-                    ma AS (
-                        SELECT
-                            AVG(close) FILTER (WHERE rn <= 20) AS ma20,
-                            AVG(close) FILTER (WHERE rn <= 50) AS ma50,
-                            AVG(close) FILTER (WHERE rn <= 200) AS ma200
-                        FROM (
-                            SELECT close, ROW_NUMBER() OVER (ORDER BY trade_date DESC) AS rn
-                            FROM price_history
-                            WHERE symbol = $1
-                        ) ranked
-                    ),
-                    highs AS (
-                        SELECT MAX(high) AS high_52w
-                        FROM price_history
-                        WHERE symbol = $1
-                          AND trade_date >= (CURRENT_DATE - INTERVAL '365 days')
-                    ),
-                    earnings AS (
-                        SELECT days_until
-                        FROM earnings_calendar
-                        WHERE symbol = $1
-                          AND report_date >= CURRENT_DATE
-                        ORDER BY report_date ASC
-                        LIMIT 1
-                    )
-                    SELECT
-                        latest_price.close,
-                        ma.ma20,
-                        ma.ma50,
-                        ma.ma200,
-                        CASE
-                            WHEN highs.high_52w IS NOT NULL AND highs.high_52w <> 0 AND latest_price.close IS NOT NULL
-                            THEN ROUND(((latest_price.close - highs.high_52w) / highs.high_52w) * 100, 2)
-                            ELSE NULL
-                        END AS pct_from_52w_high,
-                        earnings.days_until
-                    FROM latest_price, ma, highs
-                    LEFT JOIN earnings ON TRUE
-                    `,
-                    [dailyBest.symbol]
-                );
-                const market = currentPriceRow.rows[0];
-                if (market) {
-                    const narrative = await generateNarrative({
-                        symbol: dailyBest.symbol,
-                        theme: dailyBest.theme,
-                        grade: dailyBestResult.overall_grade,
-                        recommended_strike: dailyBestResult.recommended_strike ?? 0,
-                        estimated_coupon_range: dailyBestResult.estimated_coupon_range ?? '',
-                        current_price: Number(market.close ?? 0),
-                        pct_from_52w_high: Number(market.pct_from_52w_high ?? 0),
-                        ma20: Number(market.ma20 ?? 0),
-                        ma50: Number(market.ma50 ?? 0),
-                        ma200: Number(market.ma200 ?? 0),
-                        iv_level:
-                            dailyBestResult.selected_implied_volatility !== null &&
-                            dailyBestResult.selected_implied_volatility !== undefined
-                                ? dailyBestResult.selected_implied_volatility >= 0.6
-                                    ? '高'
-                                    : dailyBestResult.selected_implied_volatility >= 0.3
-                                      ? '中'
-                                      : '低'
-                                : '中',
-                        flags: dailyBestResult.flags,
-                        tenor_days: dailyBestResult.recommended_tenor_days ?? 90,
-                        news_headlines: newsItems.map((item) => item.title),
-                        has_recent_earnings: newsContext.hasRecentEarnings,
-                        days_to_earnings: market.days_to_earnings ?? null
-                    });
-                    await updateIdeaCandidateNarrative(runId, dailyBest.symbol, narrative);
-                }
-            }
             console.log(
                 `[screener] Daily best: ${dailyBest.symbol} (adjusted score: ${dailyBest.adjustedScore.toFixed(2)})`
             );
         }
 
-        await runPriceTracker();
-
         await updateIdeaRunStatus(runId, 'completed');
         console.log(
             `Daily screener completed for ${results.length} symbols (${totalRecommended} GO ideas, ${failedSymbols} failed), run_id=${runId}`
         );
+
+        try {
+            await runPriceTracker();
+            console.log('[screener] Recommendation tracker refresh completed');
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn(`[screener] Recommendation tracker refresh failed (${message})`);
+        }
+
+        try {
+            const gradeResults = results.map((r) => ({ symbol: r.symbol, grade: r.overall_grade }));
+            await sendDowngradeNotifications(gradeResults, previousGrades);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn(`[screener] Push notification dispatch failed (${message})`);
+        }
     } catch (error) {
         if (runId) {
             try {

@@ -1,5 +1,6 @@
 import { pool } from '../client';
-import type { DailyBestCard, Flag, SymbolIdeaResponse, TodayIdeasResponse } from '../../types/api';
+import type { DailyBestCard, Flag, NewsItem, SymbolIdeaResponse, TodayIdeasResponse } from '../../types/api';
+import type { DailyPriceBar } from '../../data/massive-fetcher';
 
 export interface LatestCompletedRun {
     run_id: string;
@@ -33,6 +34,16 @@ export interface PriceContextRow {
     days_to_earnings: number | null;
 }
 
+export interface PriceHistoryPointRow {
+    date: string;
+    close: number;
+}
+
+export interface UpsertPriceHistoryInput {
+    symbol: string;
+    bars: DailyPriceBar[];
+}
+
 export interface DailyBestHistoryRow {
     symbol: string;
     run_date: string;
@@ -59,6 +70,8 @@ export interface TodayIdeaRow {
     why_now: string | null;
     risk_note: string | null;
     sentiment_score: number | null;
+    key_events: string[] | null;
+    news_items: NewsItem[] | null;
     reasoning_text: string;
     current_price: number | null;
     ma20: number | null;
@@ -93,6 +106,8 @@ export interface CachedIdeaRow {
     why_now: string | null;
     risk_note: string | null;
     sentiment_score: number | null;
+    key_events: string[] | null;
+    news_items: NewsItem[] | null;
     reasoning_text: string;
     current_price: number | null;
     ma20: number | null;
@@ -127,6 +142,8 @@ export interface SaveIdeaCandidateInput {
     whyNow?: string | null;
     riskNote?: string | null;
     sentimentScore?: number | null;
+    keyEvents?: string[] | null;
+    newsItems?: NewsItem[] | null;
     reasoningText: string;
 }
 
@@ -241,6 +258,8 @@ export async function getIdeasByRunId(runId: string): Promise<TodayIdeaRow[]> {
             ic.why_now,
             ic.risk_note,
             ic.sentiment_score,
+            ic.key_events,
+            ic.news_items,
             ic.reasoning_text,
             ic.current_price,
             ic.ma20,
@@ -337,6 +356,8 @@ export async function getIdeaBySymbolAndDate(symbol: string, date: string): Prom
             ic.why_now,
             ic.risk_note,
             ic.sentiment_score,
+            ic.key_events,
+            ic.news_items,
             ic.reasoning_text,
             ic.current_price,
             ic.ma20,
@@ -395,6 +416,7 @@ export async function getIdeaBySymbolAndRunId(symbol: string, runId: string): Pr
             ic.why_now,
             ic.risk_note,
             ic.sentiment_score,
+            ic.news_items,
             ic.reasoning_text,
             ic.current_price,
             ic.ma20,
@@ -503,6 +525,72 @@ export async function getPriceContextBySymbol(symbol: string): Promise<PriceCont
     return result.rows[0] ?? null;
 }
 
+export async function getRecentPriceHistoryBySymbol(
+    symbol: string,
+    limit = 260
+): Promise<PriceHistoryPointRow[]> {
+    const result = await pool.query<PriceHistoryPointRow>(
+        `
+        SELECT
+            trade_date::text AS date,
+            close
+        FROM price_history
+        WHERE symbol = $1
+        ORDER BY trade_date DESC
+        LIMIT $2
+        `,
+        [symbol, limit]
+    );
+
+    return result.rows.reverse();
+}
+
+export async function upsertPriceHistory(input: UpsertPriceHistoryInput): Promise<void> {
+    if (input.bars.length === 0) {
+        return;
+    }
+
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        for (const bar of input.bars) {
+            await client.query(
+                `
+                INSERT INTO price_history (
+                    symbol,
+                    trade_date,
+                    open,
+                    high,
+                    low,
+                    close,
+                    volume,
+                    adj_close
+                )
+                VALUES ($1, $2::date, $3, $4, $5, $6, $7, $6)
+                ON CONFLICT (symbol, trade_date)
+                DO UPDATE SET
+                    open = EXCLUDED.open,
+                    high = EXCLUDED.high,
+                    low = EXCLUDED.low,
+                    close = EXCLUDED.close,
+                    volume = EXCLUDED.volume,
+                    adj_close = EXCLUDED.adj_close
+                `,
+                [input.symbol, bar.date, bar.open, bar.high, bar.low, bar.close, Math.round(bar.volume)]
+            );
+        }
+
+        await client.query('COMMIT');
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+}
+
 export async function getRiskFlagsByRunAndSymbol(runId: string, symbol: string): Promise<Flag[]> {
     const result = await pool.query<RiskFlagRow>(
         `
@@ -552,9 +640,11 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             why_now,
             risk_note,
             sentiment_score,
+            key_events,
+            news_items,
             reasoning_text
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22::jsonb, $23::jsonb, $24
         )
         ON CONFLICT (run_id, symbol) DO UPDATE
         SET overall_grade = EXCLUDED.overall_grade,
@@ -576,6 +666,8 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             why_now = EXCLUDED.why_now,
             risk_note = EXCLUDED.risk_note,
             sentiment_score = EXCLUDED.sentiment_score,
+            key_events = EXCLUDED.key_events,
+            news_items = EXCLUDED.news_items,
             reasoning_text = EXCLUDED.reasoning_text
         `,
         [
@@ -600,6 +692,8 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             result.whyNow ?? null,
             result.riskNote ?? null,
             result.sentimentScore ?? null,
+            JSON.stringify(result.keyEvents ?? []),
+            JSON.stringify(result.newsItems ?? []),
             result.reasoningText
         ]
     );
@@ -614,7 +708,9 @@ export async function ensureIdeaCandidatePriceColumns(): Promise<void> {
         ADD COLUMN IF NOT EXISTS ma20 NUMERIC(18, 6),
         ADD COLUMN IF NOT EXISTS ma50 NUMERIC(18, 6),
         ADD COLUMN IF NOT EXISTS ma200 NUMERIC(18, 6),
-        ADD COLUMN IF NOT EXISTS pct_from_52w_high NUMERIC(10, 4)
+        ADD COLUMN IF NOT EXISTS pct_from_52w_high NUMERIC(10, 4),
+        ADD COLUMN IF NOT EXISTS key_events JSONB DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS news_items JSONB DEFAULT '[]'::jsonb
     `);
 }
 
@@ -686,6 +782,7 @@ export async function updateIdeaCandidateNarrative(
         why_now: string;
         risk_note: string;
         sentiment_score: number;
+        key_events: string[];
     }
 ): Promise<void> {
     await pool.query(
@@ -693,11 +790,12 @@ export async function updateIdeaCandidateNarrative(
         UPDATE idea_candidates
         SET why_now = $3,
             risk_note = $4,
-            sentiment_score = $5
+            sentiment_score = $5,
+            key_events = $6::jsonb
         WHERE run_id = $1
           AND symbol = $2
         `,
-        [runId, symbol, narrative.why_now, narrative.risk_note, narrative.sentiment_score]
+        [runId, symbol, narrative.why_now, narrative.risk_note, narrative.sentiment_score, JSON.stringify(narrative.key_events ?? [])]
     );
 }
 
@@ -733,7 +831,9 @@ export async function ensureRiskFlagEnumValues(): Promise<void> {
     const values: Flag['type'][] = [
         'EARNINGS_PROXIMITY',
         'BROKEN_TREND',
+        'COMMODITY_BETA_CAUTION',
         'HIGH_VOL_LOW_STRIKE',
+        'HIGH_COUPON_OVERRIDE',
         'BEARISH_STRUCTURE',
         'LOWER_HIGH_RISK',
         'LOW_COUPON',
@@ -783,6 +883,45 @@ export async function upsertUnderlyingCompanyName(symbol: string, companyName: s
         WHERE symbol = $1
         `,
         [symbol, companyName]
+    );
+}
+
+export async function upsertUnderlyingReference(input: {
+    symbol: string;
+    exchange?: string | null;
+    companyName?: string | null;
+    sector?: string | null;
+}): Promise<void> {
+    await pool.query(
+        `
+        INSERT INTO underlyings (
+            symbol,
+            exchange,
+            name,
+            company_name,
+            sector,
+            currency,
+            themes,
+            tier,
+            active
+        )
+        VALUES (
+            $1,
+            COALESCE($2, 'UNKNOWN'),
+            $1,
+            $3,
+            COALESCE($4, 'Unknown'),
+            'USD',
+            '{}'::text[],
+            2,
+            false
+        )
+        ON CONFLICT (symbol) DO UPDATE
+        SET exchange = COALESCE(EXCLUDED.exchange, underlyings.exchange),
+            company_name = COALESCE(EXCLUDED.company_name, underlyings.company_name),
+            sector = COALESCE(EXCLUDED.sector, underlyings.sector)
+        `,
+        [input.symbol, input.exchange ?? null, input.companyName ?? null, input.sector ?? null]
     );
 }
 
@@ -841,6 +980,14 @@ export async function saveDailyBest(symbol: string, runId: string, theme: string
         `,
         [runId, symbol, theme]
     );
+}
+
+export async function getRecentDailyBestHistory(limit: number): Promise<Array<{ symbol: string }>> {
+    const result = await pool.query(
+        `SELECT symbol FROM daily_best_history ORDER BY run_date DESC LIMIT $1`,
+        [limit]
+    );
+    return result.rows;
 }
 
 export async function upsertRecommendationTracker(input: UpsertRecommendationTrackerInput): Promise<void> {
@@ -1096,10 +1243,11 @@ export function mapTodayIdeasResponse(
                     ? {
                           why_now: idea.why_now,
                           risk_note: idea.risk_note ?? '',
-                          sentiment_score: parseNumeric(idea.sentiment_score) ?? 0.5
+                          sentiment_score: parseNumeric(idea.sentiment_score) ?? 0.5,
+                          key_events: idea.key_events ?? []
                       }
                     : null,
-                news_items: [],
+                news_items: idea.news_items ?? [],
                 flags: flagsBySymbol.get(idea.symbol) ?? [],
                 current_price: parseNumeric(idea.current_price),
                 pct_from_52w_high: parseNumeric(idea.pct_from_52w_high),
@@ -1129,10 +1277,11 @@ export function mapTodayIdeasResponse(
                     ? {
                           why_now: idea.why_now,
                           risk_note: idea.risk_note ?? '',
-                          sentiment_score: parseNumeric(idea.sentiment_score) ?? 0.5
+                          sentiment_score: parseNumeric(idea.sentiment_score) ?? 0.5,
+                          key_events: idea.key_events ?? []
                       }
                     : null,
-                news_items: [],
+                news_items: idea.news_items ?? [],
                 flags: flagsBySymbol.get(idea.symbol) ?? [],
                 current_price: parseNumeric(idea.current_price),
                 pct_from_52w_high: parseNumeric(idea.pct_from_52w_high),
@@ -1174,5 +1323,5 @@ function formatEstimatedCouponRange(lowerBound: number | string | null): string 
     }
 
     const upperBound = lowerBoundNumber * (1.15 / 0.85);
-    return `${lowerBoundNumber.toFixed(1)}%-${upperBound.toFixed(1)}%`;
+    return `${Math.round(lowerBoundNumber)}%-${Math.round(upperBound)}%`;
 }

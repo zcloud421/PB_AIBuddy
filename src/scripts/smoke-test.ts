@@ -9,7 +9,7 @@ import * as ideasService from '../services/ideas-service';
 dotenv.config();
 
 async function main(): Promise<void> {
-    const symbol = 'AMZN';
+    const symbol = (process.argv[2] ?? 'AMZN').toUpperCase();
     const fetcher = new MassiveDataFetcher();
     const client = new MassiveClient();
     const fromDate = isoDateOffsetDays(-365);

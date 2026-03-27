@@ -7,8 +7,19 @@ import { errorHandler } from './middleware/error-handler';
 import { apiRateLimit } from './middleware/rate-limit';
 import { requestIdMiddleware } from './middleware/request-id';
 import { pool } from './db/client';
+import {
+    deleteTodayIdeaCandidate,
+    ensureDailyBestHistoryTable,
+    ensureEarningsCalendarColumns,
+    ensureIdeaCandidatePriceColumns,
+    ensureRecommendationTrackerTable,
+    ensureRiskFlagEnumValues,
+    ensureUnderlyingCompanyNameColumn
+} from './db/queries/ideas';
 import { ideasRouter } from './routes/ideas';
+import { deviceRouter } from './routes/device';
 import { trackerRouter } from './routes/tracker';
+import { ensureDeviceTables } from './db/queries/devices';
 
 dotenv.config();
 
@@ -57,19 +68,54 @@ export function createApp() {
         }
     });
 
+    app.delete('/cache/:symbol', async (req, res) => {
+        const rawSetupToken = process.env.SETUP_TOKEN;
+        const rawProvidedToken = typeof req.query.token === 'string' ? req.query.token : null;
+        const setupToken = rawSetupToken?.trim() ?? null;
+        const providedToken = rawProvidedToken?.trim() ?? null;
+
+        if (!setupToken || providedToken !== setupToken) {
+            res.status(403).json({ error: 'forbidden' });
+            return;
+        }
+
+        const symbol = req.params.symbol.toUpperCase();
+        await deleteTodayIdeaCandidate(symbol);
+        res.json({ status: 'cleared', symbol });
+    });
+
     app.use('/ideas', ideasRouter);
+    app.use('/device', deviceRouter);
     app.use('/tracker', trackerRouter);
     app.use(errorHandler);
 
     return app;
 }
 
+async function ensureSchemaGuards(): Promise<void> {
+    await ensureDailyBestHistoryTable();
+    await ensureIdeaCandidatePriceColumns();
+    await ensureEarningsCalendarColumns();
+    await ensureRiskFlagEnumValues();
+    await ensureRecommendationTrackerTable();
+    await ensureUnderlyingCompanyNameColumn();
+    await ensureDeviceTables();
+}
+
 if (require.main === module) {
     const PORT = parseInt(process.env.PORT || '3000', 10);
     const app = createApp();
 
-    app.listen(PORT, '0.0.0.0', () => {
-        // eslint-disable-next-line no-console
-        console.log(`FCN API listening on port ${PORT}`);
-    });
+    ensureSchemaGuards()
+        .then(() => {
+            app.listen(PORT, '0.0.0.0', () => {
+                // eslint-disable-next-line no-console
+                console.log(`FCN API listening on port ${PORT}`);
+            });
+        })
+        .catch((error) => {
+            // eslint-disable-next-line no-console
+            console.error('Schema guard initialization failed:', error);
+            process.exit(1);
+        });
 }

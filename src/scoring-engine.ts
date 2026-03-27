@@ -1,14 +1,20 @@
+import { fetchStockNewsContext, getCompanyName } from './data/news-fetcher';
+
 export type HouseOverrideType = 'FORCE_AVOID' | 'FORCE_CAUTION' | 'WHITELIST_ONLY';
 
 export type OverallGrade = 'GO' | 'CAUTION' | 'AVOID';
 
-export type FlagSeverity = 'WARN' | 'BLOCK';
+export type FlagSeverity = 'INFO' | 'WARN' | 'BLOCK';
 
 export type FlagType =
     | 'BROKEN_TREND'
+    | 'COMMODITY_BETA_CAUTION'
     | 'EARNINGS_PROXIMITY'
     | 'HIGH_VOL_LOW_STRIKE'
+    | 'HIGH_COUPON_OVERRIDE'
     | 'HOUSE_OVERRIDE'
+    | 'MATERIAL_NEWS_SHOCK'
+    | 'MATERIAL_NEWS_OVERHANG'
     | 'BEARISH_STRUCTURE'
     | 'LOWER_HIGH_RISK'
     | 'LOW_COUPON'
@@ -104,32 +110,73 @@ const PREFERRED_TENORS = [90, 180];
 const MAX_APPROVED_TENORS = 2;
 const MAX_APPROVED_STRIKES = 3;
 const NORMAL_TARGET_ABS_DELTA = 0.20;
+const SHORT_TENOR_DAYS = 90;
+const LONG_TENOR_DAYS = 180;
+const LONG_TENOR_MIN_COUPON_DISTANCE_IMPROVEMENT = 3.5;
+const LONG_TENOR_MIN_COMPOSITE_SCORE_IMPROVEMENT = 0.10;
+const SHORT_TENOR_MAX_COUPON_DISTANCE_PENALTY = 1.5;
+const SHORT_TENOR_MAX_COMPOSITE_SCORE_PENALTY = 0.05;
 interface StrikeSelectionConfig {
     minAbsDelta: number;
     maxAbsDelta: number;
     targetAbsDelta: number;
+    maxMoneynessPct: number;
+}
+
+function latestOneDayMovePct(symbolData: SymbolData): number | null {
+    const history = symbolData.price_history;
+    if (history.length < 2) {
+        return null;
+    }
+
+    const previousClose = history[history.length - 2]?.close;
+    const latestClose = history[history.length - 1]?.close;
+    if (!previousClose || !latestClose) {
+        return null;
+    }
+
+    return ((latestClose - previousClose) / previousClose) * 100;
 }
 
 const DEFAULT_STRIKE_SELECTION: StrikeSelectionConfig = {
     minAbsDelta: 0.15,
     maxAbsDelta: 0.40,
-    targetAbsDelta: NORMAL_TARGET_ABS_DELTA
+    targetAbsDelta: NORMAL_TARGET_ABS_DELTA,
+    maxMoneynessPct: 92
 };
+
+const COMMODITY_BETA_STRIKE_SELECTION: StrikeSelectionConfig = {
+    minAbsDelta: 0.10,
+    maxAbsDelta: 0.28,
+    targetAbsDelta: 0.15,
+    maxMoneynessPct: 85
+};
+
+const COMMODITY_BETA_SYMBOLS = new Set(['GDX', 'USO']);
 
 function clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
 }
 
-function getTargetCouponPct(historicalVolatility: number): number {
+function getTargetCouponPct(historicalVolatility: number, symbol?: string): number {
+    const normalizedSymbol = symbol?.toUpperCase();
+    const isCommodityBeta = normalizedSymbol ? COMMODITY_BETA_SYMBOLS.has(normalizedSymbol) : false;
+
     if (historicalVolatility > 0.6) {
-        return 20;
+        return isCommodityBeta ? 15 : 20;
     }
 
     if (historicalVolatility >= 0.3) {
-        return 15;
+        return isCommodityBeta ? 12 : 15;
     }
 
-    return 10;
+    return isCommodityBeta ? 8 : 10;
+}
+
+export function getStrikeSelectionConfig(symbol: string): StrikeSelectionConfig {
+    return COMMODITY_BETA_SYMBOLS.has(symbol.toUpperCase())
+        ? COMMODITY_BETA_STRIKE_SELECTION
+        : DEFAULT_STRIKE_SELECTION;
 }
 
 function daysUntil(dateString?: string | null): number | null {
@@ -215,6 +262,57 @@ function deriveOverallGrade(compositeScore: number): OverallGrade {
     }
 
     return 'AVOID';
+}
+
+export function shouldPreferTenorCandidate(input: {
+    candidateTenorDays: number | null;
+    candidateCouponDistance: number;
+    candidateCompositeScore: number;
+    candidateRefCouponPct: number | null;
+    bestTenorDays: number | null;
+    bestCouponDistance: number;
+    bestCompositeScore: number;
+    bestRefCouponPct: number | null;
+}): boolean {
+    const {
+        candidateTenorDays,
+        candidateCouponDistance,
+        candidateCompositeScore,
+        candidateRefCouponPct,
+        bestTenorDays,
+        bestCouponDistance,
+        bestCompositeScore,
+        bestRefCouponPct
+    } = input;
+
+    if (bestTenorDays === null || candidateTenorDays === null || candidateTenorDays === bestTenorDays) {
+        return false;
+    }
+
+    if (candidateTenorDays === LONG_TENOR_DAYS && bestTenorDays === SHORT_TENOR_DAYS) {
+        const couponDistanceImprovement = bestCouponDistance - candidateCouponDistance;
+        const compositeScoreImprovement = candidateCompositeScore - bestCompositeScore;
+        const couponLevelImprovement = (candidateRefCouponPct ?? Number.NEGATIVE_INFINITY) - (bestRefCouponPct ?? Number.NEGATIVE_INFINITY);
+
+        return (
+            couponDistanceImprovement >= LONG_TENOR_MIN_COUPON_DISTANCE_IMPROVEMENT ||
+            compositeScoreImprovement >= LONG_TENOR_MIN_COMPOSITE_SCORE_IMPROVEMENT ||
+            (
+                couponLevelImprovement >= 5 &&
+                candidateCouponDistance <= bestCouponDistance + 0.5 &&
+                candidateCompositeScore >= bestCompositeScore - 0.02
+            )
+        );
+    }
+
+    if (candidateTenorDays === SHORT_TENOR_DAYS && bestTenorDays === LONG_TENOR_DAYS) {
+        return (
+            candidateCouponDistance <= bestCouponDistance + SHORT_TENOR_MAX_COUPON_DISTANCE_PENALTY &&
+            candidateCompositeScore >= bestCompositeScore - SHORT_TENOR_MAX_COMPOSITE_SCORE_PENALTY
+        );
+    }
+
+    return false;
 }
 
 export function checkEligibility(symbolData: SymbolData): { eligible: boolean; flags: Flag[] } {
@@ -309,15 +407,17 @@ export function approveTenors(symbolData: SymbolData, chainData: ChainData): Ten
 }
 
 export function approveStrikes(
+    symbol: string,
     symbolData: SymbolData,
     tenorData: TenorWindow,
-    config: StrikeSelectionConfig = DEFAULT_STRIKE_SELECTION
+    config: StrikeSelectionConfig = getStrikeSelectionConfig(symbol)
 ): StrikeData[] {
     const historicalVolatility = calculateHistoricalVolatility(symbolData.price_history);
-    const targetCouponPct = getTargetCouponPct(historicalVolatility);
+    const targetCouponPct = getTargetCouponPct(historicalVolatility, symbol);
 
     return tenorData.strikes
         .filter((strike) => Math.abs(strike.delta) >= config.minAbsDelta && Math.abs(strike.delta) <= config.maxAbsDelta)
+        .filter((strike) => (strike.strike / symbolData.current_price) * 100 <= config.maxMoneynessPct)
         .filter((strike) => strike.open_interest >= 100)
         .sort((a, b) => {
             const refCouponPctA = calculateRefCouponPct(a, tenorData.tenor_days);
@@ -346,6 +446,9 @@ export function scoreAndGrade(candidate: {
     symbolData: SymbolData;
     tenorData: TenorWindow;
     strikeData: StrikeData;
+    hasRecentEarnings?: boolean;
+    sentimentProxy?: number | null;
+    hasMaterialNegativeNews?: boolean;
 }): ScoringResult {
     const { symbol, symbolData, tenorData, strikeData } = candidate;
     const flags: Flag[] = [];
@@ -371,7 +474,7 @@ export function scoreAndGrade(candidate: {
     const macdScore = scoreMacdMomentum(symbolData);
     const rsiScore = scoreRsiStrength(symbolData.rsi_14 ?? null);
     const trendScore = clamp(
-        (structureScore * 0.5) + (macdScore * 0.3) + (rsiScore * 0.2),
+        (structureScore * 0.40) + (normalizedPctFromHigh * 0.20) + (macdScore * 0.25) + (rsiScore * 0.15),
         0,
         1
     );
@@ -395,6 +498,11 @@ export function scoreAndGrade(candidate: {
             severity: 'WARN',
             message: `Earnings are due in ${daysToEarnings} day(s), event risk should be monitored closely`
         });
+    } else {
+        const ivRank = symbolData.iv_rank;
+        if (ivRank !== null) {
+            eventRiskScore = clamp(1 - Math.max(0, ivRank - 0.5) * 0.4, 0.80, 1.0);
+        }
     }
 
     const premiumScore = adjustedPremiumScore(strikeData);
@@ -440,23 +548,99 @@ export function scoreAndGrade(candidate: {
     }
 
     let compositeScore = baseCompositeScore;
+    const oneDayMovePct = latestOneDayMovePct(symbolData);
+    const hasMaterialNewsShock =
+        (candidate.hasMaterialNegativeNews ?? false) &&
+        oneDayMovePct !== null &&
+        oneDayMovePct <= -15 &&
+        (symbolData.current_price < symbolData.ma50 || symbolData.pct_from_52w_high < -25);
 
-    if (
-        shouldAvoidResult({
-            symbolData,
-            strikeData,
-            refCouponPct,
-            flags
-        })
-    ) {
+    if (hasMaterialNewsShock) {
+        flags.push({
+            type: 'MATERIAL_NEWS_SHOCK',
+            severity: 'WARN',
+            message: `Material adverse news coincided with a ${Math.abs(oneDayMovePct).toFixed(1)}% one-day drop`
+        });
+    } else if (candidate.hasMaterialNegativeNews ?? false) {
+        flags.push({
+            type: 'MATERIAL_NEWS_OVERHANG',
+            severity: 'WARN',
+            message: 'Material adverse news overhang remains in place and should cap conviction'
+        });
+    }
+
+    if ((candidate.hasRecentEarnings ?? false) && (candidate.sentimentProxy ?? null) !== null && (candidate.sentimentProxy ?? 1) < 0.4) {
+        const adjustedEventRiskScore = Math.min(eventRiskScore, 0.35);
+        const eventRiskDelta = eventRiskScore - adjustedEventRiskScore;
+        eventRiskScore = adjustedEventRiskScore;
+        compositeScore = clamp(compositeScore - (eventRiskDelta * 0.25), 0, 1);
+    }
+
+    const hardAvoidTriggered = shouldAvoidResult({
+        symbolData,
+        strikeData,
+        refCouponPct,
+        flags
+    });
+
+    let overallGrade: OverallGrade;
+
+    if (hardAvoidTriggered) {
+        const moneynessThresholdMet = moneynessPct <= 75;
+        const highCouponOverride =
+            refCouponPct !== null &&
+            refCouponPct >= 20 &&
+            moneynessThresholdMet &&
+            strikeData.open_interest >= 100 &&
+            daysToEarnings !== null &&
+            daysToEarnings > 3 &&
+            (candidate.sentimentProxy ?? 0) >= 0.35;
+
+        if (highCouponOverride) {
+            compositeScore = clamp(compositeScore, 0.45, 0.55);
+            flags.push({
+                type: 'HIGH_COUPON_OVERRIDE',
+                severity: 'INFO',
+                message: '高票息执行价已充分反映下行风险，升级为CAUTION'
+            });
+            overallGrade = 'CAUTION';
+        } else {
         // Hard avoid penalty: multiply final composite score by 0.4
         // This ensures AVOID grade always scores below CAUTION threshold (0.45)
         // e.g. original 0.80 → 0.32 after penalty
         // Penalty factor 0.4 is empirical, review after 30 days of data
-        compositeScore = clamp(compositeScore * 0.4, 0, 1);
+            compositeScore = clamp(compositeScore * 0.4, 0, 1);
+            overallGrade = deriveOverallGrade(compositeScore);
+        }
+    } else {
+        overallGrade = deriveOverallGrade(compositeScore);
     }
 
-    const overallGrade = deriveOverallGrade(compositeScore);
+    const isCommodityBeta = COMMODITY_BETA_SYMBOLS.has(symbol.toUpperCase());
+    const commodityBetaNeedsCaution =
+        isCommodityBeta &&
+        !hardAvoidTriggered &&
+        (
+            moneynessPct > 85 ||
+            strikeData.iv >= 0.4 ||
+            symbolData.pct_from_52w_high < -20 ||
+            symbolData.current_price < symbolData.ma20
+        );
+
+    if (commodityBetaNeedsCaution && overallGrade === 'GO') {
+        compositeScore = Math.min(compositeScore, 0.62);
+        overallGrade = 'CAUTION';
+        flags.push({
+            type: 'COMMODITY_BETA_CAUTION',
+            severity: 'WARN',
+            message: 'Commodity-linked ETF uses tighter FCN guardrails because macro, curve, and beta sensitivity can amplify drawdowns'
+        });
+    }
+
+    if ((candidate.hasMaterialNegativeNews ?? false) && overallGrade === 'GO') {
+        compositeScore = Math.min(compositeScore, 0.62);
+        overallGrade = 'CAUTION';
+    }
 
     const reasoningText = buildReasoningText(
         symbol,
@@ -519,6 +703,11 @@ function shouldAvoidResult(input: {
         hasBearishStructure &&
         (hasLowCoupon || hasLowLiquidity || input.symbolData.pct_from_52w_high < -40)
     ) {
+        return true;
+    }
+
+    const hasMaterialNewsShock = input.flags.some((flag) => flag.type === 'MATERIAL_NEWS_SHOCK');
+    if (hasMaterialNewsShock) {
         return true;
     }
 
@@ -585,6 +774,7 @@ export async function runDailyScreener(
 
     for (const symbol of symbols) {
         const symbolData = await dataFetcher.fetchSymbolData(symbol);
+        const newsContext = await fetchStockNewsContext(symbol, getCompanyName(symbol));
         const eligibility = checkEligibility(symbolData);
 
         if (!eligibility.eligible) {
@@ -669,11 +859,11 @@ export async function runDailyScreener(
             continue;
         }
 
-        const targetCouponPct = getTargetCouponPct(calculateHistoricalVolatility(symbolData.price_history));
+        const targetCouponPct = getTargetCouponPct(calculateHistoricalVolatility(symbolData.price_history), symbol);
         let bestChoice: { result: ScoringResult; couponDistance: number; strikeData: StrikeData } | null = null;
 
         for (const tenorData of approvedTenors) {
-            const approvedStrikes = approveStrikes(symbolData, tenorData, DEFAULT_STRIKE_SELECTION);
+            const approvedStrikes = approveStrikes(symbol, symbolData, tenorData, getStrikeSelectionConfig(symbol));
 
             if (approvedStrikes.length === 0) {
                 const emptyStrikeFlags = [
@@ -733,7 +923,10 @@ export async function runDailyScreener(
                     symbol,
                     symbolData,
                     tenorData,
-                    strikeData
+                    strikeData,
+                    hasRecentEarnings: newsContext.hasRecentEarnings,
+                    sentimentProxy: newsContext.sentimentProxy,
+                    hasMaterialNegativeNews: newsContext.hasMaterialNegativeNews
                 });
 
                 candidateResult.flags = mergeUniqueFlags(eligibility.flags, candidateResult.flags);
@@ -742,12 +935,26 @@ export async function runDailyScreener(
                     candidateResult.ref_coupon_pct === null
                         ? Number.POSITIVE_INFINITY
                         : Math.abs(candidateResult.ref_coupon_pct - targetCouponPct);
+                const isSameTenor =
+                    bestChoice !== null &&
+                    candidateResult.recommended_tenor_days === bestChoice.result.recommended_tenor_days;
+                const isCrossTenor = bestChoice !== null && !isSameTenor;
                 if (
                     bestChoice === null ||
-                    couponDistance < bestChoice.couponDistance ||
-                    (couponDistance === bestChoice.couponDistance &&
+                    (isCrossTenor && shouldPreferTenorCandidate({
+                        candidateTenorDays: candidateResult.recommended_tenor_days,
+                        candidateCouponDistance: couponDistance,
+                        candidateCompositeScore: candidateResult.composite_score,
+                        candidateRefCouponPct: candidateResult.ref_coupon_pct,
+                        bestTenorDays: bestChoice.result.recommended_tenor_days,
+                        bestCouponDistance: bestChoice.couponDistance,
+                        bestCompositeScore: bestChoice.result.composite_score,
+                        bestRefCouponPct: bestChoice.result.ref_coupon_pct
+                    })) ||
+                    (isSameTenor && couponDistance < bestChoice.couponDistance) ||
+                    (isSameTenor && couponDistance === bestChoice.couponDistance &&
                         candidateResult.composite_score > bestChoice.result.composite_score) ||
-                    (couponDistance === bestChoice.couponDistance &&
+                    (isSameTenor && couponDistance === bestChoice.couponDistance &&
                         candidateResult.composite_score === bestChoice.result.composite_score &&
                         (candidateResult.ref_coupon_pct ?? 0) > (bestChoice.result.ref_coupon_pct ?? 0))
                 ) {
@@ -901,5 +1108,5 @@ function mergeUniqueFlags(...flagGroups: Flag[][]): Flag[] {
 }
 
 function severityRank(severity: FlagSeverity): number {
-    return severity === 'BLOCK' ? 2 : 1;
+    return severity === 'BLOCK' ? 3 : severity === 'WARN' ? 2 : 1;
 }

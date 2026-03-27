@@ -1,11 +1,15 @@
 export type Grade = 'GO' | 'CAUTION' | 'AVOID';
 export type SignalColor = 'green' | 'amber' | 'red' | 'gray';
-export type FlagSeverity = 'WARN' | 'BLOCK';
+export type FlagSeverity = 'INFO' | 'WARN' | 'BLOCK';
 export type FlagType =
     | 'BROKEN_TREND'
+    | 'COMMODITY_BETA_CAUTION'
     | 'EARNINGS_PROXIMITY'
     | 'HIGH_VOL_LOW_STRIKE'
+    | 'HIGH_COUPON_OVERRIDE'
     | 'HOUSE_OVERRIDE'
+    | 'MATERIAL_NEWS_SHOCK'
+    | 'MATERIAL_NEWS_OVERHANG'
     | 'BEARISH_STRUCTURE'
     | 'LOWER_HIGH_RISK'
     | 'LOW_COUPON'
@@ -30,6 +34,7 @@ export interface NarrativeOutput {
     why_now: string;
     risk_note: string;
     sentiment_score: number;
+    key_events: string[];
 }
 
 export interface IdeaCard {
@@ -98,6 +103,50 @@ export interface TodayIdeasResponse {
     not_recommended: AvoidEntry[];
 }
 
+export interface ClientFocusQuestion {
+    question: string;
+    answer: string;
+}
+
+export interface ClientFocusUpdate {
+    time: string;
+    title: string;
+    impact: string;
+    source?: string;
+}
+
+export interface ClientFocusTransmissionItem {
+    order: '一阶传导' | '二阶传导';
+    title: string;
+    pricing: '已定价' | '部分定价' | '未充分定价';
+    summary: string;
+    latest_evidence?: string | null;
+}
+
+export interface ClientFocusListItem {
+    slug: string;
+    title: string;
+    status?: string;
+    updated_at: string;
+    summary: string;
+    accent: string;
+    client_questions: Array<Pick<ClientFocusQuestion, 'question'>>;
+}
+
+export interface ClientFocusDetailResponse {
+    slug: string;
+    title: string;
+    status?: string;
+    updated_at: string;
+    summary: string;
+    accent: string;
+    latest_updates: ClientFocusUpdate[];
+    client_questions: ClientFocusQuestion[];
+    transmission_chain: ClientFocusTransmissionItem[];
+    related_assets: string[];
+    disclaimer: string;
+}
+
 export interface SignalRow {
     name: string;
     value: string;
@@ -115,6 +164,11 @@ export interface PriceContext {
     data_date: string | null;
     earnings_date: string | null;
     days_to_earnings: number | null;
+}
+
+export interface PriceHistoryPoint {
+    date: string;
+    close: number;
 }
 
 export interface SymbolIdeaResponse {
@@ -140,6 +194,7 @@ export interface SymbolIdeaResponse {
     flags: Flag[];
     signals: SignalRow[];
     price_context: PriceContext;
+    price_history: PriceHistoryPoint[];
     sentiment_score: number | null;
 }
 
@@ -151,6 +206,12 @@ export interface AsyncScoringAcceptedResponse {
     job_id: string;
     poll_url: string;
     message: string;
+}
+
+export interface SymbolPriceHistoryResponse {
+    symbol: string;
+    data_as_of_date: string | null;
+    price_history: PriceHistoryPoint[];
 }
 
 export interface AsyncScoringStatusResponse {

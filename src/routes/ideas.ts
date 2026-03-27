@@ -2,7 +2,10 @@ import { Router } from 'express';
 
 import { asyncHandler } from '../lib/async-handler';
 import {
+    getClientFocusDetailController,
+    getClientFocusListController,
     getSymbolIdeaController,
+    getSymbolPriceHistoryController,
     getSymbolIdeaStatusController,
     getTodayIdeasController
 } from '../controllers/ideas-controller';
@@ -10,6 +13,8 @@ import {
 export const ideasRouter = Router();
 
 ideasRouter.get('/today', asyncHandler(getTodayIdeasController));
+ideasRouter.get('/focus', asyncHandler(getClientFocusListController));
+ideasRouter.get('/focus/:slug', asyncHandler(getClientFocusDetailController));
+ideasRouter.get('/:symbol/price-history', asyncHandler(getSymbolPriceHistoryController));
 ideasRouter.get('/:symbol', asyncHandler(getSymbolIdeaController));
 ideasRouter.get('/:symbol/status/:job_id', asyncHandler(getSymbolIdeaStatusController));
-

@@ -77,8 +77,13 @@ export class MassiveClient {
             return this.requestWithRetry<T>(path, params, attempt + 1);
         }
 
-        if (response.status === 503) {
-            throw new MassiveApiError(503, 'Massive API is temporarily unavailable');
+        if (response.status === 503 || response.status === 504) {
+            if (attempt >= MAX_RETRIES) {
+                throw new MassiveApiError(response.status, `Massive API request failed with status ${response.status}`);
+            }
+
+            await delay(BASE_DELAY_MS);
+            return this.requestWithRetry<T>(path, params, attempt + 1);
         }
 
         if (!response.ok) {

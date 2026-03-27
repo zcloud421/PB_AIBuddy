@@ -22,7 +22,9 @@ export async function fetchEarningsCalendar(symbols: string[]): Promise<Earnings
         return [];
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const from = new Date(Date.now() - (3 * 24 * 60 * 60 * 1000))
+        .toISOString()
+        .split('T')[0];
     const future = new Date(Date.now() + (14 * 24 * 60 * 60 * 1000))
         .toISOString()
         .split('T')[0];
@@ -34,7 +36,7 @@ export async function fetchEarningsCalendar(symbols: string[]): Promise<Earnings
             'https://finnhub.io/api/v1/calendar/earnings',
             {
                 params: {
-                    from: today,
+                    from,
                     to: future,
                     token: finnhubApiKey
                 },
