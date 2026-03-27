@@ -18,8 +18,9 @@ export interface StockNewsContext {
     hasMaterialNegativeNews: boolean;
 }
 
+const FINNHUB_BASE_URL = 'https://finnhub.io/api/v1';
 const GOOGLE_NEWS_RSS_BASE_URL = 'https://news.google.com/rss/search';
-const NEWS_FETCH_TIMEOUT_MS = 3000;
+const NEWS_FETCH_TIMEOUT_MS = 8000;
 
 const ISSUER_NAMES: Record<string, string> = {
     NVDA: 'Nvidia',
@@ -141,53 +142,87 @@ async function getRecentEarningsStatus(symbol: string): Promise<RecentEarningsSt
     };
 }
 
+interface FinnhubNewsItem {
+    category: string;
+    datetime: number;
+    headline: string;
+    id: number;
+    image: string;
+    related: string;
+    source: string;
+    summary: string;
+    url: string;
+}
+
+async function fetchNewsFromFinnhub(symbol: string): Promise<NewsItem[]> {
+    const apiKey = process.env.FINNHUB_API_KEY;
+    if (!apiKey) {
+        console.warn(`[news-fetcher] FINNHUB_API_KEY not set, skipping news fetch for ${symbol}`);
+        return [];
+    }
+
+    const toDate = new Date();
+    const fromDate = new Date();
+    fromDate.setDate(fromDate.getDate() - 14);
+
+    const url = new URL(`${FINNHUB_BASE_URL}/company-news`);
+    url.searchParams.set('symbol', symbol);
+    url.searchParams.set('from', fromDate.toISOString().slice(0, 10));
+    url.searchParams.set('to', toDate.toISOString().slice(0, 10));
+    url.searchParams.set('token', apiKey);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), NEWS_FETCH_TIMEOUT_MS);
+
+    try {
+        const response = await fetch(url.toString(), { signal: controller.signal });
+        if (!response.ok) {
+            console.warn(`[news-fetcher] Finnhub returned ${response.status} for ${symbol}`);
+            return [];
+        }
+
+        const data = await response.json() as FinnhubNewsItem[];
+        if (!Array.isArray(data)) {
+            return [];
+        }
+
+        return data.slice(0, 20).map((item) => ({
+            title: item.headline,
+            source: item.source,
+            url: item.url,
+            published_at: new Date(item.datetime * 1000).toISOString()
+        }));
+    } catch {
+        return [];
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 export async function fetchStockNewsContext(
     symbol: string,
-    companyName?: string
+    _companyName?: string
 ): Promise<StockNewsContext> {
     try {
         const normalizedSymbol = symbol.toUpperCase();
         const earningsStatus = await getRecentEarningsStatus(normalizedSymbol);
-        const issuerName = ISSUER_NAMES[normalizedSymbol] ?? companyName ?? normalizedSymbol;
-        const earningsQuery =
-            RECENT_EARNINGS_QUERIES[normalizedSymbol] ??
-            `${issuerName} earnings profit revenue miss fall shares drop ${new Date().getFullYear()}`;
-        const standardQuery = SPECIAL_QUERIES[normalizedSymbol] ?? `${issuerName} company business outlook`;
-        const queryUsed = `primary=${earningsQuery}; secondary=${standardQuery}`;
-        console.log(`[news-fetcher] ${normalizedSymbol} hasRecentEarnings=${earningsStatus.hasRecentEarnings}, using query: ${queryUsed}`);
 
-        const primaryItems = await fetchNewsItemsForQuery(earningsQuery);
-        const secondaryItems = await fetchNewsItemsForQuery(standardQuery);
-        const newsIndicatesRecentEarnings = dedupeNewsItems([...primaryItems, ...secondaryItems]).some((item) =>
-            isEarningsHeadline(item.title)
-        );
+        const rawItems = await fetchNewsFromFinnhub(normalizedSymbol);
+        console.log(`[news-fetcher] ${normalizedSymbol} hasRecentEarnings=${earningsStatus.hasRecentEarnings}, fetched ${rawItems.length} items from Finnhub`);
+
+        const newsIndicatesRecentEarnings = rawItems.some((item) => isEarningsHeadline(item.title));
         const hasRecentEarnings = earningsStatus.hasRecentEarnings || newsIndicatesRecentEarnings;
         const effectiveEarningsWeight = hasRecentEarnings
             ? Math.max(earningsStatus.earningsWeight, newsIndicatesRecentEarnings ? 0.6 : 0)
             : 0;
 
-        const displayItems = buildDisplayNewsItems(primaryItems, secondaryItems, hasRecentEarnings);
-
-        let combinedItems = hasRecentEarnings
-            ? buildWeightedRecentEarningsNewsItems(primaryItems, secondaryItems, effectiveEarningsWeight)
-            : dedupeNewsItems([...secondaryItems]);
-
-        combinedItems = filterStaleEarningsHeadlines(combinedItems, hasRecentEarnings);
+        let combinedItems = filterStaleEarningsHeadlines(dedupeNewsItems(rawItems), hasRecentEarnings);
 
         if (hasRecentEarnings) {
             combinedItems = sortNewsItemsForNarrative(combinedItems);
-
-            const leadingItems = combinedItems.slice(0, 3);
-            const hasEarningsHeadline = leadingItems.some((item) => scoreNewsPriority(item.title) <= 2);
-
-            if (!hasEarningsHeadline) {
-                const fallbackItems = await fetchNewsItemsForQuery(`${issuerName} stock falls earnings ${new Date().getFullYear()}`);
-                if (fallbackItems.length > 0) {
-                    combinedItems = dedupeNewsItems([fallbackItems[0], ...combinedItems]);
-                    combinedItems = sortNewsItemsForNarrative(combinedItems);
-                }
-            }
         }
+
+        const displayItems = combinedItems.slice(0, 5);
 
         return {
             items: combinedItems.slice(0, 5),
@@ -196,7 +231,7 @@ export async function fetchStockNewsContext(
             hasRecentEarnings,
             earningsWeight: effectiveEarningsWeight,
             daysSinceEarnings: earningsStatus.daysSinceEarnings,
-            sentimentProxy: hasRecentEarnings ? scoreRecentEarningsHeadlines(primaryItems.length > 0 ? primaryItems : combinedItems) : null,
+            sentimentProxy: hasRecentEarnings ? scoreRecentEarningsHeadlines(combinedItems) : null,
             hasMaterialNegativeNews: detectMaterialNegativeNews(combinedItems)
         };
     } catch {
@@ -216,10 +251,6 @@ export async function fetchStockNewsContext(
 export async function fetchStockNews(symbol: string, companyName?: string): Promise<NewsItem[]> {
     const context = await fetchStockNewsContext(symbol, companyName);
     return context.displayItems;
-}
-
-async function fetchNewsItemsForQuery(query: string): Promise<NewsItem[]> {
-    return fetchNewsItemsByQuery(query);
 }
 
 export async function fetchNewsItemsByQuery(
@@ -309,40 +340,6 @@ function filterStaleEarningsHeadlines(items: NewsItem[], hasRecentEarnings: bool
         const ageInDays = (Date.now() - publishedAt) / (24 * 60 * 60 * 1000);
         return ageInDays <= 14;
     });
-}
-
-function buildDisplayNewsItems(
-    primaryItems: NewsItem[],
-    secondaryItems: NewsItem[],
-    hasRecentEarnings: boolean
-): NewsItem[] {
-    const dedupedItems = dedupeNewsItems([...primaryItems, ...secondaryItems]);
-
-    if (hasRecentEarnings) {
-        return sortNewsItemsForNarrative(dedupedItems).slice(0, 5);
-    }
-
-    if (secondaryItems.length > 0) {
-        return dedupeNewsItems([...secondaryItems, ...primaryItems]).slice(0, 5);
-    }
-
-    return dedupedItems.slice(0, 5);
-}
-
-function buildWeightedRecentEarningsNewsItems(
-    primaryItems: NewsItem[],
-    secondaryItems: NewsItem[],
-    earningsWeight: number
-): NewsItem[] {
-    if (earningsWeight >= 1) {
-        return dedupeNewsItems([...primaryItems.slice(0, 3)]);
-    }
-
-    if (earningsWeight >= 0.6) {
-        return dedupeNewsItems([...primaryItems.slice(0, 2), ...secondaryItems.slice(0, 2)]);
-    }
-
-    return dedupeNewsItems([...secondaryItems.slice(0, 3), ...primaryItems.slice(0, 1)]);
 }
 
 function getEarningsWeight(daysSinceEarnings: number | null): number {

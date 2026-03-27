@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 
 import { fetchEarningsCalendar } from '../data/earnings-fetcher';
 import { fetchTickerCompanyName, MassiveDataFetcher } from '../data/massive-fetcher';
-import { fetchStockNewsContext, getCompanyName } from '../data/news-fetcher';
+import { fetchStockNewsContext } from '../data/news-fetcher';
 import { pool } from '../db/client';
 import {
     createIdeaRun,
@@ -107,11 +107,7 @@ async function main(): Promise<void> {
                 if (!result) {
                     throw new Error(`No scoring result returned for ${symbol}`);
                 }
-                const newsContext = await withTimeout(
-                    fetchStockNewsContext(symbol, companyName ?? getCompanyName(symbol)),
-                    10000,
-                    { items: [], narrativeItems: [], displayItems: [], hasRecentEarnings: false, earningsWeight: 0, daysSinceEarnings: null, sentimentProxy: null, hasMaterialNegativeNews: false }
-                );
+                const newsContext = await fetchStockNewsContext(symbol, underlying?.company_name ?? undefined);
                 const narrative = await generateNarrative({
                     symbol,
                     theme: underlying?.themes?.[0] ?? 'Featured',
@@ -272,9 +268,3 @@ function delay(ms: number): Promise<void> {
     });
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-    return Promise.race([
-        promise,
-        new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))
-    ]);
-}
