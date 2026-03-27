@@ -77,7 +77,7 @@ async function main(): Promise<void> {
             FROM idea_candidates ic
             JOIN idea_runs ir ON ir.run_id = ic.run_id
             WHERE ir.status = 'completed'
-              AND ir.created_at::date = (CURRENT_DATE - INTERVAL '1 day')::date
+              AND ir.run_date = (CURRENT_DATE - INTERVAL '1 day')::date
             `
         );
         const previousGrades = previousGradesResult.rows;
