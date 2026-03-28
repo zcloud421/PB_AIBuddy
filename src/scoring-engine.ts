@@ -1001,15 +1001,49 @@ export async function runDailyScreener(
             bestChoice = best180;
         }
 
-        if (bestChoice !== null) {
-            results.push(
-                applyHighVolCautionOverride({
-                    result: bestChoice.result,
-                    symbolData,
-                    strikeData: bestChoice.strikeData
-                })
-            );
+        if (bestChoice === null) {
+            const flags: Flag[] = [
+                ...eligibility.flags,
+                {
+                    type: 'NO_APPROVED_TENOR',
+                    severity: 'WARN',
+                    message: 'No 90-day tenor baseline passed current screening constraints'
+                }
+            ];
+
+            results.push({
+                symbol,
+                overall_grade: 'AVOID',
+                composite_score: 0.2,
+                iv_rank_score: 0,
+                trend_score: 0,
+                skew_score: 0,
+                event_risk_score: 0,
+                premium_score: null,
+                selected_implied_volatility: null,
+                recommended_strike: null,
+                recommended_tenor_days: null,
+                estimated_coupon_range: null,
+                ref_coupon_pct: null,
+                moneyness_pct: null,
+                current_price: symbolData.current_price,
+                ma20: symbolData.ma20,
+                ma50: symbolData.ma50,
+                ma200: symbolData.ma200,
+                pct_from_52w_high: symbolData.pct_from_52w_high,
+                reasoning_text: buildReasoningText(symbol, 'AVOID', null, null, null, flags),
+                flags
+            });
+            continue;
         }
+
+        results.push(
+            applyHighVolCautionOverride({
+                result: bestChoice.result,
+                symbolData,
+                strikeData: bestChoice.strikeData
+            })
+        );
     }
 
     return results.sort((a, b) => b.composite_score - a.composite_score);
