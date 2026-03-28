@@ -20,6 +20,7 @@ interface FocusTopicConfig {
     query: string;
     fallbackStatus?: string;
     clientQuestions: ClientFocusQuestion[];
+    previewQuestions?: string[];
     relatedAssets: string[];
     fallbackSummary: string;
     fallbackLatestUpdates?: ClientFocusUpdate[];
@@ -94,6 +95,10 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
                 question: '今年还能降息吗，还是反而会加息？',
                 answer: 'Fed 3 月点阵图维持全年仅一次降息，但市场定价更悲观，债券市场已将年内完全不降息的概率计入约 48%，且出现小概率加息预期。核心变量是油价走势：若局势缓和、油价回落，年底前一次降息仍是基准情景；若油价维持高位，加息讨论可能重新浮出水面。'
             }
+        ],
+        previewQuestions: [
+            '高油价会造成什么影响？',
+            '今年还能降息吗，还是反而会加息？'
         ],
         relatedAssets: ['股票', '债券', '贵金属', '原油', '美元', '港股'],
         fallbackSummary: '地缘风险正在通过原油、黄金与利率预期重塑市场定价，客户对风险传导的提问明显升温。',
@@ -188,6 +193,14 @@ const focusChainCache = new Map<string, { expiresAt: number; value: ClientFocusT
 
 function getFocusTopic(slug: string): FocusTopicConfig | null {
     return FOCUS_TOPICS.find((topic) => topic.slug === slug) ?? null;
+}
+
+function getPreviewQuestions(topic: FocusTopicConfig): Array<Pick<ClientFocusQuestion, 'question'>> {
+    if (Array.isArray(topic.previewQuestions) && topic.previewQuestions.length > 0) {
+        return topic.previewQuestions.map((question) => ({ question }));
+    }
+
+    return topic.clientQuestions.map((entry) => ({ question: entry.question }));
 }
 
 function formatRelativeTime(publishedAt: string | undefined): string {
@@ -1755,7 +1768,15 @@ export async function getClientFocusList(): Promise<ClientFocusListItem[]> {
         updated_at: item.updated_at,
         summary: item.summary,
         accent: item.accent,
-        client_questions: item.client_questions.map((entry) => ({ question: entry.question }))
+        client_questions: getPreviewQuestions(getFocusTopic(item.slug) ?? {
+            slug: item.slug,
+            title: item.title,
+            accent: item.accent,
+            query: '',
+            clientQuestions: item.client_questions,
+            relatedAssets: [],
+            fallbackSummary: item.summary
+        })
     }));
 }
 
