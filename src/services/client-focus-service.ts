@@ -87,7 +87,7 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
                 answer: '高油价会先推升通胀预期并压缩降息空间，随后传导到股市估值、企业成本与风险偏好。短期最直接受影响的方向是原油、能源股和利率敏感资产。市场目前预期全年最多降息一次，且存在加息的尾部风险。'
             },
             {
-                question: '今年美联储还会降息吗？',
+                question: '今年美联储还会降息吗，还是会有加息可能？',
                 answer: '黄金虽然受益于避险情绪，但实际利率和美元同步走高时，持有黄金的机会成本会上升，金价不一定和地缘风险同方向上行。当前油价冲击推高通胀预期，反而强化了央行鹰派立场，这是金价承压的核心原因。'
             },
             {
@@ -144,7 +144,7 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
         query: 'gold price real yields dollar central bank buying gold miners latest',
         clientQuestions: [
             {
-                question: '黄金不是避险资产吗，为什么中东冲突升级反而下跌？',
+                question: '为什么中东冲突升级黄金反而下跌？',
                 answer: '2024 到 2025 年黄金大牛市由三个因素共同驱动：各国央行持续大规模购金以减少美元依赖、市场对联储降息的预期，以及美元走弱。这三个支撑因素在 2026 年初开始同步发生变化，是当前金价承压的根本原因。'
             },
             {
