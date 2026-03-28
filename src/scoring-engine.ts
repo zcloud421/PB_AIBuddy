@@ -273,6 +273,7 @@ export function shouldPreferTenorCandidate(input: {
     bestCouponDistance: number;
     bestCompositeScore: number;
     bestRefCouponPct: number | null;
+    daysToEarnings?: number | null;
 }): boolean {
     const {
         candidateTenorDays,
@@ -290,25 +291,27 @@ export function shouldPreferTenorCandidate(input: {
     }
 
     if (candidateTenorDays === LONG_TENOR_DAYS && bestTenorDays === SHORT_TENOR_DAYS) {
-        // Only recommend a longer tenor if the stock is strongly GO and the coupon
-        // improvement meaningfully compensates for twice the lock-up period and uncertainty
-        if (candidateCompositeScore < 0.70) {
+        // Require strongly GO composite score (not just passing GO threshold)
+        if (candidateCompositeScore < 0.80) {
             return false;
         }
 
-        const couponDistanceImprovement = bestCouponDistance - candidateCouponDistance;
-        const compositeScoreImprovement = candidateCompositeScore - bestCompositeScore;
-        const couponLevelImprovement = (candidateRefCouponPct ?? Number.NEGATIVE_INFINITY) - (bestRefCouponPct ?? Number.NEGATIVE_INFINITY);
+        // Require the 180-day annualized coupon itself to be sufficiently attractive
+        if ((candidateRefCouponPct ?? 0) < 20) {
+            return false;
+        }
 
-        return (
-            couponDistanceImprovement >= LONG_TENOR_MIN_COUPON_DISTANCE_IMPROVEMENT ||
-            compositeScoreImprovement >= LONG_TENOR_MIN_COMPOSITE_SCORE_IMPROVEMENT ||
-            (
-                couponLevelImprovement >= 8 &&
-                candidateCouponDistance <= bestCouponDistance + 0.5 &&
-                candidateCompositeScore >= bestCompositeScore - 0.02
-            )
-        );
+        // Require next earnings to be at least 30 days away — avoid near-term binary risk
+        // at the start of a 6-month commitment (note: earnings within the full 180-day
+        // window is expected and acceptable for quarterly reporters)
+        const daysToEarnings = input.daysToEarnings ?? null;
+        if (daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings < 30) {
+            return false;
+        }
+
+        // Require meaningful annualized coupon improvement over the 90-day alternative
+        const couponLevelImprovement = (candidateRefCouponPct ?? Number.NEGATIVE_INFINITY) - (bestRefCouponPct ?? Number.NEGATIVE_INFINITY);
+        return couponLevelImprovement >= 10;
     }
 
     if (candidateTenorDays === SHORT_TENOR_DAYS && bestTenorDays === LONG_TENOR_DAYS) {
@@ -955,7 +958,8 @@ export async function runDailyScreener(
                         bestTenorDays: bestChoice.result.recommended_tenor_days,
                         bestCouponDistance: bestChoice.couponDistance,
                         bestCompositeScore: bestChoice.result.composite_score,
-                        bestRefCouponPct: bestChoice.result.ref_coupon_pct
+                        bestRefCouponPct: bestChoice.result.ref_coupon_pct,
+                        daysToEarnings: symbolData.days_to_earnings ?? null
                     })) ||
                     (isSameTenor && couponDistance < bestChoice.couponDistance) ||
                     (isSameTenor && couponDistance === bestChoice.couponDistance &&
