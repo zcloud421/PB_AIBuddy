@@ -87,7 +87,7 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
                 answer: '高油价会先推升通胀预期并压缩降息空间，随后传导到股市估值、企业成本与风险偏好。短期最直接受影响的方向是原油、能源股和利率敏感资产。市场目前预期全年最多降息一次，且存在加息的尾部风险。'
             },
             {
-                question: '黄金不是避险资产吗，为什么也出现下跌？',
+                question: '今年美联储还会降息吗？',
                 answer: '黄金虽然受益于避险情绪，但实际利率和美元同步走高时，持有黄金的机会成本会上升，金价不一定和地缘风险同方向上行。当前油价冲击推高通胀预期，反而强化了央行鹰派立场，这是金价承压的核心原因。'
             },
             {
@@ -134,7 +134,7 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
                 answer: '风险最集中在软件和 SaaS，私募信贷市场约 20% 到 25% 的敞口在软件公司，AI 对商业模式的冲击直接影响还款能力，软件敞口较高的 BDC 如 Blue Owl 股价已较 NAV 折价 20% 以上。其次是 2020 到 2024 年低利率时代完成的高杠杆收购标的，以及医疗保健并购 roll-up。相对安全的是资产支持类私募信贷和现金流稳健的中型企业贷款。'
             }
         ],
-        relatedAssets: ['信用市场', '金融股', '小盘成长', '另类资产'],
+        relatedAssets: ['信用市场', '金融股', '私募信贷基金', 'BDC', '另类资管股'],
         fallbackSummary: '信用事件开始从个别机构蔓延到风险偏好层面，客户更关注流动性与估值压缩风险。'
     },
     {
@@ -144,7 +144,7 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
         query: 'gold price real yields dollar central bank buying gold miners latest',
         clientQuestions: [
             {
-                question: '黄金之前为什么涨那么多？',
+                question: '黄金不是避险资产吗，为什么中东冲突升级反而下跌？',
                 answer: '2024 到 2025 年黄金大牛市由三个因素共同驱动：各国央行持续大规模购金以减少美元依赖、市场对联储降息的预期，以及美元走弱。这三个支撑因素在 2026 年初开始同步发生变化，是当前金价承压的根本原因。'
             },
             {
@@ -434,35 +434,59 @@ function buildPrivateCreditLatestUpdates(newsItems: NewsItem[]): ClientFocusUpda
         }));
 }
 
+type MiddleEastActor = 'iran' | 'us_trump' | 'israel' | 'diplomatic' | 'other';
+
+function classifyMiddleEastActor(title: string): MiddleEastActor {
+    const n = title.toLowerCase();
+    const isDiplomatic =
+        n.includes('ceasefire') || n.includes('peace') || n.includes('talks') ||
+        n.includes('deal') || n.includes('mediat') || n.includes('backchannel') ||
+        n.includes('indirect') || n.includes('negotiat') || n.includes('proposal') ||
+        n.includes('postpone') || n.includes('extends deadline') || n.includes('extend deadline') ||
+        n.includes('pause') || n.includes('extension');
+    if (isDiplomatic) return 'diplomatic';
+    const isIran =
+        n.includes('iran') && !n.includes('trump') && !n.includes('us ') && !n.includes('u.s.') && !n.includes('america');
+    if (isIran) return 'iran';
+    const isIsrael =
+        n.includes('israel') && !n.includes('trump') && !n.includes('us ') && !n.includes('u.s.');
+    if (isIsrael) return 'israel';
+    if (n.includes('trump') || n.includes('u.s.') || n.includes('us ') || n.includes('washington') || n.includes('pentagon') || n.includes('white house')) return 'us_trump';
+    return 'other';
+}
+
 function buildMiddleEastLatestUpdates(newsItems: NewsItem[]): ClientFocusUpdate[] {
     const seen = new Set<string>();
+    const actorCount: Record<MiddleEastActor, number> = { iran: 0, us_trump: 0, israel: 0, diplomatic: 0, other: 0 };
+    const MAX_PER_ACTOR = 2;
+    const result: ClientFocusUpdate[] = [];
 
-    return newsItems
+    const filtered = newsItems
         .slice()
         .filter((item) => isMiddleEastHardNews(item))
         .sort((left, right) => {
             const leftTs = left.published_at ? new Date(left.published_at).getTime() : 0;
             const rightTs = right.published_at ? new Date(right.published_at).getTime() : 0;
             return rightTs - leftTs;
-        })
-        .filter((item) => {
-            const normalized = item.title.trim().toLowerCase();
-            if (!normalized || seen.has(normalized)) {
-                return false;
-            }
-            seen.add(normalized);
-            return true;
-        })
-        .slice(0, 2)
-        .map((item) => {
-            return {
-                time: formatClockTime(item.published_at),
-                date: formatDateOnly(item.published_at),
-                title: item.title.trim(),
-                impact: classifyMiddleEastImpact(item.title)
-            };
-        })
-        .filter((item) => Boolean(item.title)) as ClientFocusUpdate[];
+        });
+
+    for (const item of filtered) {
+        if (result.length >= 5) break;
+        const normalized = item.title.trim().toLowerCase();
+        if (!normalized || seen.has(normalized)) continue;
+        const actor = classifyMiddleEastActor(item.title);
+        if (actorCount[actor] >= MAX_PER_ACTOR) continue;
+        seen.add(normalized);
+        actorCount[actor]++;
+        result.push({
+            time: formatClockTime(item.published_at),
+            date: formatDateOnly(item.published_at),
+            title: item.title.trim(),
+            impact: classifyMiddleEastImpact(item.title)
+        });
+    }
+
+    return result.filter((item) => Boolean(item.title)) as ClientFocusUpdate[];
 }
 
 function dedupeRecentNews(newsItems: NewsItem[]): NewsItem[] {
@@ -634,16 +658,49 @@ function isMiddleEastHardNews(item: NewsItem): boolean {
 function classifyMiddleEastImpact(title: string): ClientFocusUpdate['impact'] {
     const normalized = title.toLowerCase();
 
+    // Escalation signals take priority — check first
+    const escalationSignals = [
+        'rejects', 'rejection', 'scoffs', 'refuses',
+        'vows retaliation', 'vows to intensify', 'vows to expand',
+        'warns civilians', 'warns to evacuate',
+        'no talks', 'no negotiations', 'no plans for negotiations',
+        'denies ceasefire', 'denies talks',
+        'maximalist', 'unreasonable',
+        'obliterate', 'obliterating',
+        'bunker buster',
+        'most intense',
+    ];
+    if (escalationSignals.some((signal) => normalized.includes(signal))) {
+        return '风险抬升';
+    }
+
     const deEscalationSignals = [
         'extends deadline',
         'extends pause',
         'extend deadline',
         'extend pause',
+        'extension on',
+        'another extension',
+        'grants iran',
+        'grants extension',
+        'pauses strikes',
+        'pause on',
+        'pauses threat',
         'ceasefire',
         'truce',
         'peace proposal',
+        'peace plan',
         'peace deal',
         'peace agreement',
+        'peace talks',
+        'indirect talks',
+        'backchannel',
+        'mediation',
+        'mediator',
+        'productive conversations',
+        'talks ongoing',
+        'talks underway',
+        'facilitating',
         'diplomatic',
         'de-escalat',
         'deescalat',
@@ -663,7 +720,7 @@ function classifyMiddleEastImpact(title: string): ClientFocusUpdate['impact'] {
     if (normalized.includes('talks') || normalized.includes('venue') || normalized.includes('agreed')) {
         return '政策变化';
     }
-    if (normalized.includes('official') || normalized.includes('demands') || normalized.includes('demand')) {
+    if (normalized.includes('official')) {
         return '政策变化';
     }
     return '风险抬升';
