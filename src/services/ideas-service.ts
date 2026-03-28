@@ -1,5 +1,5 @@
 import { fetchTickerMarketCap, fetchTickerReferenceSnapshot, MassiveDataFetcher } from '../data/massive-fetcher';
-import { fetchStockNews, fetchStockNewsContext, getCompanyName } from '../data/news-fetcher';
+import { fetchStockNews, fetchStockNewsContext, filterRelevantNewsItems, getCompanyName } from '../data/news-fetcher';
 import {
     calculateHistoricalVolatility,
     approveStrikes,
@@ -403,7 +403,11 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             shouldRefreshStaleConferenceEvent ||
             (shouldCheckForMissingKeyEvents && headlinesContainMaterialEvent(newsContext?.narrativeItems ?? []));
         const needsFreshNarrative = !cachedRow.why_now || shouldRefreshNarrativeForEvents;
-        const newsItems = cachedRow.news_items ?? newsContext?.displayItems ?? [];
+        const newsItems = filterRelevantNewsItems(
+            cachedRow.news_items ?? newsContext?.displayItems ?? [],
+            normalizedSymbol,
+            cachedRow.company_name ?? getCompanyName(normalizedSymbol)
+        );
         const priceContext = await getPriceContextBySymbol(normalizedSymbol);
         const shouldUseDbPriceContext =
             priceContext?.data_date !== null &&

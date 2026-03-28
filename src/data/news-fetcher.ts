@@ -327,7 +327,7 @@ function dedupeNewsItems(items: NewsItem[]): NewsItem[] {
     return deduped;
 }
 
-function filterRelevantNewsItems(items: NewsItem[], symbol: string, companyName?: string): NewsItem[] {
+export function filterRelevantNewsItems(items: NewsItem[], symbol: string, companyName?: string): NewsItem[] {
     const needles = buildCompanyMatchNeedles(symbol, companyName);
     if (needles.length === 0) {
         return items;
