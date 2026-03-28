@@ -201,7 +201,7 @@ async function fetchNewsFromFinnhub(symbol: string): Promise<NewsItem[]> {
 
 export async function fetchStockNewsContext(
     symbol: string,
-    _companyName?: string
+    companyName?: string
 ): Promise<StockNewsContext> {
     try {
         const normalizedSymbol = symbol.toUpperCase();
@@ -217,6 +217,11 @@ export async function fetchStockNewsContext(
             : 0;
 
         let combinedItems = filterStaleEarningsHeadlines(dedupeNewsItems(rawItems), hasRecentEarnings);
+        combinedItems = filterRelevantNewsItems(
+            combinedItems,
+            normalizedSymbol,
+            companyName ?? getCompanyName(normalizedSymbol)
+        );
 
         if (hasRecentEarnings) {
             combinedItems = sortNewsItemsForNarrative(combinedItems);
@@ -320,6 +325,57 @@ function dedupeNewsItems(items: NewsItem[]): NewsItem[] {
     }
 
     return deduped;
+}
+
+function filterRelevantNewsItems(items: NewsItem[], symbol: string, companyName?: string): NewsItem[] {
+    const needles = buildCompanyMatchNeedles(symbol, companyName);
+    if (needles.length === 0) {
+        return items;
+    }
+
+    return items.filter((item) => {
+        const title = normalizeNewsMatchText(item.title);
+        if (!title) {
+            return false;
+        }
+
+        return needles.some((needle) => title.includes(needle));
+    });
+}
+
+function buildCompanyMatchNeedles(symbol?: string, companyName?: string): string[] {
+    const normalizedSymbol = symbol?.trim().toLowerCase();
+    const normalizedCompany = normalizeCompanyMatchText(companyName ?? '');
+    const parts = normalizedCompany
+        .split(/\s+/)
+        .map((part) => part.trim())
+        .filter((part) => part.length >= 3);
+    const longestParts = parts.filter((part) => part.length >= 4);
+
+    return Array.from(
+        new Set(
+            [
+                normalizedSymbol,
+                normalizedCompany,
+                ...longestParts
+            ].filter((value): value is string => Boolean(value))
+        )
+    );
+}
+
+function normalizeCompanyMatchText(value: string): string {
+    return normalizeNewsMatchText(value)
+        .replace(/\b(inc|incorporated|corp|corporation|co|company|holdings|holding|group|ltd|limited|plc|sa|nv|ag|common|stock|shares)\b/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function normalizeNewsMatchText(value: string): string {
+    return value
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 function filterStaleEarningsHeadlines(items: NewsItem[], hasRecentEarnings: boolean): NewsItem[] {
