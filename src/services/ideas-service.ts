@@ -891,7 +891,8 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
         };
     }
 
-    let bestChoice: { scoring: ScoringResult; couponDistance: number; strikeData: Awaited<ReturnType<DataFetcherInterface['fetchChainData']>>[number] } | null = null;
+    let best90: { scoring: ScoringResult; couponDistance: number; strikeData: Awaited<ReturnType<DataFetcherInterface['fetchChainData']>>[number] } | null = null;
+    let best180: { scoring: ScoringResult; couponDistance: number; strikeData: Awaited<ReturnType<DataFetcherInterface['fetchChainData']>>[number] } | null = null;
     const historicalVolatility = calculateHistoricalVolatility(symbolData.price_history);
     const targetCouponPct =
         historicalVolatility > 0.6
@@ -899,6 +900,24 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
             : historicalVolatility >= 0.3
               ? ['GDX', 'USO'].includes(symbol) ? 12 : 15
               : ['GDX', 'USO'].includes(symbol) ? 8 : 10;
+
+    const shouldReplaceSameTenorChoice = (
+        candidate: { scoring: ScoringResult; couponDistance: number },
+        current: { scoring: ScoringResult; couponDistance: number } | null
+    ) => {
+        if (!current) {
+            return true;
+        }
+
+        return (
+            candidate.couponDistance < current.couponDistance ||
+            (candidate.couponDistance === current.couponDistance &&
+                candidate.scoring.composite_score > current.scoring.composite_score) ||
+            (candidate.couponDistance === current.couponDistance &&
+                candidate.scoring.composite_score === current.scoring.composite_score &&
+                (candidate.scoring.ref_coupon_pct ?? 0) > (current.scoring.ref_coupon_pct ?? 0))
+        );
+    };
 
     for (const tenorData of approvedTenors) {
         const approvedStrikes = approveStrikes(symbol, symbolData, tenorData, getStrikeSelectionConfig(symbol));
@@ -918,32 +937,35 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 scoring.ref_coupon_pct === null
                     ? Number.POSITIVE_INFINITY
                     : Math.abs(scoring.ref_coupon_pct - targetCouponPct);
-            if (
-                !bestChoice ||
-                shouldPreferTenorCandidate({
-                    candidateTenorDays: scoring.recommended_tenor_days,
-                    candidateCouponDistance: couponDistance,
-                    candidateCompositeScore: scoring.composite_score,
-                    candidateRefCouponPct: scoring.ref_coupon_pct,
-                    bestTenorDays: bestChoice.scoring.recommended_tenor_days,
-                    bestCouponDistance: bestChoice.couponDistance,
-                    bestCompositeScore: bestChoice.scoring.composite_score,
-                    bestRefCouponPct: bestChoice.scoring.ref_coupon_pct
-                }) ||
-                couponDistance < bestChoice.couponDistance ||
-                (couponDistance === bestChoice.couponDistance &&
-                    scoring.composite_score > bestChoice.scoring.composite_score) ||
-                (couponDistance === bestChoice.couponDistance &&
-                    scoring.composite_score === bestChoice.scoring.composite_score &&
-                    (scoring.ref_coupon_pct ?? 0) > (bestChoice.scoring.ref_coupon_pct ?? 0))
-            ) {
-                bestChoice = {
-                    scoring,
-                    couponDistance,
-                    strikeData
-                };
+
+            const candidate = { scoring, couponDistance, strikeData };
+            const tenorDays = scoring.recommended_tenor_days;
+
+            if (tenorDays === 90 && shouldReplaceSameTenorChoice(candidate, best90)) {
+                best90 = candidate;
+            } else if (tenorDays === 180 && shouldReplaceSameTenorChoice(candidate, best180)) {
+                best180 = candidate;
             }
         }
+    }
+
+    let bestChoice = best90;
+    if (
+        best90 !== null &&
+        best180 !== null &&
+        shouldPreferTenorCandidate({
+            candidateTenorDays: best180.scoring.recommended_tenor_days,
+            candidateCouponDistance: best180.couponDistance,
+            candidateCompositeScore: best180.scoring.composite_score,
+            candidateRefCouponPct: best180.scoring.ref_coupon_pct,
+            bestTenorDays: best90.scoring.recommended_tenor_days,
+            bestCouponDistance: best90.couponDistance,
+            bestCompositeScore: best90.scoring.composite_score,
+            bestRefCouponPct: best90.scoring.ref_coupon_pct,
+            daysToEarnings: symbolData.days_to_earnings ?? null
+        })
+    ) {
+        bestChoice = best180;
     }
 
     if (!bestChoice) {

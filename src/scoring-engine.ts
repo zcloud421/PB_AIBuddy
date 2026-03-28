@@ -869,7 +869,26 @@ export async function runDailyScreener(
         }
 
         const targetCouponPct = getTargetCouponPct(calculateHistoricalVolatility(symbolData.price_history), symbol);
-        let bestChoice: { result: ScoringResult; couponDistance: number; strikeData: StrikeData } | null = null;
+        let best90: { result: ScoringResult; couponDistance: number; strikeData: StrikeData } | null = null;
+        let best180: { result: ScoringResult; couponDistance: number; strikeData: StrikeData } | null = null;
+
+        const shouldReplaceSameTenorChoice = (
+            candidate: { result: ScoringResult; couponDistance: number },
+            current: { result: ScoringResult; couponDistance: number } | null
+        ) => {
+            if (!current) {
+                return true;
+            }
+
+            return (
+                candidate.couponDistance < current.couponDistance ||
+                (candidate.couponDistance === current.couponDistance &&
+                    candidate.result.composite_score > current.result.composite_score) ||
+                (candidate.couponDistance === current.couponDistance &&
+                    candidate.result.composite_score === current.result.composite_score &&
+                    (candidate.result.ref_coupon_pct ?? 0) > (current.result.ref_coupon_pct ?? 0))
+            );
+        };
 
         for (const tenorData of approvedTenors) {
             const approvedStrikes = approveStrikes(symbol, symbolData, tenorData, getStrikeSelectionConfig(symbol));
@@ -908,21 +927,25 @@ export async function runDailyScreener(
                     flags: emptyStrikeFlags
                 };
 
-                if (bestChoice === null || emptyStrikeResult.composite_score > bestChoice.result.composite_score) {
-                    bestChoice = {
-                        result: emptyStrikeResult,
-                        couponDistance: Number.POSITIVE_INFINITY,
-                        strikeData: {
-                            strike: 0,
-                            iv: 0,
-                            delta: 0,
-                            volume: 0,
-                            open_interest: 0,
-                            mid_price: null,
-                            mid_price_source: 'none',
-                            expiry_date: tenorData.expiry_date
-                        }
-                    };
+                const emptyChoice = {
+                    result: emptyStrikeResult,
+                    couponDistance: Number.POSITIVE_INFINITY,
+                    strikeData: {
+                        strike: 0,
+                        iv: 0,
+                        delta: 0,
+                        volume: 0,
+                        open_interest: 0,
+                        mid_price: null,
+                        mid_price_source: 'none' as const,
+                        expiry_date: tenorData.expiry_date
+                    }
+                };
+
+                if (tenorData.tenor_days === SHORT_TENOR_DAYS && shouldReplaceSameTenorChoice(emptyChoice, best90)) {
+                    best90 = emptyChoice;
+                } else if (tenorData.tenor_days === LONG_TENOR_DAYS && shouldReplaceSameTenorChoice(emptyChoice, best180)) {
+                    best180 = emptyChoice;
                 }
                 continue;
             }
@@ -944,37 +967,38 @@ export async function runDailyScreener(
                     candidateResult.ref_coupon_pct === null
                         ? Number.POSITIVE_INFINITY
                         : Math.abs(candidateResult.ref_coupon_pct - targetCouponPct);
-                const isSameTenor =
-                    bestChoice !== null &&
-                    candidateResult.recommended_tenor_days === bestChoice.result.recommended_tenor_days;
-                const isCrossTenor = bestChoice !== null && !isSameTenor;
-                if (
-                    bestChoice === null ||
-                    (isCrossTenor && shouldPreferTenorCandidate({
-                        candidateTenorDays: candidateResult.recommended_tenor_days,
-                        candidateCouponDistance: couponDistance,
-                        candidateCompositeScore: candidateResult.composite_score,
-                        candidateRefCouponPct: candidateResult.ref_coupon_pct,
-                        bestTenorDays: bestChoice.result.recommended_tenor_days,
-                        bestCouponDistance: bestChoice.couponDistance,
-                        bestCompositeScore: bestChoice.result.composite_score,
-                        bestRefCouponPct: bestChoice.result.ref_coupon_pct,
-                        daysToEarnings: symbolData.days_to_earnings ?? null
-                    })) ||
-                    (isSameTenor && couponDistance < bestChoice.couponDistance) ||
-                    (isSameTenor && couponDistance === bestChoice.couponDistance &&
-                        candidateResult.composite_score > bestChoice.result.composite_score) ||
-                    (isSameTenor && couponDistance === bestChoice.couponDistance &&
-                        candidateResult.composite_score === bestChoice.result.composite_score &&
-                        (candidateResult.ref_coupon_pct ?? 0) > (bestChoice.result.ref_coupon_pct ?? 0))
-                ) {
-                    bestChoice = {
-                        result: candidateResult,
-                        couponDistance,
-                        strikeData
-                    };
+                const candidateChoice = {
+                    result: candidateResult,
+                    couponDistance,
+                    strikeData
+                };
+                const tenorDays = candidateResult.recommended_tenor_days;
+
+                if (tenorDays === SHORT_TENOR_DAYS && shouldReplaceSameTenorChoice(candidateChoice, best90)) {
+                    best90 = candidateChoice;
+                } else if (tenorDays === LONG_TENOR_DAYS && shouldReplaceSameTenorChoice(candidateChoice, best180)) {
+                    best180 = candidateChoice;
                 }
             }
+        }
+
+        let bestChoice = best90;
+        if (
+            best90 !== null &&
+            best180 !== null &&
+            shouldPreferTenorCandidate({
+                candidateTenorDays: best180.result.recommended_tenor_days,
+                candidateCouponDistance: best180.couponDistance,
+                candidateCompositeScore: best180.result.composite_score,
+                candidateRefCouponPct: best180.result.ref_coupon_pct,
+                bestTenorDays: best90.result.recommended_tenor_days,
+                bestCouponDistance: best90.couponDistance,
+                bestCompositeScore: best90.result.composite_score,
+                bestRefCouponPct: best90.result.ref_coupon_pct,
+                daysToEarnings: symbolData.days_to_earnings ?? null
+            })
+        ) {
+            bestChoice = best180;
         }
 
         if (bestChoice !== null) {
