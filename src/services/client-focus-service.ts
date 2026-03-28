@@ -246,6 +246,45 @@ function formatDateOnly(publishedAt: string | undefined): string | undefined {
     return `${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 }
 
+function sanitizeFocusSummary(summary: string | undefined, topic: FocusTopicConfig): string | null {
+    if (!summary) {
+        return null;
+    }
+
+    const trimmed = summary.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    const blockedPatterns = [
+        /RM\s*\/\s*IC/i,
+        /RM\b/i,
+        /\bIC\b/i,
+        /客户经理/,
+        /口径无需调整/,
+        /无需调整/,
+        /本周无符合筛选标准的关键事件/
+    ];
+
+    if (blockedPatterns.some((pattern) => pattern.test(trimmed))) {
+        return null;
+    }
+
+    if (topic.slug === 'gold-repricing' && /未出现明确变化/.test(trimmed)) {
+        return null;
+    }
+
+    return trimmed;
+}
+
+function buildFocusSummaryFallback(topic: FocusTopicConfig): string {
+    if (topic.slug === 'gold-repricing') {
+        return '本周黄金表现弱于地缘避险直觉，客户沟通宜聚焦美元、实际利率与降息预期是否重新主导定价。';
+    }
+
+    return topic.fallbackSummary;
+}
+
 function sanitizeLatestUpdates(
     topic: FocusTopicConfig,
     value: unknown,
@@ -1323,7 +1362,7 @@ async function generateFocusContent(topic: FocusTopicConfig, newsItems: NewsItem
         : '暂无最新新闻。';
 
     const systemPrompt =
-        '你是一位香港私人银行前台助手，帮助RM/IC整理客户高频市场话题。请输出简洁、结构化、专业的中文 JSON。不要输出 markdown。不要写投资建议，不要替代机构 house view。';
+        '你是一位香港私人银行前台助手，负责整理客户高频市场话题。请输出简洁、结构化、专业的中文 JSON。不要输出 markdown。不要写投资建议，不要替代机构 house view。';
     const userPrompt = `
 主题：${topic.title}
 
@@ -1400,18 +1439,18 @@ async function generateWeeklyProgress(
         .join('\n');
 
     const systemPrompt =
-        '你是香港私人银行 RM/IC 团队的市场简报助手。请输出严格 JSON，不要输出 markdown，不要输出任何解释。';
+        '你是香港私人银行前台助手，负责整理客户焦点的每周市场摘要。请输出严格 JSON，不要输出 markdown，不要输出任何解释。';
     const userPrompt = `
 主题：${topic.title}
 
-我会给你一组通过 Google News RSS 抓取的原始新闻条目。你的任务是从这些新闻中提炼出对 RM/IC 最有价值的内容，输出结构化 JSON。
+我会给你一组通过 Google News RSS 抓取的原始新闻条目。你的任务是从这些新闻中提炼出对客户沟通最有价值的内容，输出结构化 JSON。
 
 输入新闻：
 ${newsSection}
 
 筛选标准：
 1. 有具体机构名称、金额、比例等可量化信息
-2. 与 RM/IC 展业直接相关（客户持仓、流动性、赎回、估值、信用事件）
+2. 与客户沟通直接相关（客户持仓、流动性、赎回、估值、信用事件）
 3. 发布时间在过去 7 天内
 4. 排除重复报道，同一事件只保留信息最完整的一条
 5. 排除以下来源：聚合媒体、内容农场、不知名博客。优先保留 Bloomberg、Reuters、FT、CNBC、WSJ、官方机构公告；行业权威源仅在信息显著优于主流媒体时保留
@@ -1429,7 +1468,7 @@ ${newsSection}
       "source": "来源名称"
     }
   ],
-  "editor_note": "50字以内。基于本周所有新闻，给 RM/IC 一句整体判断：这周整体风险方向是升还是降，口径需不需要调整。"
+  "editor_note": "50字以内。基于本周所有新闻，用一句话概括这周整体风险方向，并提示客户沟通时最该留意的变量。"
 }
 
 写作要求：
@@ -1444,9 +1483,11 @@ ${newsSection}
   4. 持续发酵：以上均不满足时才使用
 - editor_note 必须包含两部分：
   1. 本周风险方向判断（一句话，要有方向性）
-  2. RM/IC 本周与客户沟通时口径是否需要调整（是/否 + 原因）
+  2. 客户沟通时最该留意的变量（如利率、美元、油价、流动性、估值）
+- 禁止出现 RM、IC、客户经理、口径无需调整 等内部表达
 - 禁止输出“需持续关注”“市场仍在消化”等无行动价值表达
 - editor_note 的方向判断必须与 items 的整体方向一致
+- 若主题是黄金逻辑重估，editor_note 优先点明黄金本周价格方向或表现特征，并明确客户沟通时应聚焦的核心变量
 - 严禁输出 JSON 以外的任何内容
 `.trim();
 
@@ -1545,7 +1586,7 @@ async function generateTransmissionChain(
         : '暂无最新新闻。';
 
     const systemPrompt =
-        '你是一位香港私人银行前台助手，帮助RM/IC更新客户焦点的传导链条。请输出简洁、结构化、专业的中文 JSON。不要输出 markdown。不要写投资建议，不要替代机构 house view。';
+        '你是一位香港私人银行前台助手，负责更新客户焦点的市场传导链条。请输出简洁、结构化、专业的中文 JSON。不要输出 markdown。不要写投资建议，不要替代机构 house view。';
     const userPrompt = `
 请基于本周最新市场信息，更新以下主题的传导链条。
 
@@ -1675,7 +1716,10 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
                 ? '持续发酵'
                 : sanitizeFocusStatus(modelOutput?.status?.trim(), topic.fallbackStatus ?? '持续发酵'),
         updated_at: formatRelativeTime(newsItems[0]?.published_at),
-        summary: weeklyProgress?.editor_note?.trim() || modelOutput?.summary?.trim() || topic.fallbackSummary,
+        summary:
+            sanitizeFocusSummary(weeklyProgress?.editor_note?.trim(), topic) ||
+            sanitizeFocusSummary(modelOutput?.summary?.trim(), topic) ||
+            buildFocusSummaryFallback(topic),
         accent: topic.accent,
         latest_updates:
             topic.slug === 'middle-east-tensions'
