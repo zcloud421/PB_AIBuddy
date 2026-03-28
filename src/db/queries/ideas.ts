@@ -840,7 +840,9 @@ export async function ensureRiskFlagEnumValues(): Promise<void> {
         'LOW_LIQUIDITY',
         'NO_APPROVED_TENOR',
         'NO_APPROVED_STRIKE',
-        'HOUSE_OVERRIDE'
+        'HOUSE_OVERRIDE',
+        'MATERIAL_NEWS_SHOCK',
+        'MATERIAL_NEWS_OVERHANG'
     ];
 
     for (const value of values) {
