@@ -46,8 +46,8 @@ export class MassiveDataFetcher implements DataFetcherInterface {
     }
 
     async fetchChainData(symbol: string, currentPrice: number): Promise<ChainData> {
-        const minExpiry = isoDateOffsetDays(85);
-        const maxExpiry = isoDateOffsetDays(180);
+        const minExpiry = isoDateOffsetDays(75);
+        const maxExpiry = isoDateOffsetDays(195);
         const maxStrike = Math.floor(currentPrice * 0.90);
         const eligibleContracts = await this.fetchEligibleContracts(symbol, minExpiry, maxExpiry, maxStrike);
         const rows = await this.fetchOptionSnapshotFirstPage(symbol, minExpiry, maxStrike);
@@ -62,7 +62,7 @@ export class MassiveDataFetcher implements DataFetcherInterface {
             })
             .filter((row) => {
                 const dte = daysUntilExpiry(row.expiry_date);
-                return dte >= 85 && dte <= 180;
+                return dte >= 75 && dte <= 195;
             })
             .filter((row) => row.open_interest >= 10)
             .filter((row) => row.delta >= -0.40 && row.delta <= -0.15)

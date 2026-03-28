@@ -148,6 +148,7 @@ async function main(): Promise<void> {
                     compositeScore: result.composite_score,
                     recommendedStrike: result.recommended_strike,
                     recommendedTenorDays: result.recommended_tenor_days,
+                    recommendedExpiryDate: result.recommended_expiry_date,
                     refCouponPct: result.ref_coupon_pct,
                     moneynessPct: result.moneyness_pct,
                     selectedImpliedVolatility: result.selected_implied_volatility,
@@ -174,6 +175,7 @@ async function main(): Promise<void> {
                         grade: result.overall_grade,
                         recommendedStrike: result.recommended_strike,
                         recommendedTenorDays: result.recommended_tenor_days,
+                        expiryDate: result.recommended_expiry_date,
                         moneynessPct: result.moneyness_pct,
                         entryPrice: result.current_price,
                         recommendationDate: new Date().toISOString().slice(0, 10)
@@ -271,4 +273,3 @@ function delay(ms: number): Promise<void> {
         setTimeout(resolve, ms);
     });
 }
-

@@ -71,6 +71,7 @@ export type ChainData = StrikeData[];
 
 export interface TenorWindow {
     tenor_days: number;
+    preferred_tenor_days: number;
     expiry_date: string;
     strikes: StrikeData[];
 }
@@ -86,8 +87,9 @@ export interface ScoringResult {
     premium_score: number | null;
     selected_implied_volatility: number | null;
     recommended_strike: number | null;
-    // standard PB FCN tenors: 90d or 180d
+    // actual DTE from the selected exchange-listed option expiry
     recommended_tenor_days: number | null;
+    recommended_expiry_date: string | null;
     estimated_coupon_range: string | null;
     ref_coupon_pct: number | null;
     moneyness_pct: number | null;
@@ -107,15 +109,12 @@ export interface DataFetcherInterface {
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const PREFERRED_TENORS = [90, 180];
+const PREFERRED_TENOR_TOLERANCE_DAYS = 15;
 const MAX_APPROVED_TENORS = 2;
 const MAX_APPROVED_STRIKES = 3;
 const NORMAL_TARGET_ABS_DELTA = 0.20;
 const SHORT_TENOR_DAYS = 90;
 const LONG_TENOR_DAYS = 180;
-const LONG_TENOR_MIN_COUPON_DISTANCE_IMPROVEMENT = 3.5;
-const LONG_TENOR_MIN_COMPOSITE_SCORE_IMPROVEMENT = 0.10;
-const SHORT_TENOR_MAX_COUPON_DISTANCE_PENALTY = 1.5;
-const SHORT_TENOR_MAX_COMPOSITE_SCORE_PENALTY = 0.05;
 interface StrikeSelectionConfig {
     minAbsDelta: number;
     maxAbsDelta: number;
@@ -215,7 +214,7 @@ function nearestPreferredTenor(expiryDate: string): number | null {
         }
     }
 
-    if (bestDistance > 15 || bestTenor === null) {
+    if (bestDistance > PREFERRED_TENOR_TOLERANCE_DAYS || bestTenor === null) {
         return null;
     }
 
@@ -314,13 +313,6 @@ export function shouldPreferTenorCandidate(input: {
         return couponLevelImprovement >= 10;
     }
 
-    if (candidateTenorDays === SHORT_TENOR_DAYS && bestTenorDays === LONG_TENOR_DAYS) {
-        return (
-            candidateCouponDistance <= bestCouponDistance + SHORT_TENOR_MAX_COUPON_DISTANCE_PENALTY &&
-            candidateCompositeScore >= bestCompositeScore - SHORT_TENOR_MAX_COMPOSITE_SCORE_PENALTY
-        );
-    }
-
     return false;
 }
 
@@ -395,7 +387,8 @@ export function approveTenors(symbolData: SymbolData, chainData: ChainData): Ten
         }
 
         windows.push({
-            tenor_days: preferredTenor,
+            tenor_days: tenorDays,
+            preferred_tenor_days: preferredTenor,
             expiry_date: expiryDate,
             strikes
         });
@@ -672,6 +665,7 @@ export function scoreAndGrade(candidate: {
         selected_implied_volatility: Number.isFinite(strikeData.iv) ? Number(strikeData.iv.toFixed(4)) : null,
         recommended_strike: strikeData.strike,
         recommended_tenor_days: tenorData.tenor_days,
+        recommended_expiry_date: tenorData.expiry_date,
         estimated_coupon_range: estimatedCouponRange,
         ref_coupon_pct: refCouponPct !== null ? Number(refCouponPct.toFixed(1)) : null,
         moneyness_pct: Number(moneynessPct.toFixed(2)),
@@ -799,6 +793,7 @@ export async function runDailyScreener(
                 selected_implied_volatility: null,
                 recommended_strike: null,
                 recommended_tenor_days: null,
+                recommended_expiry_date: null,
                 estimated_coupon_range: null,
                 ref_coupon_pct: null,
                 moneyness_pct: null,
@@ -854,6 +849,7 @@ export async function runDailyScreener(
                 selected_implied_volatility: null,
                 recommended_strike: null,
                 recommended_tenor_days: null,
+                recommended_expiry_date: null,
                 estimated_coupon_range: null,
                 ref_coupon_pct: null,
                 moneyness_pct: null,
@@ -869,8 +865,8 @@ export async function runDailyScreener(
         }
 
         const targetCouponPct = getTargetCouponPct(calculateHistoricalVolatility(symbolData.price_history), symbol);
-        let best90: { result: ScoringResult; couponDistance: number; strikeData: StrikeData } | null = null;
-        let best180: { result: ScoringResult; couponDistance: number; strikeData: StrikeData } | null = null;
+        let best90: { result: ScoringResult; couponDistance: number; strikeData: StrikeData; tenorBucketDays: number } | null = null;
+        let best180: { result: ScoringResult; couponDistance: number; strikeData: StrikeData; tenorBucketDays: number } | null = null;
 
         const shouldReplaceSameTenorChoice = (
             candidate: { result: ScoringResult; couponDistance: number },
@@ -915,6 +911,7 @@ export async function runDailyScreener(
                     selected_implied_volatility: null,
                     recommended_strike: null,
                     recommended_tenor_days: tenorData.tenor_days,
+                    recommended_expiry_date: tenorData.expiry_date,
                     estimated_coupon_range: null,
                     ref_coupon_pct: null,
                     moneyness_pct: null,
@@ -930,6 +927,7 @@ export async function runDailyScreener(
                 const emptyChoice = {
                     result: emptyStrikeResult,
                     couponDistance: Number.POSITIVE_INFINITY,
+                    tenorBucketDays: tenorData.preferred_tenor_days,
                     strikeData: {
                         strike: 0,
                         iv: 0,
@@ -942,9 +940,9 @@ export async function runDailyScreener(
                     }
                 };
 
-                if (tenorData.tenor_days === SHORT_TENOR_DAYS && shouldReplaceSameTenorChoice(emptyChoice, best90)) {
+                if (tenorData.preferred_tenor_days === SHORT_TENOR_DAYS && shouldReplaceSameTenorChoice(emptyChoice, best90)) {
                     best90 = emptyChoice;
-                } else if (tenorData.tenor_days === LONG_TENOR_DAYS && shouldReplaceSameTenorChoice(emptyChoice, best180)) {
+                } else if (tenorData.preferred_tenor_days === LONG_TENOR_DAYS && shouldReplaceSameTenorChoice(emptyChoice, best180)) {
                     best180 = emptyChoice;
                 }
                 continue;
@@ -970,9 +968,10 @@ export async function runDailyScreener(
                 const candidateChoice = {
                     result: candidateResult,
                     couponDistance,
+                    tenorBucketDays: tenorData.preferred_tenor_days,
                     strikeData
                 };
-                const tenorDays = candidateResult.recommended_tenor_days;
+                const tenorDays = tenorData.preferred_tenor_days;
 
                 if (tenorDays === SHORT_TENOR_DAYS && shouldReplaceSameTenorChoice(candidateChoice, best90)) {
                     best90 = candidateChoice;
@@ -987,11 +986,11 @@ export async function runDailyScreener(
             best90 !== null &&
             best180 !== null &&
             shouldPreferTenorCandidate({
-                candidateTenorDays: best180.result.recommended_tenor_days,
+                candidateTenorDays: best180.tenorBucketDays,
                 candidateCouponDistance: best180.couponDistance,
                 candidateCompositeScore: best180.result.composite_score,
                 candidateRefCouponPct: best180.result.ref_coupon_pct,
-                bestTenorDays: best90.result.recommended_tenor_days,
+                bestTenorDays: best90.tenorBucketDays,
                 bestCouponDistance: best90.couponDistance,
                 bestCompositeScore: best90.result.composite_score,
                 bestRefCouponPct: best90.result.ref_coupon_pct,
@@ -1023,6 +1022,7 @@ export async function runDailyScreener(
                 selected_implied_volatility: null,
                 recommended_strike: null,
                 recommended_tenor_days: null,
+                recommended_expiry_date: null,
                 estimated_coupon_range: null,
                 ref_coupon_pct: null,
                 moneyness_pct: null,

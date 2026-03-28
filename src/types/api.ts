@@ -47,8 +47,8 @@ export interface IdeaCard {
     grade: Extract<Grade, 'GO' | 'CAUTION'>;
     composite_score: number;
     recommended_strike: number;
-    // standard PB FCN tenors: 90d or 180d
     recommended_tenor_days: number;
+    recommended_expiry_date: string | null;
     estimated_coupon_range: string | null;
     coupon_note: string;
     moneyness_pct: number;
@@ -78,6 +78,7 @@ export interface DailyBestCard {
     grade: 'GO';
     recommended_strike: number;
     recommended_tenor_days: number;
+    recommended_expiry_date: string | null;
     estimated_coupon_range: string;
     moneyness_pct: number;
     reasoning_text: string;
@@ -184,8 +185,8 @@ export interface SymbolIdeaResponse {
     verdict_sub: string;
     data_as_of_date: string | null;
     recommended_strike: number | null;
-    // standard PB FCN tenors: 90d or 180d
     recommended_tenor_days: number | null;
+    recommended_expiry_date: string | null;
     estimated_coupon_range: string | null;
     coupon_note: string;
     moneyness_pct: number | null;

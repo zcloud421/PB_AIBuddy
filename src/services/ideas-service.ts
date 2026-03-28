@@ -505,6 +505,7 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             data_as_of_date: effectiveDataAsOfDate,
             recommended_strike: toNullableNumber(cachedRow.recommended_strike),
             recommended_tenor_days: cachedRow.recommended_tenor_days,
+            recommended_expiry_date: cachedRow.expiry_date ?? null,
             estimated_coupon_range: formatEstimatedCouponRange(cachedRow.ref_coupon_pct),
             coupon_note: '实际票息请向交易台询价',
             moneyness_pct: toNullableNumber(cachedRow.moneyness_pct),
@@ -691,6 +692,7 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
                     compositeScore: scoring.composite_score,
                     recommendedStrike: scoring.recommended_strike,
                     recommendedTenorDays: scoring.recommended_tenor_days,
+                    recommendedExpiryDate: scoring.recommended_expiry_date,
                     refCouponPct: scoring.ref_coupon_pct,
                     moneynessPct: scoring.moneyness_pct,
                     selectedImpliedVolatility: scoring.selected_implied_volatility,
@@ -761,6 +763,7 @@ function buildUnavailableIdeaResponse(symbol: string): SymbolIdeaResponse {
         data_as_of_date: null,
         recommended_strike: null,
         recommended_tenor_days: null,
+        recommended_expiry_date: null,
         estimated_coupon_range: null,
         coupon_note: '实际票息请向交易台询价',
         moneyness_pct: null,
@@ -821,6 +824,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 selected_implied_volatility: null,
                 recommended_strike: null,
                 recommended_tenor_days: null,
+                recommended_expiry_date: null,
                 estimated_coupon_range: null,
                 ref_coupon_pct: null,
                 moneyness_pct: null,
@@ -877,6 +881,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 selected_implied_volatility: null,
                 recommended_strike: null,
                 recommended_tenor_days: null,
+                recommended_expiry_date: null,
                 estimated_coupon_range: null,
                 ref_coupon_pct: null,
                 moneyness_pct: null,
@@ -891,8 +896,18 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
         };
     }
 
-    let best90: { scoring: ScoringResult; couponDistance: number; strikeData: Awaited<ReturnType<DataFetcherInterface['fetchChainData']>>[number] } | null = null;
-    let best180: { scoring: ScoringResult; couponDistance: number; strikeData: Awaited<ReturnType<DataFetcherInterface['fetchChainData']>>[number] } | null = null;
+    let best90: {
+        scoring: ScoringResult;
+        couponDistance: number;
+        strikeData: Awaited<ReturnType<DataFetcherInterface['fetchChainData']>>[number];
+        tenorBucketDays: number;
+    } | null = null;
+    let best180: {
+        scoring: ScoringResult;
+        couponDistance: number;
+        strikeData: Awaited<ReturnType<DataFetcherInterface['fetchChainData']>>[number];
+        tenorBucketDays: number;
+    } | null = null;
     const historicalVolatility = calculateHistoricalVolatility(symbolData.price_history);
     const targetCouponPct =
         historicalVolatility > 0.6
@@ -938,8 +953,13 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                     ? Number.POSITIVE_INFINITY
                     : Math.abs(scoring.ref_coupon_pct - targetCouponPct);
 
-            const candidate = { scoring, couponDistance, strikeData };
-            const tenorDays = scoring.recommended_tenor_days;
+            const candidate = {
+                scoring,
+                couponDistance,
+                strikeData,
+                tenorBucketDays: tenorData.preferred_tenor_days
+            };
+            const tenorDays = tenorData.preferred_tenor_days;
 
             if (tenorDays === 90 && shouldReplaceSameTenorChoice(candidate, best90)) {
                 best90 = candidate;
@@ -954,11 +974,11 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
         best90 !== null &&
         best180 !== null &&
         shouldPreferTenorCandidate({
-            candidateTenorDays: best180.scoring.recommended_tenor_days,
+            candidateTenorDays: best180.tenorBucketDays,
             candidateCouponDistance: best180.couponDistance,
             candidateCompositeScore: best180.scoring.composite_score,
             candidateRefCouponPct: best180.scoring.ref_coupon_pct,
-            bestTenorDays: best90.scoring.recommended_tenor_days,
+            bestTenorDays: best90.tenorBucketDays,
             bestCouponDistance: best90.couponDistance,
             bestCompositeScore: best90.scoring.composite_score,
             bestRefCouponPct: best90.scoring.ref_coupon_pct,
@@ -996,6 +1016,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 selected_implied_volatility: null,
                 recommended_strike: null,
                 recommended_tenor_days: null,
+                recommended_expiry_date: null,
                 estimated_coupon_range: null,
                 ref_coupon_pct: null,
                 moneyness_pct: null,
@@ -1087,6 +1108,7 @@ function mapScoringResultToSymbolIdea(
         data_as_of_date: symbolData.price_history[symbolData.price_history.length - 1]?.date ?? todayIsoDate(),
         recommended_strike: scoring.recommended_strike,
         recommended_tenor_days: scoring.recommended_tenor_days,
+        recommended_expiry_date: scoring.recommended_expiry_date,
         estimated_coupon_range: scoring.estimated_coupon_range,
         coupon_note: '实际票息请向交易台询价',
         moneyness_pct: scoring.moneyness_pct,
@@ -1579,6 +1601,7 @@ async function mapDailyBestCard(
         news_items?: NewsItem[] | null;
         recommended_strike: number | null;
         recommended_tenor_days: number | null;
+        expiry_date?: string | null;
         ref_coupon_pct: number | null;
         moneyness_pct: number | null;
         selected_implied_volatility?: number | null;
@@ -1643,6 +1666,7 @@ async function mapDailyBestCard(
         grade: 'GO',
         recommended_strike: recommendedStrike,
         recommended_tenor_days: recommendedTenorDays,
+        recommended_expiry_date: idea.expiry_date ?? null,
         estimated_coupon_range: formatEstimatedCouponRange(idea.ref_coupon_pct) ?? '—',
         moneyness_pct: moneynessPct,
         reasoning_text: idea.reasoning_text,

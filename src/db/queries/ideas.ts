@@ -63,8 +63,8 @@ export interface TodayIdeaRow {
     overall_grade: 'GO' | 'CAUTION' | 'AVOID';
     composite_score: number;
     recommended_strike: number | null;
-    // standard PB FCN tenors: 90d or 180d
     recommended_tenor_days: number | null;
+    expiry_date: string | null;
     ref_coupon_pct: number | null;
     moneyness_pct: number | null;
     why_now: string | null;
@@ -99,8 +99,8 @@ export interface CachedIdeaRow {
     overall_grade: 'GO' | 'CAUTION' | 'AVOID';
     composite_score: number | null;
     recommended_strike: number | null;
-    // standard PB FCN tenors: 90d or 180d
     recommended_tenor_days: number | null;
+    expiry_date: string | null;
     ref_coupon_pct: number | null;
     moneyness_pct: number | null;
     why_now: string | null;
@@ -129,8 +129,8 @@ export interface SaveIdeaCandidateInput {
     eventRiskScore: number;
     compositeScore: number;
     recommendedStrike: number | null;
-    // standard PB FCN tenors: 90d or 180d
     recommendedTenorDays: number | null;
+    recommendedExpiryDate?: string | null;
     refCouponPct: number | null;
     moneynessPct: number | null;
     selectedImpliedVolatility?: number | null;
@@ -152,6 +152,7 @@ export interface UpsertRecommendationTrackerInput {
     grade: 'GO' | 'CAUTION';
     recommendedStrike: number | null;
     recommendedTenorDays: number | null;
+    expiryDate?: string | null;
     moneynessPct: number | null;
     entryPrice: number | null;
     recommendationDate: string;
@@ -253,6 +254,7 @@ export async function getIdeasByRunId(runId: string): Promise<TodayIdeaRow[]> {
             ic.composite_score,
             ic.recommended_strike,
             ic.recommended_tenor_days,
+            ic.expiry_date::text AS expiry_date,
             ic.ref_coupon_pct,
             ic.moneyness_pct,
             ic.why_now,
@@ -351,6 +353,7 @@ export async function getIdeaBySymbolAndDate(symbol: string, date: string): Prom
             ic.composite_score,
             ic.recommended_strike,
             ic.recommended_tenor_days,
+            ic.expiry_date::text AS expiry_date,
             ic.ref_coupon_pct,
             ic.moneyness_pct,
             ic.why_now,
@@ -411,6 +414,7 @@ export async function getIdeaBySymbolAndRunId(symbol: string, runId: string): Pr
             ic.composite_score,
             ic.recommended_strike,
             ic.recommended_tenor_days,
+            ic.expiry_date::text AS expiry_date,
             ic.ref_coupon_pct,
             ic.moneyness_pct,
             ic.why_now,
@@ -629,6 +633,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             composite_score,
             recommended_strike,
             recommended_tenor_days,
+            expiry_date,
             ref_coupon_pct,
             moneyness_pct,
             selected_implied_volatility,
@@ -644,7 +649,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             news_items,
             reasoning_text
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22::jsonb, $23::jsonb, $24
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::date, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23::jsonb, $24::jsonb, $25
         )
         ON CONFLICT (run_id, symbol) DO UPDATE
         SET overall_grade = EXCLUDED.overall_grade,
@@ -655,6 +660,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             composite_score = EXCLUDED.composite_score,
             recommended_strike = EXCLUDED.recommended_strike,
             recommended_tenor_days = EXCLUDED.recommended_tenor_days,
+            expiry_date = EXCLUDED.expiry_date,
             ref_coupon_pct = EXCLUDED.ref_coupon_pct,
             moneyness_pct = EXCLUDED.moneyness_pct,
             selected_implied_volatility = EXCLUDED.selected_implied_volatility,
@@ -681,6 +687,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             result.compositeScore,
             result.recommendedStrike,
             result.recommendedTenorDays,
+            result.recommendedExpiryDate ?? null,
             result.refCouponPct,
             result.moneynessPct,
             result.selectedImpliedVolatility ?? null,
@@ -709,6 +716,7 @@ export async function ensureIdeaCandidatePriceColumns(): Promise<void> {
         ADD COLUMN IF NOT EXISTS ma50 NUMERIC(18, 6),
         ADD COLUMN IF NOT EXISTS ma200 NUMERIC(18, 6),
         ADD COLUMN IF NOT EXISTS pct_from_52w_high NUMERIC(10, 4),
+        ADD COLUMN IF NOT EXISTS expiry_date DATE,
         ADD COLUMN IF NOT EXISTS key_events JSONB DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS news_items JSONB DEFAULT '[]'::jsonb
     `);
@@ -1013,6 +1021,7 @@ export async function upsertRecommendationTracker(input: UpsertRecommendationTra
             $6::numeric,
             $7::date,
             CASE
+                WHEN $8::date IS NOT NULL THEN $8::date
                 WHEN $4 IS NOT NULL THEN ($7::date + ($4::int * INTERVAL '1 day'))::date
                 ELSE NULL
             END
@@ -1032,7 +1041,8 @@ export async function upsertRecommendationTracker(input: UpsertRecommendationTra
             input.recommendedTenorDays,
             input.moneynessPct,
             input.entryPrice,
-            input.recommendationDate
+            input.recommendationDate,
+            input.expiryDate ?? null
         ]
     );
 }
@@ -1237,6 +1247,7 @@ export function mapTodayIdeasResponse(
                 composite_score: Number(idea.composite_score),
                 recommended_strike: parseNumeric(idea.recommended_strike) ?? 0,
                 recommended_tenor_days: parseNumeric(idea.recommended_tenor_days) ?? 0,
+                recommended_expiry_date: idea.expiry_date ?? null,
                 estimated_coupon_range: formatEstimatedCouponRange(idea.ref_coupon_pct),
                 coupon_note: '实际票息请向交易台询价',
                 moneyness_pct: parseNumeric(idea.moneyness_pct) ?? 0,
@@ -1271,6 +1282,7 @@ export function mapTodayIdeasResponse(
                 composite_score: Number(idea.composite_score),
                 recommended_strike: parseNumeric(idea.recommended_strike) ?? 0,
                 recommended_tenor_days: parseNumeric(idea.recommended_tenor_days) ?? 0,
+                recommended_expiry_date: idea.expiry_date ?? null,
                 estimated_coupon_range: formatEstimatedCouponRange(idea.ref_coupon_pct),
                 coupon_note: '实际票息请向交易台询价',
                 moneyness_pct: parseNumeric(idea.moneyness_pct) ?? 0,
