@@ -741,7 +741,7 @@ export async function ensureEarningsCalendarColumns(): Promise<void> {
 }
 
 export async function upsertEarningsCalendar(
-    rows: Array<{ symbol: string; report_date: string; days_until: number }>
+    rows: Array<{ symbol: string; report_date: string; days_until: number; source?: string }>
 ): Promise<void> {
     if (rows.length === 0) {
         return;
@@ -753,7 +753,7 @@ export async function upsertEarningsCalendar(
     for (const [index, row] of rows.entries()) {
         const offset = index * 5;
         valuesSql.push(`($${offset + 1}, $${offset + 2}::date, $${offset + 3}, $${offset + 4}, $${offset + 5})`);
-        params.push(row.symbol, row.report_date, row.days_until, false, 'finnhub');
+        params.push(row.symbol, row.report_date, row.days_until, false, row.source ?? 'finnhub');
     }
 
     await pool.query(
