@@ -18,6 +18,7 @@ interface FocusTopicConfig {
     title: string;
     accent: string;
     query: string;
+    newsQueries?: string[];
     fallbackStatus?: string;
     clientQuestions: ClientFocusQuestion[];
     previewQuestions?: string[];
@@ -80,7 +81,11 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
         slug: 'middle-east-tensions',
         title: '中东冲突',
         accent: '#C9A45C',
-        query: 'Iran Israel Hormuz talks strike shipping tanker ceasefire official latest war',
+        query: 'Iran Israel Pentagon ground operations retaliation infrastructure JD Vance Trump White House strike military latest war',
+        newsQueries: [
+            'Iran Israel Pentagon ground operations retaliation infrastructure JD Vance Trump White House strike military latest war',
+            'Hormuz tanker shipping crude oil exports sanctions ceasefire diplomacy Iran Israel Middle East latest'
+        ],
         fallbackStatus: '持续发酵',
         clientQuestions: [
             {
@@ -193,6 +198,34 @@ const focusChainCache = new Map<string, { expiresAt: number; value: ClientFocusT
 
 function getFocusTopic(slug: string): FocusTopicConfig | null {
     return FOCUS_TOPICS.find((topic) => topic.slug === slug) ?? null;
+}
+
+async function fetchFocusNewsItems(topic: FocusTopicConfig): Promise<NewsItem[]> {
+    const queries = topic.newsQueries?.length ? topic.newsQueries : [topic.query];
+    const results = await Promise.all(
+        queries.map((query) => fetchNewsItemsByQuery(query, { excludeEtfAndFunds: false }))
+    );
+
+    const seen = new Set<string>();
+    const merged = results
+        .flat()
+        .filter((item) => {
+            const normalizedTitle = item.title.trim().toLowerCase().replace(/\s+/g, ' ');
+            const key = `${normalizedTitle}|${item.url}`;
+            if (!normalizedTitle || seen.has(key)) {
+                return false;
+            }
+
+            seen.add(key);
+            return true;
+        })
+        .sort((left, right) => {
+            const leftTs = left.published_at ? new Date(left.published_at).getTime() : 0;
+            const rightTs = right.published_at ? new Date(right.published_at).getTime() : 0;
+            return rightTs - leftTs;
+        });
+
+    return merged;
 }
 
 function getPreviewQuestions(topic: FocusTopicConfig): Array<Pick<ClientFocusQuestion, 'question'>> {
@@ -673,6 +706,13 @@ function isMiddleEastHardNews(item: NewsItem): boolean {
         'combat',
         'soldiers',
         'forces',
+        'retaliate',
+        'retaliation',
+        'infrastructure',
+        'vice president',
+        'jd vance',
+        'white house',
+        'washington',
         'warship',
         'carrier',
         'military',
@@ -1715,7 +1755,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         return cached.value;
     }
 
-    const newsItems = await fetchNewsItemsByQuery(topic.query, { excludeEtfAndFunds: false });
+    const newsItems = await fetchFocusNewsItems(topic);
     const modelOutput = await generateFocusContent(topic, newsItems);
     const skipWeeklyProgress = topic.slug === 'middle-east-tensions' || topic.slug === 'private-credit-stress';
     const weeklyProgress = skipWeeklyProgress ? null : await generateWeeklyProgress(topic, newsItems);
