@@ -19,6 +19,7 @@ import {
 import { ideasRouter } from './routes/ideas';
 import { deviceRouter } from './routes/device';
 import { trackerRouter } from './routes/tracker';
+import { pairAnalysisRouter } from './routes/pair-analysis';
 import { ensureDeviceTables } from './db/queries/devices';
 
 dotenv.config();
@@ -87,6 +88,7 @@ export function createApp() {
     app.use('/ideas', ideasRouter);
     app.use('/device', deviceRouter);
     app.use('/tracker', trackerRouter);
+    app.use('/api/pair-analysis', pairAnalysisRouter);
     app.use(errorHandler);
 
     return app;

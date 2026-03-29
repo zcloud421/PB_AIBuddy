@@ -216,6 +216,27 @@ export interface SymbolPriceHistoryResponse {
     price_history: PriceHistoryPoint[];
 }
 
+export interface PairAnalysisResponse {
+    symbolA: string;
+    symbolB: string;
+    data_as_of: string;
+    trading_days_overlap: number;
+    correlation: {
+        d60: number;
+        d120: number;
+        d252: number;
+    };
+    volatility: {
+        symbolA_annualized: number;
+        symbolB_annualized: number;
+        gap: number;
+    };
+    downside_sync: number;
+    correlation_stability: 'STABLE' | 'MODERATE' | 'UNSTABLE';
+    suitability: 'HIGH' | 'MEDIUM' | 'LOW';
+    suitability_note: string;
+}
+
 export interface AsyncScoringStatusResponse {
     symbol: string;
     job_id: string;
