@@ -723,6 +723,15 @@ function isMiddleEastHardNews(item: NewsItem): boolean {
     ];
     const analysisKeywords = [
         'analysis',
+        'where things stand',
+        'what we know',
+        'what to know',
+        'timeline',
+        'explained',
+        'one month into',
+        '1 month into',
+        'so far',
+        'overview',
         'what means',
         'what it means',
         'impact on',
@@ -740,10 +749,17 @@ function isMiddleEastHardNews(item: NewsItem): boolean {
         'delivers high oil prices',
         'means for china'
     ];
+    const lowSignalPatterns = [
+        'reveals iran',
+        '\'present\' to us',
+        '"present" to us',
+        'present to us'
+    ];
     const blockedSources = ['bruegel', 'pbs', 'council on foreign relations', 'financial times opinion'];
 
     return eventKeywords.some((keyword) => normalized.includes(keyword))
         && !analysisKeywords.some((keyword) => normalized.includes(keyword))
+        && !lowSignalPatterns.some((keyword) => normalized.includes(keyword))
         && !blockedSources.some((blocked) => source.includes(blocked));
 }
 
