@@ -244,19 +244,7 @@ async function getActiveCompletedRun() {
         getLatestCompletedRun()
     ]);
 
-    if (!latestScheduledRun) {
-        return latestCompletedRun;
-    }
-
-    if (!latestCompletedRun) {
-        return latestScheduledRun;
-    }
-
-    if (latestCompletedRun.run_date > latestScheduledRun.run_date) {
-        return latestCompletedRun;
-    }
-
-    return latestScheduledRun;
+    return latestScheduledRun ?? latestCompletedRun;
 }
 
 function normalizeCommodityBetaTodayIdea(
