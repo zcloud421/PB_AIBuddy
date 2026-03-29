@@ -232,6 +232,7 @@ export interface PairAnalysisResponse {
         gap: number;
     };
     downside_sync: number;
+    correlation_stability: 'STABLE' | 'MODERATE' | 'UNSTABLE';
     suitability: 'HIGH' | 'MEDIUM' | 'LOW';
     suitability_note: string;
 }

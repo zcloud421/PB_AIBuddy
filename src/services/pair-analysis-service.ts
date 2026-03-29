@@ -16,6 +16,7 @@ export interface PairAnalysisResponse {
         gap: number;
     };
     downside_sync: number;
+    correlation_stability: 'STABLE' | 'MODERATE' | 'UNSTABLE';
     suitability: 'HIGH' | 'MEDIUM' | 'LOW';
     suitability_note: string;
 }
@@ -75,6 +76,7 @@ export async function analyzePairSuitability(symbolA: string, symbolB: string): 
     const volB = roundMetric(calculateAnnualizedVolatility(recent60Returns.map((point) => point.returnB)));
     const volatilityGap = roundMetric(Math.abs(volA - volB));
     const downsideSync = roundMetric(calculateDownsideSync(returnSeries));
+    const correlationStability = determineCorrelationStability([corr60, corr120, corr252]);
     const suitability = determineSuitability(corr60, corr120, downsideSync);
 
     return {
@@ -95,6 +97,7 @@ export async function analyzePairSuitability(symbolA: string, symbolB: string): 
                 gap: volatilityGap
             },
             downside_sync: downsideSync,
+            correlation_stability: correlationStability,
             suitability,
             suitability_note: getSuitabilityNote(suitability)
         }
@@ -204,6 +207,28 @@ function determineSuitability(
     }
 
     return 'MEDIUM';
+}
+
+function determineCorrelationStability(
+    correlations: [number, number, number] | number[]
+): 'STABLE' | 'MODERATE' | 'UNSTABLE' {
+    const finiteValues = correlations.filter((value) => Number.isFinite(value));
+
+    if (finiteValues.length === 0) {
+        return 'UNSTABLE';
+    }
+
+    const range = Math.max(...finiteValues) - Math.min(...finiteValues);
+
+    if (range <= 0.15) {
+        return 'STABLE';
+    }
+
+    if (range <= 0.30) {
+        return 'MODERATE';
+    }
+
+    return 'UNSTABLE';
 }
 
 function getSuitabilityNote(suitability: 'HIGH' | 'MEDIUM' | 'LOW'): string {
