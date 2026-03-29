@@ -1,0 +1,241 @@
+import { getRecentPriceHistoryBySymbol, type PriceHistoryPointRow } from '../db/queries/ideas';
+
+export interface PairAnalysisResponse {
+    symbolA: string;
+    symbolB: string;
+    data_as_of: string;
+    trading_days_overlap: number;
+    correlation: {
+        d60: number;
+        d120: number;
+        d252: number;
+    };
+    volatility: {
+        symbolA_annualized: number;
+        symbolB_annualized: number;
+        gap: number;
+    };
+    downside_sync: number;
+    suitability: 'HIGH' | 'MEDIUM' | 'LOW';
+    suitability_note: string;
+}
+
+export type PairAnalysisResult =
+    | { kind: 'ok'; data: PairAnalysisResponse }
+    | { kind: 'not_found'; missing: 'symbolA' | 'symbolB' | 'both' }
+    | { kind: 'insufficient_data' };
+
+interface AlignedPricePoint {
+    date: string;
+    closeA: number;
+    closeB: number;
+}
+
+interface ReturnPoint {
+    date: string;
+    returnA: number;
+    returnB: number;
+}
+
+const MAX_TRADING_DAYS = 252;
+
+export async function analyzePairSuitability(symbolA: string, symbolB: string): Promise<PairAnalysisResult> {
+    const normalizedA = symbolA.trim().toUpperCase();
+    const normalizedB = symbolB.trim().toUpperCase();
+
+    const [historyA, historyB] = await Promise.all([
+        getRecentPriceHistoryBySymbol(normalizedA, MAX_TRADING_DAYS),
+        getRecentPriceHistoryBySymbol(normalizedB, MAX_TRADING_DAYS)
+    ]);
+
+    if (historyA.length === 0 && historyB.length === 0) {
+        return { kind: 'not_found', missing: 'both' };
+    }
+
+    if (historyA.length === 0) {
+        return { kind: 'not_found', missing: 'symbolA' };
+    }
+
+    if (historyB.length === 0) {
+        return { kind: 'not_found', missing: 'symbolB' };
+    }
+
+    const alignedSeries = alignPriceSeries(historyA, historyB);
+
+    if (alignedSeries.length < 60) {
+        return { kind: 'insufficient_data' };
+    }
+
+    const returnSeries = computeLogReturns(alignedSeries);
+    const corr60 = roundMetric(calculateCorrelation(takeRecentTradingWindow(returnSeries, 60).map((point) => point.returnA), takeRecentTradingWindow(returnSeries, 60).map((point) => point.returnB)));
+    const corr120 = roundMetric(calculateCorrelation(takeRecentTradingWindow(returnSeries, 120).map((point) => point.returnA), takeRecentTradingWindow(returnSeries, 120).map((point) => point.returnB)));
+    const corr252 = roundMetric(calculateCorrelation(takeRecentTradingWindow(returnSeries, 252).map((point) => point.returnA), takeRecentTradingWindow(returnSeries, 252).map((point) => point.returnB)));
+    const recent60Returns = takeRecentTradingWindow(returnSeries, 60);
+    const volA = roundMetric(calculateAnnualizedVolatility(recent60Returns.map((point) => point.returnA)));
+    const volB = roundMetric(calculateAnnualizedVolatility(recent60Returns.map((point) => point.returnB)));
+    const volatilityGap = roundMetric(Math.abs(volA - volB));
+    const downsideSync = roundMetric(calculateDownsideSync(returnSeries));
+    const suitability = determineSuitability(corr60, corr120, downsideSync);
+
+    return {
+        kind: 'ok',
+        data: {
+            symbolA: normalizedA,
+            symbolB: normalizedB,
+            data_as_of: alignedSeries[alignedSeries.length - 1].date,
+            trading_days_overlap: alignedSeries.length,
+            correlation: {
+                d60: corr60,
+                d120: corr120,
+                d252: corr252
+            },
+            volatility: {
+                symbolA_annualized: volA,
+                symbolB_annualized: volB,
+                gap: volatilityGap
+            },
+            downside_sync: downsideSync,
+            suitability,
+            suitability_note: getSuitabilityNote(suitability)
+        }
+    };
+}
+
+function alignPriceSeries(historyA: PriceHistoryPointRow[], historyB: PriceHistoryPointRow[]): AlignedPricePoint[] {
+    const symbolBByDate = new Map(historyB.map((point) => [point.date, point.close]));
+
+    return historyA.flatMap((pointA) => {
+        const closeB = symbolBByDate.get(pointA.date);
+        if (closeB == null) {
+            return [];
+        }
+
+        return [{
+            date: pointA.date,
+            closeA: pointA.close,
+            closeB
+        }];
+    });
+}
+
+function computeLogReturns(alignedSeries: AlignedPricePoint[]): ReturnPoint[] {
+    const returns: ReturnPoint[] = [];
+
+    for (let index = 1; index < alignedSeries.length; index += 1) {
+        const previous = alignedSeries[index - 1];
+        const current = alignedSeries[index];
+
+        returns.push({
+            date: current.date,
+            returnA: Math.log(current.closeA / previous.closeA),
+            returnB: Math.log(current.closeB / previous.closeB)
+        });
+    }
+
+    return returns;
+}
+
+function takeRecentTradingWindow(series: ReturnPoint[], tradingDays: number): ReturnPoint[] {
+    const returnCount = Math.max(tradingDays - 1, 1);
+    return series.slice(-Math.min(returnCount, series.length));
+}
+
+function calculateCorrelation(seriesA: number[], seriesB: number[]): number {
+    if (seriesA.length !== seriesB.length || seriesA.length < 2) {
+        return 0;
+    }
+
+    const meanA = calculateMean(seriesA);
+    const meanB = calculateMean(seriesB);
+
+    let numerator = 0;
+    let varianceA = 0;
+    let varianceB = 0;
+
+    for (let index = 0; index < seriesA.length; index += 1) {
+        const diffA = seriesA[index] - meanA;
+        const diffB = seriesB[index] - meanB;
+        numerator += diffA * diffB;
+        varianceA += diffA * diffA;
+        varianceB += diffB * diffB;
+    }
+
+    const denominator = Math.sqrt(varianceA * varianceB);
+    return denominator === 0 ? 0 : numerator / denominator;
+}
+
+function calculateAnnualizedVolatility(returns: number[]): number {
+    if (returns.length < 2) {
+        return 0;
+    }
+
+    return calculateSampleStdDev(returns) * Math.sqrt(252);
+}
+
+function calculateDownsideSync(returnSeries: ReturnPoint[]): number {
+    const triggerDays = returnSeries.filter((point) => Math.min(point.returnA, point.returnB) < -0.01);
+
+    if (triggerDays.length === 0) {
+        return 1;
+    }
+
+    const syncedDays = triggerDays.filter((point) => {
+        if (point.returnA <= point.returnB) {
+            return point.returnB < 0;
+        }
+
+        return point.returnA < 0;
+    }).length;
+
+    return syncedDays / triggerDays.length;
+}
+
+function determineSuitability(
+    corr60: number,
+    corr120: number,
+    downsideSync: number
+): 'HIGH' | 'MEDIUM' | 'LOW' {
+    if (corr60 >= 0.60 && corr120 >= 0.60 && downsideSync >= 0.60) {
+        return 'HIGH';
+    }
+
+    if (corr60 < 0.40 || corr120 < 0.35 || downsideSync < 0.40) {
+        return 'LOW';
+    }
+
+    return 'MEDIUM';
+}
+
+function getSuitabilityNote(suitability: 'HIGH' | 'MEDIUM' | 'LOW'): string {
+    if (suitability === 'HIGH') {
+        return '两只标的历史走势高度联动，Worst-of 结构适配度较高';
+    }
+
+    if (suitability === 'LOW') {
+        return '两只标的历史走势分化明显，Worst-of 结构风险较高';
+    }
+
+    return '两只标的存在一定联动性，但分化风险不可忽视';
+}
+
+function calculateMean(values: number[]): number {
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function calculateSampleStdDev(values: number[]): number {
+    if (values.length < 2) {
+        return 0;
+    }
+
+    const mean = calculateMean(values);
+    const variance = values.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / (values.length - 1);
+    return Math.sqrt(variance);
+}
+
+function roundMetric(value: number): number {
+    if (!Number.isFinite(value)) {
+        return 0;
+    }
+
+    return Math.round(value * 10000) / 10000;
+}
