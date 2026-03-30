@@ -1200,11 +1200,6 @@ function classifyMiddleEastChangeImpact(title: string): '风险抬升' | '缓和
 }
 
 async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<WhatChangedGroup[]> {
-    const apiKey = process.env.DEEPSEEK_API_KEY;
-    if (!apiKey) {
-        return [];
-    }
-
     const candidates = newsItems
         .filter((item) => isWithinHours(item.published_at, WHAT_CHANGED_WINDOW_HOURS))
         .sort((left, right) => {
@@ -1216,6 +1211,11 @@ async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<Wha
 
     if (candidates.length === 0) {
         return [];
+    }
+
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) {
+        return buildFallbackWhatChangedGroups(candidates);
     }
 
     const systemPrompt = '你是香港私人银行的市场简报助手。请按给定分组选项，把过去72小时的中东冲突新闻整理成可直接给RM使用的中文结构化要点。';
