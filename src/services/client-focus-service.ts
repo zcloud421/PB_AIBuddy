@@ -91,10 +91,12 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
         accent: '#C9A45C',
         query: 'Iran Israel Pentagon ground operations retaliation infrastructure JD Vance Trump White House strike military latest war',
         newsQueries: [
-            'Iran Israel US military strike attack Pentagon ground troops nuclear latest',
-            'Hormuz strait tanker shipping oil blockade Iran naval',
-            'Iran ceasefire negotiations Pakistan Saudi Turkey Egypt diplomacy talks',
-            'Iran war casualties IRGC Revolutionary Guard Trump White House Middle East',
+            'Israel IDF airstrike Iran strike attack nuclear facility munitions bombs missiles latest',
+            'IRGC Iran Revolutionary Guard missile drone attack wave retaliation assault latest',
+            'Iran Hormuz strait oil tanker blockade fee passage shipping latest',
+            'Trump White House Iran policy oil ceasefire Hormuz tanker announcement cabinet',
+            'Iran ceasefire deal Pakistan Saudi Arabia Turkey Egypt negotiations diplomacy talks',
+            'Saudi Arabia Iran oil WTI crude pipeline production output barrel price latest',
         ],
         fallbackStatus: '持续发酵',
         clientQuestions: [
@@ -1113,7 +1115,7 @@ async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<Wha
             const rightTs = right.published_at ? new Date(right.published_at).getTime() : 0;
             return rightTs - leftTs;
         })
-        .slice(0, 15);
+        .slice(0, 20);
 
     if (candidates.length === 0) {
         return [];
@@ -1136,13 +1138,16 @@ async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<Wha
 
 每组最多4条，每条：
 - time: 从新闻时间取 HH:MM（转换为香港时间 UTC+8）
-- headline: 不超过35字，必须包含【谁】+【做了什么/说了什么的具体内容】
+- headline: 不超过35字。格式：用【名称】标注具体主语（例如【特朗普】【以军】【伊朗】【IRGC】【IAEA】【沙特】），后接具体行动或数据。
+  示例：【以军】对伊朗布什尔核设施发动第5轮空袭，投弹120枚
+  示例：【特朗普】在内阁会议宣称伊朗已放行10艘油轮作为"礼物"
+  示例：【IRGC】发动第86波导弹和无人机攻势，目标为以军南部基地
   禁止：
-  - "各方态势评估""局势升级""引发不确定性"等模糊表述
-  - 省略主语（必须说清楚是伊朗/美军/以军/特朗普/IAEA等）
-  - 省略关键细节（船只必须说明国籍或来源）
+  - "各方态势评估""局势升级""引发不确定性""主持会议""发表声明"等模糊表述
+  - 主语模糊（不允许"某方""双方""各方"，必须说明是哪个国家/机构/人物）
+  - 省略关键数字或具体细节（有数字尽量保留：波次、枚数、桶/日、美元价格）
 
-选取标准：优先选择有具体事件发生的新闻，忽略背景分析文章和观点类文章。
+选取标准：优先选择有具体军事行动、具体数据或直接表态的新闻；忽略背景分析、观点类、会议筹备类文章。
 
 输出格式（JSON数组）：
 [
