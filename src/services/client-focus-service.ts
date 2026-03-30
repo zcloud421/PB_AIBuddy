@@ -9,7 +9,7 @@ import type {
     NewsItem,
     WhatChangedGroup
 } from '../types/api';
-import { fetchNewsItemsByQuery } from '../data/news-fetcher';
+import { fetchNewsItemsByQuery, fetchNewsItemsFromNewsData } from '../data/news-fetcher';
 import axios from 'axios';
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
@@ -91,12 +91,9 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
         accent: '#C9A45C',
         query: 'Iran Israel Pentagon ground operations retaliation infrastructure JD Vance Trump White House strike military latest war',
         newsQueries: [
-            'Israel IDF airstrike Iran strike attack nuclear facility munitions bombs missiles Saudi Bahrain Jordan Azraq Prince Sultan latest',
-            'IRGC Iran Revolutionary Guard missile drone attack wave retaliation assault Fifth Fleet Bahrain latest',
-            'Iran Hormuz strait oil tanker blockade fee passage shipping Lloyds transit Yanbu pipeline latest',
-            'Trump White House Iran policy oil ceasefire Hormuz tanker announcement cabinet',
-            'Iran ceasefire deal Pakistan Saudi Arabia Turkey Egypt negotiations diplomacy talks mediation committee',
-            'Saudi Arabia Iran oil WTI Brent crude pipeline production output barrel price Aramco latest',
+            'Iran Israel US strike missile drone Tabriz Haifa refinery petrochemical air base special forces Fifth Fleet Houthis Bab el-Mandeb',
+            'Hormuz strait permit licensing transit fee shipping passage Iran naval tanker throughput NPT',
+            'Iran ceasefire negotiations Islamabad Saudi Turkey Egypt foreign ministers dialogue mediated talks agreement precondition'
         ],
         fallbackStatus: '持续发酵',
         clientQuestions: [
@@ -408,9 +405,23 @@ async function fetchPolymarketMarket(
 
 async function fetchFocusNewsItems(topic: FocusTopicConfig): Promise<NewsItem[]> {
     const queries = topic.newsQueries?.length ? topic.newsQueries : [topic.query];
-    const results = await Promise.all(
+    const googleResultsPromise = Promise.all(
         queries.map((query) => fetchNewsItemsByQuery(query, { excludeEtfAndFunds: false }))
     );
+    const newsDataResultsPromise = topic.slug === 'middle-east-tensions'
+        ? Promise.all(
+              queries.map((query) =>
+                  fetchNewsItemsFromNewsData(query, {
+                      timeframeHours: 24,
+                      language: 'en',
+                      categories: ['politics', 'world']
+                  })
+              )
+          )
+        : Promise.resolve([]);
+
+    const [googleResults, newsDataResults] = await Promise.all([googleResultsPromise, newsDataResultsPromise]);
+    const results = [...googleResults, ...(Array.isArray(newsDataResults) ? newsDataResults : [])];
 
     const seen = new Set<string>();
     const merged = results

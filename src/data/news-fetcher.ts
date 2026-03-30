@@ -20,6 +20,7 @@ export interface StockNewsContext {
 
 const FINNHUB_BASE_URL = 'https://finnhub.io/api/v1';
 const GOOGLE_NEWS_RSS_BASE_URL = 'https://news.google.com/rss/search';
+const NEWSDATA_LATEST_BASE_URL = 'https://newsdata.io/api/1/latest';
 const NEWS_FETCH_TIMEOUT_MS = 8000;
 
 const ISSUER_NAMES: Record<string, string> = {
@@ -152,6 +153,18 @@ interface FinnhubNewsItem {
     source: string;
     summary: string;
     url: string;
+}
+
+interface NewsDataLatestItem {
+    title?: string;
+    link?: string;
+    source_id?: string;
+    source_name?: string;
+    pubDate?: string;
+}
+
+interface NewsDataLatestResponse {
+    results?: NewsDataLatestItem[];
 }
 
 async function fetchNewsFromFinnhub(symbol: string): Promise<NewsItem[]> {
@@ -308,6 +321,72 @@ export async function fetchNewsItemsByQuery(
     return extractItems(xml)
         .filter((article) => !excludeEtfAndFunds || !/ETF|fund/i.test(article.title))
         .filter((article) => article.title.length > 0);
+}
+
+export async function fetchNewsItemsFromNewsData(
+    query: string,
+    options: {
+        timeframeHours?: number;
+        language?: string;
+        categories?: string[];
+    } = {}
+): Promise<NewsItem[]> {
+    const apiKey = process.env.NEWSDATA_API_KEY ?? process.env.NEWSDATAIO_API_KEY;
+    if (!apiKey) {
+        return [];
+    }
+
+    const url = new URL(NEWSDATA_LATEST_BASE_URL);
+    url.searchParams.set('apikey', apiKey);
+    url.searchParams.set('q', query);
+    url.searchParams.set('language', options.language ?? 'en');
+    url.searchParams.set('timeframe', String(Math.min(Math.max(options.timeframeHours ?? 24, 1), 48)));
+    url.searchParams.set('category', (options.categories ?? ['politics', 'world']).join(','));
+
+    let response: Response;
+    try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), NEWS_FETCH_TIMEOUT_MS);
+        try {
+            response = await fetch(url.toString(), {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)',
+                    Accept: 'application/json'
+                },
+                signal: controller.signal
+            });
+        } finally {
+            clearTimeout(timer);
+        }
+    } catch {
+        return [];
+    }
+
+    if (!response.ok) {
+        return [];
+    }
+
+    let payload: NewsDataLatestResponse;
+    try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), NEWS_FETCH_TIMEOUT_MS);
+        try {
+            payload = await response.json() as NewsDataLatestResponse;
+        } finally {
+            clearTimeout(timer);
+        }
+    } catch {
+        return [];
+    }
+
+    return (payload.results ?? [])
+        .map((item) => ({
+            title: item.title?.trim() ?? '',
+            source: item.source_name?.trim() || item.source_id?.trim() || 'NewsData.io',
+            url: item.link?.trim() ?? '',
+            published_at: item.pubDate?.trim() ?? ''
+        }))
+        .filter((item) => Boolean(item.title) && Boolean(item.url));
 }
 
 function dedupeNewsItems(items: NewsItem[]): NewsItem[] {
