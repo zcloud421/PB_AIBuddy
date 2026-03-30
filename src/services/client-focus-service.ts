@@ -499,6 +499,7 @@ function isUsefulMiddleEastNewsTitle(title: string): boolean {
         'air defense',
         'gulf',
         'forces',
+        'war',
         'hormuz',
         'tanker',
         'shipping',
@@ -1279,7 +1280,7 @@ ${newsList}
         });
 
         if (!response.ok) {
-            return [];
+            return buildFallbackWhatChangedGroups(candidates);
         }
 
         const payload = (await response.json()) as {
