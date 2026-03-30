@@ -125,6 +125,12 @@ export interface ClientFocusTransmissionItem {
     latest_evidence?: string | null;
 }
 
+export interface WhatChangedItem {
+    time: string;
+    headline: string;
+    asset_tags: string[];
+}
+
 export interface ClientFocusListItem {
     slug: string;
     title: string;
@@ -143,7 +149,7 @@ export interface ClientFocusDetailResponse {
     summary: string;
     accent: string;
     latest_updates: ClientFocusUpdate[];
-    what_changed?: string[];
+    what_changed?: WhatChangedItem[];
     client_questions: ClientFocusQuestion[];
     transmission_chain: ClientFocusTransmissionItem[];
     related_assets: string[];

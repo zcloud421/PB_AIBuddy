@@ -6,7 +6,8 @@ import type {
     ClientFocusQuestion,
     ClientFocusTransmissionItem,
     ClientFocusUpdate,
-    NewsItem
+    NewsItem,
+    WhatChangedItem
 } from '../types/api';
 import { fetchNewsItemsByQuery } from '../data/news-fetcher';
 import axios from 'axios';
@@ -1097,7 +1098,7 @@ function classifyMiddleEastChangeImpact(title: string): '风险抬升' | '缓和
     return classifyMiddleEastImpact(title) === '风险抬升' ? '风险抬升' : null;
 }
 
-async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<string[]> {
+async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<WhatChangedItem[]> {
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
         return [];
@@ -1128,16 +1129,17 @@ async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<str
             const userPrompt = `
 你是香港私人银行的市场简报助手。
 
-将以下英文新闻标题压缩成一句中文（不超过40字），格式：
-[事件概述] → [对市场/资产的含义]
+将以下新闻标题处理成两部分，用 JSON 格式输出：
 
-来源媒体在括号内附上，格式：（来源名）
+{
+  "headline": "事件描述，不超过30字，必须包含：主体（谁）+ 具体行动或言论核心。禁止使用'引发不确定性''局势升级''风险抬升'等模糊表述。",
+  "asset_tags": ["最多3个受影响资产或方向，如'油价↑''黄金''能源股''美元避险''航运'，每个不超过4字"]
+}
 
 新闻标题：${item.title}
 影响分类：${impact}
-来源媒体：${item.source ?? 'Unknown'}
 
-只输出一句话，不要解释，不要换行。
+只输出 JSON，不要解释，不要换行。
 `.trim();
 
             try {
@@ -1164,14 +1166,31 @@ async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<str
                     choices?: Array<{ message?: { content?: string } }>;
                 };
                 const content = payload.choices?.[0]?.message?.content?.trim() ?? '';
-                return content ? content.replace(/\s+/g, ' ') : null;
+                const parsed = safeParseJson(content) as { headline?: string; asset_tags?: unknown } | null;
+                const headline = typeof parsed?.headline === 'string' ? parsed.headline.trim() : '';
+                const assetTags = Array.isArray(parsed?.asset_tags)
+                    ? parsed.asset_tags
+                          .filter((tag): tag is string => typeof tag === 'string' && Boolean(tag.trim()))
+                          .map((tag) => tag.trim())
+                          .slice(0, 3)
+                    : [];
+
+                if (!headline) {
+                    return null;
+                }
+
+                return {
+                    time: formatClockTime(item.published_at),
+                    headline,
+                    asset_tags: assetTags
+                } satisfies WhatChangedItem;
             } catch {
                 return null;
             }
         })
     );
 
-    return results.filter((item): item is string => Boolean(item)).slice(0, 3);
+    return results.filter((item): item is WhatChangedItem => Boolean(item)).slice(0, 3);
 }
 
 function summarizeMiddleEastHeadline(title: string, source?: string): string {
