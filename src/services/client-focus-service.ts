@@ -91,9 +91,10 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
         accent: '#C9A45C',
         query: 'Iran Israel Pentagon ground operations retaliation infrastructure JD Vance Trump White House strike military latest war',
         newsQueries: [
-            'Iran Israel US strike missile drone Tabriz Haifa refinery petrochemical air base Azraq Bahrain Prince Sultan special forces Fifth Fleet Houthis Bab el-Mandeb',
-            'Hormuz strait permit licensing transit fee shipping passage tanker throughput NPT Yanbu pipeline Aramco Lloyds shipping fee',
-            'Iran ceasefire negotiations Islamabad Saudi Turkey Egypt Pakistan foreign ministers dialogue mediated talks agreement precondition White House Trump'
+            'Iran Israel war military strike',
+            'Iran Hormuz oil shipping',
+            'Iran ceasefire talks diplomacy',
+            'Trump Iran deal war'
         ],
         fallbackStatus: '持续发酵',
         clientQuestions: [
