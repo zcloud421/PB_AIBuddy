@@ -19,7 +19,7 @@ const FOCUS_CHAIN_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const POLYMARKET_CACHE_TTL_MS = 5 * 60 * 1000;
 const POLYMARKET_HISTORY_WINDOW_DAYS = 30;
 const POLYMARKET_HISTORY_CHUNK_DAYS = 14;
-const WHAT_CHANGED_WINDOW_HOURS = 36;
+const WHAT_CHANGED_WINDOW_HOURS = 48;
 
 interface FocusTopicConfig {
     slug: string;
@@ -91,9 +91,10 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
         accent: '#C9A45C',
         query: 'Iran Israel Pentagon ground operations retaliation infrastructure JD Vance Trump White House strike military latest war',
         newsQueries: [
-            'Iran Israel Pentagon ground operations retaliation infrastructure JD Vance Trump White House strike military latest war',
-            'Hormuz tanker shipping crude oil exports sanctions ceasefire diplomacy Iran Israel Middle East latest',
-            'Iran IRGC attack strike nuclear Saudi Arabia ceasefire negotiations Pakistan four nations ground troops Hormuz'
+            'Iran Israel US military strike attack Pentagon ground troops nuclear latest',
+            'Hormuz strait tanker shipping oil blockade Iran naval',
+            'Iran ceasefire negotiations Pakistan Saudi Turkey Egypt diplomacy talks',
+            'Iran war casualties IRGC Revolutionary Guard Trump White House Middle East',
         ],
         fallbackStatus: '持续发酵',
         clientQuestions: [
@@ -1106,13 +1107,13 @@ async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<Wha
     }
 
     const candidates = newsItems
-        .filter((item) => isWithinHours(item.published_at, 48))
+        .filter((item) => isWithinHours(item.published_at, WHAT_CHANGED_WINDOW_HOURS))
         .sort((left, right) => {
             const leftTs = left.published_at ? new Date(left.published_at).getTime() : 0;
             const rightTs = right.published_at ? new Date(right.published_at).getTime() : 0;
             return rightTs - leftTs;
         })
-        .slice(0, 10);
+        .slice(0, 15);
 
     if (candidates.length === 0) {
         return [];
@@ -1125,27 +1126,30 @@ async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<Wha
     const userPrompt = `
 你是香港私人银行的市场简报助手。
 
-以下是过去48小时的中东冲突新闻标题列表（含时间），请将它们整理成最多4个分组：
+以下是过去48小时的中东冲突相关新闻标题列表。请将它们整理成以下4个固定分组（每组必须出现，无内容则 items 为空数组）：
 
-分组选项（只输出有内容的分组）：
-- 军事动态（空袭、导弹、地面行动、核设施）
-- 霍尔木兹 & 能源（海峡、航运、石油）
-- 谈判 & 外交（停火、外交斡旋、谈判提议）
-- 整体态势（其他重要综合动态）
+分组定义：
+1. 军事动态（icon: 🔴）：空袭、导弹、地面行动、核设施、无人机
+2. 霍尔木兹 & 能源（icon: 🛢️）：海峡通航、航运、油价、封锁
+3. 谈判 & 外交（icon: 🕊️）：停火提议、外交斡旋、谈判、国际调停
+4. 整体态势（icon: 📊）：伤亡数据、政治局势、多方综合评估
 
-每组最多2条，每条：
+每组最多4条，每条：
 - time: 从新闻时间取 HH:MM（转换为香港时间 UTC+8）
-- headline: 不超过30字，必须包含主体+具体行动，禁止"引发不确定性""局势升级"等模糊表述
+- headline: 不超过35字，必须包含【谁】+【做了什么/说了什么的具体内容】
+  禁止：
+  - "各方态势评估""局势升级""引发不确定性"等模糊表述
+  - 省略主语（必须说清楚是伊朗/美军/以军/特朗普/IAEA等）
+  - 省略关键细节（船只必须说明国籍或来源）
+
+选取标准：优先选择有具体事件发生的新闻，忽略背景分析文章和观点类文章。
 
 输出格式（JSON数组）：
 [
-  {
-    "group_label": "军事动态",
-    "group_icon": "🔴",
-    "items": [
-      { "time": "03:30", "headline": "以军使用120枚弹药打击德黑兰武器研发设施" }
-    ]
-  }
+  { "group_label": "军事动态", "group_icon": "🔴", "items": [...] },
+  { "group_label": "霍尔木兹 & 能源", "group_icon": "🛢️", "items": [...] },
+  { "group_label": "谈判 & 外交", "group_icon": "🕊️", "items": [...] },
+  { "group_label": "整体态势", "group_icon": "📊", "items": [...] }
 ]
 
 新闻列表：
@@ -1188,22 +1192,32 @@ ${newsList}
             return [];
         }
 
-        return parsed
-            .filter((group) => typeof group.group_label === 'string' && typeof group.group_icon === 'string' && Array.isArray(group.items))
-            .map((group) => ({
-                group_label: group.group_label!.trim(),
-                group_icon: group.group_icon!.trim(),
-                items: group.items!
-                    .filter((item) => typeof item?.time === 'string' && typeof item?.headline === 'string')
-                    .map((item) => ({
-                        time: item.time!.trim(),
-                        headline: item.headline!.trim()
-                    }))
-                    .filter((item) => item.time && item.headline)
-                    .slice(0, 2)
-            }))
-            .filter((group) => group.group_label && group.group_icon && group.items.length > 0)
-            .slice(0, 4);
+        const fixedGroups = [
+            { group_label: '军事动态', group_icon: '🔴' },
+            { group_label: '霍尔木兹 & 能源', group_icon: '🛢️' },
+            { group_label: '谈判 & 外交', group_icon: '🕊️' },
+            { group_label: '整体态势', group_icon: '📊' }
+        ] as const;
+
+        return fixedGroups.map((expectedGroup) => {
+            const sourceGroup = parsed.find((group) => group.group_label?.trim() === expectedGroup.group_label);
+            const items = Array.isArray(sourceGroup?.items)
+                ? sourceGroup.items
+                      .filter((item) => typeof item?.time === 'string' && typeof item?.headline === 'string')
+                      .map((item) => ({
+                          time: item.time?.trim() ?? '',
+                          headline: item.headline?.trim() ?? ''
+                      }))
+                      .filter((item) => item.headline)
+                      .slice(0, 4)
+                : [];
+
+            return {
+                group_label: expectedGroup.group_label,
+                group_icon: expectedGroup.group_icon,
+                items
+            };
+        });
     } catch {
         return [];
     }
