@@ -1358,20 +1358,57 @@ async function generateDynamicClientQuestions(
     }
 
     const questionsList = topic.clientQuestions.map((item, index) => `${index + 1}. ${item.question}`).join('\n');
+    const baselineAnswers = topic.clientQuestions
+        .map(
+            (item, index) =>
+                `${index + 1}. 问题：${item.question}\n基准回答：${item.answer}`
+        )
+        .join('\n\n');
     const newsList = contextItems
         .map((item, index) => `${index + 1}. ${formatClockTime(item.published_at)} | ${item.title}`)
         .join('\n');
 
-    const systemPrompt = '你是香港私人银行的市场简报助手。';
+    const systemPrompt = `
+你是香港私人银行的市场沟通助手，面向 RM/IC 生成“客户常问”的标准回答。
+
+回答目标不是复述新闻，而是帮助 RM 向客户解释：
+1. 当前市场机制是什么
+2. 最新新闻改变了什么
+3. 对大类资产意味着什么
+
+语气要求：
+- 专业、克制、像私行客户沟通口径
+- 先讲机制，再讲最新变化，再讲资产含义
+- 不要写成快讯，不要像事件播报
+- 不要使用“局势升级”“引发不确定性”等空泛表述
+- 不要直接给投资建议
+`.trim();
     const userPrompt = `
 以下是过去48小时的中东冲突相关新闻。请基于这些最新信息，
-为以下3个固定问题重新撰写答案（每条答案不超过100字，
-必须包含具体数字或最新事实，禁止模糊表述）：
+为以下3个固定问题重写回答，供香港私人银行 RM/IC 与客户沟通时使用。
 
 ${questionsList}
 
+每个问题的当前基准回答如下：
+${baselineAnswers}
+
 新闻列表：
 ${newsList}
+
+写作要求：
+- 每条答案 70-110 字
+- 必须采用“市场机制 → 最新变化 → 资产含义”的结构
+- 必须至少包含 1 个具体最新事实、数字或市场变量
+- 重点解释对油价、黄金、美元、利率路径或风险偏好的影响
+- 回答要有 3-7 天可用性，不要写成只对应某一条新闻的快讯
+- 如果最新新闻没有改变原有市场框架，应明确说明“市场逻辑未变，只是新增了什么变量”
+- 在保留基准回答逻辑框架的基础上，用最新新闻更新答案
+
+禁止：
+- 不要以“过去48小时内...”开头
+- 不要整段围绕某个 headline 复述
+- 不要使用“局势升级”“引发不确定性”等空泛表述
+- 不要给具体投资建议
 
 输出格式（JSON数组）：
 [{"question":"原问题文字","answer":"重写后的答案"}]
