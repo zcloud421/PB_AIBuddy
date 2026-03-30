@@ -1312,7 +1312,7 @@ ${newsList}
                       .filter((item) => typeof item?.time === 'string' && typeof item?.headline === 'string')
                       .map((item) => ({
                           time: item.time?.trim() ?? '',
-                          headline: item.headline?.trim() ?? ''
+                          headline: sanitizeGeneratedMiddleEastHeadline(item.headline?.trim() ?? '')
                       }))
                       .filter((item) => item.headline)
                       .slice(0, 4)
@@ -1778,6 +1778,31 @@ function buildFallbackWhatChangedGroups(newsItems: NewsItem[]): WhatChangedGroup
         group_icon: group.group_icon,
         items: buildFallbackWhatChangedItems(newsItems, group.group_label)
     }));
+}
+
+function sanitizeGeneratedMiddleEastHeadline(headline: string) {
+    const trimmed = headline.replace(/\s+/g, ' ').trim();
+    if (!trimmed) {
+        return '';
+    }
+
+    const chineseMatches = trimmed.match(/[\u4e00-\u9fff]/g) ?? [];
+    const latinWordMatches = trimmed.match(/[A-Za-z]{3,}/g) ?? [];
+    const contentAfterActor = trimmed.replace(/^【[^】]+】/, '').trim();
+
+    if (chineseMatches.length < 4) {
+        return '';
+    }
+
+    if (latinWordMatches.length >= 4) {
+        return '';
+    }
+
+    if (/[A-Za-z]{3,}\s+[A-Za-z]{3,}/.test(contentAfterActor)) {
+        return '';
+    }
+
+    return trimmed;
 }
 
 function buildFallbackWhatChangedItems(
