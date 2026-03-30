@@ -206,21 +206,29 @@ const polymarketCache = new Map<string, { expiresAt: number; value: ClientFocusP
 const MIDDLE_EAST_POLYMARKET_MARKETS = [
     {
         pageUrl: 'https://polymarket.com/event/us-x-iran-ceasefire-by',
-        outcomeLabel: 'April 30',
         label: '美伊4月底前直接谈判',
-        description: '若概率上升，优先关注缓和交易：油价回落、避险资产松动'
+        outcomes: [
+            { outcomeLabel: 'April 30', displayLabel: '4月底' },
+            { outcomeLabel: 'May 31', displayLabel: '5月底' },
+            { outcomeLabel: 'June 30', displayLabel: '6月底' }
+        ]
     },
     {
         pageUrl: 'https://polymarket.com/event/us-forces-enter-iran-by',
-        outcomeLabel: 'April 30',
-        label: '美军4月底前进入伊朗',
-        description: '若概率上升，优先关注：油价、黄金、美元避险'
+        label: '美军何时进入伊朗',
+        outcomes: [
+            { outcomeLabel: 'April 30', displayLabel: '4月底' },
+            { outcomeLabel: 'December 31', displayLabel: '年底' }
+        ]
     },
     {
         pageUrl: 'https://polymarket.com/event/what-price-will-wti-hit-in-april-2026',
-        outcomeLabel: '↑ $120',
-        label: 'WTI 4月触及 $120',
-        description: '反映市场对供应冲击的定价程度'
+        label: '原油4月触及什么价位',
+        outcomes: [
+            { outcomeLabel: '↑ $100', displayLabel: '$100' },
+            { outcomeLabel: '↑ $110', displayLabel: '$110' },
+            { outcomeLabel: '↑ $120', displayLabel: '$120' }
+        ]
     }
 ] as const;
 
@@ -285,7 +293,7 @@ async function fetchPolymarketHistoryChunk(
                 market: yesTokenId,
                 startTs,
                 endTs,
-                fidelity: 1440
+                fidelity: 60
             },
             headers: {
                 'User-Agent': 'Josan/1.0',
@@ -336,6 +344,36 @@ async function fetchPolymarketHistory(yesTokenId: string): Promise<Array<{ t: nu
         .sort((left, right) => left.t - right.t);
 }
 
+async function fetchPolymarketOutcome(
+    pageMarkets: PolymarketPageMarket[],
+    outcome: { outcomeLabel: string; displayLabel: string }
+) {
+    const targetMarket = pageMarkets.find((pageMarket) => pageMarket.groupItemTitle === outcome.outcomeLabel);
+    if (!targetMarket) {
+        throw new Error(`Target market not found for ${outcome.outcomeLabel}`);
+    }
+
+    const yesProbability = Number(targetMarket.outcomePrices[0]);
+    const yesTokenId = targetMarket.clobTokenIds[0];
+    if (!Number.isFinite(yesProbability) || !yesTokenId) {
+        throw new Error('Invalid Polymarket market metadata');
+    }
+
+    const history = await fetchPolymarketHistory(yesTokenId);
+    const normalizedHistory = history.map((point) => ({
+        t: point.t,
+        p: Math.round(point.p * 1000) / 10
+    }));
+    const latestProbability = normalizedHistory[normalizedHistory.length - 1]?.p;
+
+    return {
+        condition_id: targetMarket.id,
+        display_label: outcome.displayLabel,
+        probability: Number.isFinite(latestProbability) ? latestProbability : Math.round(yesProbability * 1000) / 10,
+        history: normalizedHistory
+    };
+}
+
 async function fetchPolymarketMarket(
     market: (typeof MIDDLE_EAST_POLYMARKET_MARKETS)[number]
 ): Promise<ClientFocusPolymarketMarket> {
@@ -351,28 +389,14 @@ async function fetchPolymarketMarket(
     );
 
     const pageMarkets = extractPolymarketPageMarkets(response.data);
-    const targetMarket = pageMarkets.find((pageMarket) => pageMarket.groupItemTitle === market.outcomeLabel);
-    if (!targetMarket) {
-        throw new Error(`Target market not found for ${market.outcomeLabel}`);
-    }
-
-    const yesProbability = Number(targetMarket.outcomePrices[0]);
-    const yesTokenId = targetMarket.clobTokenIds[0];
-    if (!Number.isFinite(yesProbability) || !yesTokenId) {
-        throw new Error('Invalid Polymarket market metadata');
-    }
-
-    const history = await fetchPolymarketHistory(yesTokenId);
+    const outcomes = await Promise.all(
+        market.outcomes.map((outcome) => fetchPolymarketOutcome(pageMarkets, outcome))
+    );
 
     return {
-        condition_id: targetMarket.id,
+        condition_id: market.pageUrl,
         label: market.label,
-        description: market.description,
-        probability: Math.round(yesProbability * 1000) / 10,
-        history: history.map((point) => ({
-            t: point.t,
-            p: Math.round(point.p * 1000) / 10
-        }))
+        outcomes
     };
 }
 

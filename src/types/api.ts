@@ -154,12 +154,16 @@ export interface ClientFocusPolymarketHistoryPoint {
     p: number;
 }
 
+export interface ClientFocusPolymarketOutcome {
+    display_label: string;
+    probability: number;
+    history: ClientFocusPolymarketHistoryPoint[];
+}
+
 export interface ClientFocusPolymarketMarket {
     condition_id: string;
     label: string;
-    description: string;
-    probability: number;
-    history: ClientFocusPolymarketHistoryPoint[];
+    outcomes: ClientFocusPolymarketOutcome[];
 }
 
 export interface ClientFocusPolymarketResponse {
