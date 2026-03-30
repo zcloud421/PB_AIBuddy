@@ -91,9 +91,9 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
         accent: '#C9A45C',
         query: 'Iran Israel Pentagon ground operations retaliation infrastructure JD Vance Trump White House strike military latest war',
         newsQueries: [
-            'Iran Israel US strike missile drone Tabriz Haifa refinery petrochemical air base special forces Fifth Fleet Houthis Bab el-Mandeb',
-            'Hormuz strait permit licensing transit fee shipping passage Iran naval tanker throughput NPT',
-            'Iran ceasefire negotiations Islamabad Saudi Turkey Egypt foreign ministers dialogue mediated talks agreement precondition'
+            'Iran Israel US strike missile drone Tabriz Haifa refinery petrochemical air base Azraq Bahrain Prince Sultan special forces Fifth Fleet Houthis Bab el-Mandeb',
+            'Hormuz strait permit licensing transit fee shipping passage tanker throughput NPT Yanbu pipeline Aramco Lloyds shipping fee',
+            'Iran ceasefire negotiations Islamabad Saudi Turkey Egypt Pakistan foreign ministers dialogue mediated talks agreement precondition White House Trump'
         ],
         fallbackStatus: '持续发酵',
         clientQuestions: [
@@ -426,6 +426,7 @@ async function fetchFocusNewsItems(topic: FocusTopicConfig): Promise<NewsItem[]>
     const seen = new Set<string>();
     const merged = results
         .flat()
+        .filter((item) => (topic.slug === 'middle-east-tensions' ? isUsefulMiddleEastNewsTitle(item.title) : true))
         .filter((item) => {
             const normalizedTitle = item.title.trim().toLowerCase().replace(/\s+/g, ' ');
             const key = `${normalizedTitle}|${item.url}`;
@@ -443,6 +444,62 @@ async function fetchFocusNewsItems(topic: FocusTopicConfig): Promise<NewsItem[]>
         });
 
     return merged;
+}
+
+function isUsefulMiddleEastNewsTitle(title: string): boolean {
+    const normalized = title.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+        return false;
+    }
+
+    const blockedPatterns = [
+        'iran conflict maritime update',
+        'maritime update:',
+        'live updates',
+        'where things stand',
+        'what we know',
+        'what to know',
+        'analysis:',
+        'opinion:',
+        'newsletter:',
+        'podcast:'
+    ];
+
+    if (blockedPatterns.some((pattern) => normalized.includes(pattern))) {
+        return false;
+    }
+
+    const usefulSignals = [
+        'hormuz',
+        'tanker',
+        'shipping',
+        'fee',
+        'pipeline',
+        'yanbu',
+        'aramco',
+        'strike',
+        'attack',
+        'drone',
+        'missile',
+        'air base',
+        'base',
+        'refinery',
+        'petrochemical',
+        'fifth fleet',
+        'special forces',
+        'ceasefire',
+        'talks',
+        'foreign ministers',
+        'islamabad',
+        'white house',
+        'trump',
+        'saudi',
+        'pakistan',
+        'egypt',
+        'turkey'
+    ];
+
+    return usefulSignals.some((signal) => normalized.includes(signal));
 }
 
 function getPreviewQuestions(topic: FocusTopicConfig): Array<Pick<ClientFocusQuestion, 'question'>> {
