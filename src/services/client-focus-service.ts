@@ -19,7 +19,7 @@ const FOCUS_CHAIN_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const POLYMARKET_CACHE_TTL_MS = 5 * 60 * 1000;
 const POLYMARKET_HISTORY_WINDOW_DAYS = 30;
 const POLYMARKET_HISTORY_CHUNK_DAYS = 14;
-const WHAT_CHANGED_WINDOW_HOURS = 48;
+const WHAT_CHANGED_WINDOW_HOURS = 72;
 
 interface FocusTopicConfig {
     slug: string;
@@ -91,12 +91,12 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
         accent: '#C9A45C',
         query: 'Iran Israel Pentagon ground operations retaliation infrastructure JD Vance Trump White House strike military latest war',
         newsQueries: [
-            'Israel IDF airstrike Iran strike attack nuclear facility munitions bombs missiles latest',
-            'IRGC Iran Revolutionary Guard missile drone attack wave retaliation assault latest',
-            'Iran Hormuz strait oil tanker blockade fee passage shipping latest',
+            'Israel IDF airstrike Iran strike attack nuclear facility munitions bombs missiles Saudi Bahrain Jordan Azraq Prince Sultan latest',
+            'IRGC Iran Revolutionary Guard missile drone attack wave retaliation assault Fifth Fleet Bahrain latest',
+            'Iran Hormuz strait oil tanker blockade fee passage shipping Lloyds transit Yanbu pipeline latest',
             'Trump White House Iran policy oil ceasefire Hormuz tanker announcement cabinet',
-            'Iran ceasefire deal Pakistan Saudi Arabia Turkey Egypt negotiations diplomacy talks',
-            'Saudi Arabia Iran oil WTI crude pipeline production output barrel price latest',
+            'Iran ceasefire deal Pakistan Saudi Arabia Turkey Egypt negotiations diplomacy talks mediation committee',
+            'Saudi Arabia Iran oil WTI Brent crude pipeline production output barrel price Aramco latest',
         ],
         fallbackStatus: '持续发酵',
         clientQuestions: [
@@ -1121,20 +1121,19 @@ async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<Wha
         return [];
     }
 
-    const systemPrompt = '你是香港私人银行的市场简报助手。请按给定分组选项，把过去48小时的中东冲突新闻整理成可直接给RM使用的中文结构化要点。';
+    const systemPrompt = '你是香港私人银行的市场简报助手。请按给定分组选项，把过去72小时的中东冲突新闻整理成可直接给RM使用的中文结构化要点。';
     const newsList = candidates
         .map((item, index) => `${index + 1}. ${formatClockTime(item.published_at)} | ${item.title}`)
         .join('\n');
     const userPrompt = `
 你是香港私人银行的市场简报助手。
 
-以下是过去48小时的中东冲突相关新闻标题列表。请将它们整理成以下4个固定分组（每组必须出现，无内容则 items 为空数组）：
+以下是过去72小时的中东冲突相关新闻标题列表。请将它们整理成以下3个固定分组（每组必须出现，无内容则 items 为空数组）：
 
 分组定义：
 1. 军事动态（icon: 🔴）：空袭、导弹、地面行动、核设施、无人机
 2. 霍尔木兹 & 能源（icon: 🛢️）：海峡通航、航运、油价、封锁
 3. 谈判 & 外交（icon: 🕊️）：停火提议、外交斡旋、谈判、国际调停
-4. 整体态势（icon: 📊）：伤亡数据、政治局势、多方综合评估
 
 每组最多4条，每条：
 - time: 从新闻时间取 HH:MM（转换为香港时间 UTC+8）
@@ -1147,14 +1146,17 @@ async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<Wha
   - 主语模糊（不允许"某方""双方""各方"，必须说明是哪个国家/机构/人物）
   - 省略关键数字或具体细节（有数字尽量保留：波次、枚数、桶/日、美元价格）
 
-选取标准：优先选择有具体军事行动、具体数据或直接表态的新闻；忽略背景分析、观点类、会议筹备类文章。
+选取标准：
+- 军事动态：优先选择具体打击、部署、导弹、无人机、基地受损、核设施相关事件
+- 霍尔木兹 & 能源：优先选择海峡通航、油轮、收费、绕道管线、出口、油价、护航等具体变化
+- 谈判 & 外交：优先选择停火提议、四国协调、调停、谈判信号等明确外交动作
+- 忽略背景分析、观点类、纯评论类文章
 
 输出格式（JSON数组）：
 [
   { "group_label": "军事动态", "group_icon": "🔴", "items": [...] },
   { "group_label": "霍尔木兹 & 能源", "group_icon": "🛢️", "items": [...] },
-  { "group_label": "谈判 & 外交", "group_icon": "🕊️", "items": [...] },
-  { "group_label": "整体态势", "group_icon": "📊", "items": [...] }
+  { "group_label": "谈判 & 外交", "group_icon": "🕊️", "items": [...] }
 ]
 
 新闻列表：
@@ -1200,8 +1202,7 @@ ${newsList}
         const fixedGroups = [
             { group_label: '军事动态', group_icon: '🔴' },
             { group_label: '霍尔木兹 & 能源', group_icon: '🛢️' },
-            { group_label: '谈判 & 外交', group_icon: '🕊️' },
-            { group_label: '整体态势', group_icon: '📊' }
+            { group_label: '谈判 & 外交', group_icon: '🕊️' }
         ] as const;
 
         return fixedGroups.map((expectedGroup) => {
