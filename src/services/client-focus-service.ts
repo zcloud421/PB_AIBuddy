@@ -1126,7 +1126,7 @@ async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<Wha
             const rightTs = right.published_at ? new Date(right.published_at).getTime() : 0;
             return rightTs - leftTs;
         })
-        .slice(0, 20);
+        .slice(0, 30);
 
     if (candidates.length === 0) {
         return [];
@@ -1207,7 +1207,7 @@ ${newsList}
         }> | null;
 
         if (!Array.isArray(parsed)) {
-            return [];
+            return buildFallbackWhatChangedGroups(candidates);
         }
 
         const fixedGroups = [
@@ -1218,7 +1218,7 @@ ${newsList}
 
         return fixedGroups.map((expectedGroup) => {
             const sourceGroup = parsed.find((group) => group.group_label?.trim() === expectedGroup.group_label);
-            const items = Array.isArray(sourceGroup?.items)
+            const parsedItems = Array.isArray(sourceGroup?.items)
                 ? sourceGroup.items
                       .filter((item) => typeof item?.time === 'string' && typeof item?.headline === 'string')
                       .map((item) => ({
@@ -1229,6 +1229,9 @@ ${newsList}
                       .slice(0, 4)
                 : [];
 
+            const fallbackItems = buildFallbackWhatChangedItems(candidates, expectedGroup.group_label);
+            const items = mergeWhatChangedItems(parsedItems, fallbackItems);
+
             return {
                 group_label: expectedGroup.group_label,
                 group_icon: expectedGroup.group_icon,
@@ -1236,8 +1239,160 @@ ${newsList}
             };
         });
     } catch {
-        return [];
+        return buildFallbackWhatChangedGroups(candidates);
     }
+}
+
+function buildFallbackWhatChangedGroups(newsItems: NewsItem[]): WhatChangedGroup[] {
+    const fixedGroups = [
+        { group_label: '军事动态', group_icon: '🔴' },
+        { group_label: '霍尔木兹 & 能源', group_icon: '🛢️' },
+        { group_label: '谈判 & 外交', group_icon: '🕊️' }
+    ] as const;
+
+    return fixedGroups.map((group) => ({
+        group_label: group.group_label,
+        group_icon: group.group_icon,
+        items: buildFallbackWhatChangedItems(newsItems, group.group_label)
+    }));
+}
+
+function buildFallbackWhatChangedItems(
+    newsItems: NewsItem[],
+    groupLabel: '军事动态' | '霍尔木兹 & 能源' | '谈判 & 外交'
+) {
+    return newsItems
+        .filter((item) => classifyWhatChangedGroup(item.title) === groupLabel)
+        .map((item) => ({
+            time: formatClockTime(item.published_at),
+            headline: buildFallbackWhatChangedHeadline(item.title)
+        }))
+        .filter((item) => item.headline)
+        .slice(0, 4);
+}
+
+function mergeWhatChangedItems(
+    parsedItems: Array<{ time: string; headline: string }>,
+    fallbackItems: Array<{ time: string; headline: string }>
+) {
+    const merged: Array<{ time: string; headline: string }> = [];
+    const seen = new Set<string>();
+
+    for (const item of [...parsedItems, ...fallbackItems]) {
+        const normalized = item.headline.replace(/\s+/g, '').toLowerCase();
+        if (!normalized || seen.has(normalized)) {
+            continue;
+        }
+        seen.add(normalized);
+        merged.push(item);
+        if (merged.length >= 4) {
+            break;
+        }
+    }
+
+    return merged;
+}
+
+function classifyWhatChangedGroup(title: string): '军事动态' | '霍尔木兹 & 能源' | '谈判 & 外交' | null {
+    const normalized = title.toLowerCase();
+
+    const energyKeywords = [
+        'hormuz',
+        'strait',
+        'tanker',
+        'shipping',
+        'passage',
+        'transit',
+        'fee',
+        'licensing',
+        'permit',
+        'pipeline',
+        'yanbu',
+        'aramco',
+        'throughput',
+        'barrel',
+        'oil',
+        'wti',
+        'brent',
+        'fifth fleet'
+    ];
+    if (energyKeywords.some((keyword) => normalized.includes(keyword))) {
+        return '霍尔木兹 & 能源';
+    }
+
+    const diplomacyKeywords = [
+        'ceasefire',
+        'negotiation',
+        'negotiations',
+        'talks',
+        'dialogue',
+        'foreign minister',
+        'foreign ministers',
+        'islamabad',
+        'mediated',
+        'committee',
+        'agreement',
+        'proposal',
+        'deal',
+        'saudi',
+        'turkey',
+        'egypt',
+        'pakistan',
+        'white house'
+    ];
+    if (diplomacyKeywords.some((keyword) => normalized.includes(keyword))) {
+        return '谈判 & 外交';
+    }
+
+    const militaryKeywords = [
+        'strike',
+        'attack',
+        'airstrike',
+        'drone',
+        'missile',
+        'troops',
+        'forces',
+        'base',
+        'facility',
+        'refinery',
+        'petrochemical',
+        'nuclear',
+        'tabriz',
+        'haifa',
+        'azraq',
+        'prince sultan',
+        'houthis',
+        'bab el-mandeb',
+        'revolutionary guard',
+        'irgc'
+    ];
+    if (militaryKeywords.some((keyword) => normalized.includes(keyword))) {
+        return '军事动态';
+    }
+
+    return null;
+}
+
+function buildFallbackWhatChangedHeadline(title: string) {
+    const actor = extractMiddleEastActor(title);
+    const cleanedTitle = title
+        .replace(/\s+-\s+[^-]+$/, '')
+        .replace(/^['"]|['"]$/g, '')
+        .trim();
+
+    if (!cleanedTitle) {
+        return '';
+    }
+
+    if (actor) {
+        const actorPrefix = `【${actor}】`;
+        if (cleanedTitle.startsWith(actorPrefix)) {
+            return cleanedTitle.slice(0, 35);
+        }
+        return `${actorPrefix}${cleanedTitle}`.slice(0, 35);
+    }
+
+    return cleanedTitle.slice(0, 35);
 }
 
 function summarizeMiddleEastHeadline(title: string, source?: string): string {
