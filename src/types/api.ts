@@ -125,10 +125,13 @@ export interface ClientFocusTransmissionItem {
     latest_evidence?: string | null;
 }
 
-export interface WhatChangedItem {
-    time: string;
-    headline: string;
-    asset_tags: string[];
+export interface WhatChangedGroup {
+    group_label: string;
+    group_icon: string;
+    items: Array<{
+        time: string;
+        headline: string;
+    }>;
 }
 
 export interface ClientFocusListItem {
@@ -149,7 +152,7 @@ export interface ClientFocusDetailResponse {
     summary: string;
     accent: string;
     latest_updates: ClientFocusUpdate[];
-    what_changed?: WhatChangedItem[];
+    what_changed?: WhatChangedGroup[];
     client_questions: ClientFocusQuestion[];
     transmission_chain: ClientFocusTransmissionItem[];
     related_assets: string[];

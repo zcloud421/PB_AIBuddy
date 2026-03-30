@@ -7,7 +7,7 @@ import type {
     ClientFocusTransmissionItem,
     ClientFocusUpdate,
     NewsItem,
-    WhatChangedItem
+    WhatChangedGroup
 } from '../types/api';
 import { fetchNewsItemsByQuery } from '../data/news-fetcher';
 import axios from 'axios';
@@ -92,7 +92,8 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
         query: 'Iran Israel Pentagon ground operations retaliation infrastructure JD Vance Trump White House strike military latest war',
         newsQueries: [
             'Iran Israel Pentagon ground operations retaliation infrastructure JD Vance Trump White House strike military latest war',
-            'Hormuz tanker shipping crude oil exports sanctions ceasefire diplomacy Iran Israel Middle East latest'
+            'Hormuz tanker shipping crude oil exports sanctions ceasefire diplomacy Iran Israel Middle East latest',
+            'Iran IRGC attack strike nuclear Saudi Arabia ceasefire negotiations Pakistan four nations ground troops Hormuz'
         ],
         fallbackStatus: '持续发酵',
         clientQuestions: [
@@ -1098,99 +1099,114 @@ function classifyMiddleEastChangeImpact(title: string): '风险抬升' | '缓和
     return classifyMiddleEastImpact(title) === '风险抬升' ? '风险抬升' : null;
 }
 
-async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<WhatChangedItem[]> {
+async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<WhatChangedGroup[]> {
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
         return [];
     }
 
     const candidates = newsItems
-        .filter((item) => isWithinHours(item.published_at, WHAT_CHANGED_WINDOW_HOURS))
-        .map((item) => ({
-            item,
-            impact: classifyMiddleEastChangeImpact(item.title)
-        }))
-        .filter((entry): entry is { item: NewsItem; impact: '风险抬升' | '缓和' } => Boolean(entry.impact))
+        .filter((item) => isWithinHours(item.published_at, 48))
         .sort((left, right) => {
-            const leftTs = left.item.published_at ? new Date(left.item.published_at).getTime() : 0;
-            const rightTs = right.item.published_at ? new Date(right.item.published_at).getTime() : 0;
+            const leftTs = left.published_at ? new Date(left.published_at).getTime() : 0;
+            const rightTs = right.published_at ? new Date(right.published_at).getTime() : 0;
             return rightTs - leftTs;
         })
-        .slice(0, 3);
+        .slice(0, 10);
 
     if (candidates.length === 0) {
         return [];
     }
 
-    const systemPrompt = '你是香港私人银行的市场简报助手。请将英文新闻标题压缩成一句可直接给RM使用的中文市场变化提示。';
-
-    const results = await Promise.all(
-        candidates.map(async ({ item, impact }) => {
-            const userPrompt = `
+    const systemPrompt = '你是香港私人银行的市场简报助手。请按给定分组选项，把过去48小时的中东冲突新闻整理成可直接给RM使用的中文结构化要点。';
+    const newsList = candidates
+        .map((item, index) => `${index + 1}. ${formatClockTime(item.published_at)} | ${item.title}`)
+        .join('\n');
+    const userPrompt = `
 你是香港私人银行的市场简报助手。
 
-将以下新闻标题处理成两部分，用 JSON 格式输出：
+以下是过去48小时的中东冲突新闻标题列表（含时间），请将它们整理成最多4个分组：
 
-{
-  "headline": "事件描述，不超过30字，必须包含：主体（谁）+ 具体行动或言论核心。禁止使用'引发不确定性''局势升级''风险抬升'等模糊表述。",
-  "asset_tags": ["最多3个受影响资产或方向，如'油价↑''黄金''能源股''美元避险''航运'，每个不超过4字"]
-}
+分组选项（只输出有内容的分组）：
+- 军事动态（空袭、导弹、地面行动、核设施）
+- 霍尔木兹 & 能源（海峡、航运、石油）
+- 谈判 & 外交（停火、外交斡旋、谈判提议）
+- 整体态势（其他重要综合动态）
 
-新闻标题：${item.title}
-影响分类：${impact}
+每组最多2条，每条：
+- time: 从新闻时间取 HH:MM（转换为香港时间 UTC+8）
+- headline: 不超过30字，必须包含主体+具体行动，禁止"引发不确定性""局势升级"等模糊表述
+
+输出格式（JSON数组）：
+[
+  {
+    "group_label": "军事动态",
+    "group_icon": "🔴",
+    "items": [
+      { "time": "03:30", "headline": "以军使用120枚弹药打击德黑兰武器研发设施" }
+    ]
+  }
+]
+
+新闻列表：
+${newsList}
 
 只输出 JSON，不要解释，不要换行。
 `.trim();
 
-            try {
-                const response = await fetch(`${process.env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL}/chat/completions`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Authorization: `Bearer ${apiKey}`
-                    },
-                    body: JSON.stringify({
-                        model: 'deepseek-chat',
-                        messages: [
-                            { role: 'system', content: systemPrompt },
-                            { role: 'user', content: userPrompt }
-                        ]
-                    })
-                });
+    try {
+        const response = await fetch(`${process.env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: 'deepseek-chat',
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt }
+                ]
+            })
+        });
 
-                if (!response.ok) {
-                    return null;
-                }
+        if (!response.ok) {
+            return [];
+        }
 
-                const payload = (await response.json()) as {
-                    choices?: Array<{ message?: { content?: string } }>;
-                };
-                const content = payload.choices?.[0]?.message?.content?.trim() ?? '';
-                const parsed = safeParseJson(content) as { headline?: string; asset_tags?: unknown } | null;
-                const headline = typeof parsed?.headline === 'string' ? parsed.headline.trim() : '';
-                const assetTags = Array.isArray(parsed?.asset_tags)
-                    ? parsed.asset_tags
-                          .filter((tag): tag is string => typeof tag === 'string' && Boolean(tag.trim()))
-                          .map((tag) => tag.trim())
-                          .slice(0, 3)
-                    : [];
+        const payload = (await response.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+        };
+        const content = payload.choices?.[0]?.message?.content?.trim() ?? '';
+        const parsed = safeParseJson(content) as Array<{
+            group_label?: string;
+            group_icon?: string;
+            items?: Array<{ time?: string; headline?: string }>;
+        }> | null;
 
-                if (!headline) {
-                    return null;
-                }
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
 
-                return {
-                    time: formatClockTime(item.published_at),
-                    headline,
-                    asset_tags: assetTags
-                } satisfies WhatChangedItem;
-            } catch {
-                return null;
-            }
-        })
-    );
-
-    return results.filter((item): item is WhatChangedItem => Boolean(item)).slice(0, 3);
+        return parsed
+            .filter((group) => typeof group.group_label === 'string' && typeof group.group_icon === 'string' && Array.isArray(group.items))
+            .map((group) => ({
+                group_label: group.group_label!.trim(),
+                group_icon: group.group_icon!.trim(),
+                items: group.items!
+                    .filter((item) => typeof item?.time === 'string' && typeof item?.headline === 'string')
+                    .map((item) => ({
+                        time: item.time!.trim(),
+                        headline: item.headline!.trim()
+                    }))
+                    .filter((item) => item.time && item.headline)
+                    .slice(0, 2)
+            }))
+            .filter((group) => group.group_label && group.group_icon && group.items.length > 0)
+            .slice(0, 4);
+    } catch {
+        return [];
+    }
 }
 
 function summarizeMiddleEastHeadline(title: string, source?: string): string {
