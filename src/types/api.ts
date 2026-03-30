@@ -149,6 +149,23 @@ export interface ClientFocusDetailResponse {
     disclaimer: string;
 }
 
+export interface ClientFocusPolymarketHistoryPoint {
+    t: number;
+    p: number;
+}
+
+export interface ClientFocusPolymarketMarket {
+    condition_id: string;
+    label: string;
+    description: string;
+    probability: number;
+    history: ClientFocusPolymarketHistoryPoint[];
+}
+
+export interface ClientFocusPolymarketResponse {
+    markets: ClientFocusPolymarketMarket[];
+}
+
 export interface SignalRow {
     name: string;
     value: string;

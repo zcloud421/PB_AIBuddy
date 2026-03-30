@@ -38,7 +38,11 @@ import {
 } from '../db/queries/ideas';
 import { HttpError } from '../lib/http-error';
 import { buildThemeNarrative } from './theme-narrative';
-import { getClientFocusDetail as getClientFocusDetailPayload, getClientFocusList as getClientFocusListPayload } from './client-focus-service';
+import {
+    getClientFocusDetail as getClientFocusDetailPayload,
+    getClientFocusList as getClientFocusListPayload,
+    getMiddleEastPolymarket as getMiddleEastPolymarketPayload
+} from './client-focus-service';
 import { generateNarrative, sanitizeNarrativeOutput } from '../utils/narrative-generator';
 import type {
     AsyncScoringAcceptedResponse,
@@ -285,6 +289,10 @@ export async function getClientFocusList(): Promise<ClientFocusListItem[]> {
 
 export async function getClientFocusDetail(slug: string): Promise<ClientFocusDetailResponse | null> {
     return getClientFocusDetailPayload(slug);
+}
+
+export async function getMiddleEastPolymarket() {
+    return getMiddleEastPolymarketPayload();
 }
 
 export async function getTodayIdeas(): Promise<TodayIdeasResponse> {

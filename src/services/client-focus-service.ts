@@ -1,17 +1,21 @@
 import type {
     ClientFocusDetailResponse,
     ClientFocusListItem,
+    ClientFocusPolymarketMarket,
+    ClientFocusPolymarketResponse,
     ClientFocusQuestion,
     ClientFocusTransmissionItem,
     ClientFocusUpdate,
     NewsItem
 } from '../types/api';
 import { fetchNewsItemsByQuery } from '../data/news-fetcher';
+import axios from 'axios';
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
 const DEFAULT_DISCLAIMER = '本页内容仅供市场讨论准备，客户沟通请结合所属机构的 house view 与合规要求。';
 const FOCUS_CACHE_TTL_MS = 60 * 60 * 1000;
 const FOCUS_CHAIN_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const POLYMARKET_CACHE_TTL_MS = 5 * 60 * 1000;
 
 interface FocusTopicConfig {
     slug: string;
@@ -195,9 +199,132 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
 
 const focusCache = new Map<string, { expiresAt: number; value: ClientFocusDetailResponse }>();
 const focusChainCache = new Map<string, { expiresAt: number; value: ClientFocusTransmissionItem[] }>();
+const polymarketCache = new Map<string, { expiresAt: number; value: ClientFocusPolymarketResponse }>();
+
+const MIDDLE_EAST_POLYMARKET_MARKETS = [
+    {
+        conditionId: '0x628e335a6cbec4b2dbcc89482fe594cb91f273318479e6930542d3cffc02f68f',
+        label: '美伊4月底前直接谈判',
+        description: '若概率上升，优先关注缓和交易：油价回落、避险资产松动'
+    },
+    {
+        conditionId: '0x6d0e09d0f04572d9b1adad84703458b0297bc5603b69dccbde93147ee4443246',
+        label: '美军4月底前进入伊朗',
+        description: '若概率上升，优先关注：油价、黄金、美元避险'
+    },
+    {
+        conditionId: '0x7eceae72d7d7b3e175fa872c728526e6fec4714288a4bda91fe818e298e69a6f',
+        label: 'WTI 4月触及 $120',
+        description: '反映市场对供应冲击的定价程度'
+    }
+] as const;
+
+interface PolymarketGammaMarket {
+    clobTokenIds?: string | string[];
+    outcomePrices?: string | string[];
+}
+
+interface PolymarketHistoryPoint {
+    t: number | string;
+    p: number | string;
+}
+
+interface PolymarketHistoryResponse {
+    history?: PolymarketHistoryPoint[];
+}
 
 function getFocusTopic(slug: string): FocusTopicConfig | null {
     return FOCUS_TOPICS.find((topic) => topic.slug === slug) ?? null;
+}
+
+function parseStringArray(value: string | string[] | undefined): string[] {
+    if (Array.isArray(value)) {
+        return value;
+    }
+
+    if (typeof value !== 'string') {
+        return [];
+    }
+
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+async function fetchPolymarketMarket(
+    market: (typeof MIDDLE_EAST_POLYMARKET_MARKETS)[number]
+): Promise<ClientFocusPolymarketMarket> {
+    const endTs = Math.floor(Date.now() / 1000);
+    const startTs = endTs - 30 * 24 * 60 * 60;
+
+    const marketParams = new URLSearchParams({
+        limit: '1',
+        active: 'true'
+    });
+    marketParams.append('condition_ids', market.conditionId);
+
+    const marketResponse = await axios.get<PolymarketGammaMarket[]>(
+        `https://gamma-api.polymarket.com/markets?${marketParams.toString()}`,
+        {
+            headers: {
+                'User-Agent': 'Josan/1.0'
+            },
+            timeout: 15000
+        }
+    );
+
+    const marketData = Array.isArray(marketResponse.data) ? marketResponse.data[0] : null;
+    if (!marketData) {
+        throw new Error('Market not found');
+    }
+
+    const outcomePrices = parseStringArray(marketData.outcomePrices);
+    const yesProbability = Number(outcomePrices[0] ?? 0);
+    const probability = Number.isFinite(yesProbability) ? yesProbability * 100 : 0;
+
+    const clobTokenIds = parseStringArray(marketData.clobTokenIds);
+    const yesTokenId = clobTokenIds[0];
+    if (!yesTokenId) {
+        throw new Error('Yes token not found');
+    }
+
+    const historyParams = new URLSearchParams({
+        market: yesTokenId,
+        startTs: String(startTs),
+        endTs: String(endTs),
+        fidelity: '1440'
+    });
+
+    const historyResponse = await axios.get<PolymarketHistoryResponse>(
+        `https://clob.polymarket.com/prices-history?${historyParams.toString()}`,
+        {
+            headers: {
+                'User-Agent': 'Josan/1.0'
+            },
+            timeout: 15000
+        }
+    );
+
+    const history = Array.isArray(historyResponse.data?.history)
+        ? historyResponse.data.history
+            .map((point) => ({
+                t: Number(point.t),
+                p: Number(point.p)
+            }))
+            .filter((point) => Number.isFinite(point.t) && Number.isFinite(point.p))
+            .sort((left, right) => left.t - right.t)
+        : [];
+
+    return {
+        condition_id: market.conditionId,
+        label: market.label,
+        description: market.description,
+        probability,
+        history
+    };
 }
 
 async function fetchFocusNewsItems(topic: FocusTopicConfig): Promise<NewsItem[]> {
@@ -1843,4 +1970,25 @@ export async function getClientFocusDetail(slug: string): Promise<ClientFocusDet
     }
 
     return buildClientFocusDetail(topic);
+}
+
+export async function getMiddleEastPolymarket(): Promise<ClientFocusPolymarketResponse> {
+    const cached = polymarketCache.get('middle-east-tensions');
+    if (cached && cached.expiresAt > Date.now()) {
+        return cached.value;
+    }
+
+    const settled = await Promise.allSettled(
+        MIDDLE_EAST_POLYMARKET_MARKETS.map((market) => fetchPolymarketMarket(market))
+    );
+
+    const markets = settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
+    const payload = { markets };
+
+    polymarketCache.set('middle-east-tensions', {
+        expiresAt: Date.now() + POLYMARKET_CACHE_TTL_MS,
+        value: payload
+    });
+
+    return payload;
 }
