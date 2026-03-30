@@ -143,6 +143,7 @@ export interface ClientFocusDetailResponse {
     summary: string;
     accent: string;
     latest_updates: ClientFocusUpdate[];
+    what_changed?: string[];
     client_questions: ClientFocusQuestion[];
     transmission_chain: ClientFocusTransmissionItem[];
     related_assets: string[];

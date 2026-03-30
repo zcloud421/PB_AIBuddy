@@ -18,6 +18,7 @@ const FOCUS_CHAIN_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const POLYMARKET_CACHE_TTL_MS = 5 * 60 * 1000;
 const POLYMARKET_HISTORY_WINDOW_DAYS = 30;
 const POLYMARKET_HISTORY_CHUNK_DAYS = 14;
+const WHAT_CHANGED_WINDOW_HOURS = 36;
 
 interface FocusTopicConfig {
     slug: string;
@@ -822,6 +823,19 @@ function isWithinDays(publishedAt: string | undefined, days: number): boolean {
     return (Date.now() - published.getTime()) <= days * 24 * 60 * 60 * 1000;
 }
 
+function isWithinHours(publishedAt: string | undefined, hours: number): boolean {
+    if (!publishedAt) {
+        return false;
+    }
+
+    const published = new Date(publishedAt);
+    if (Number.isNaN(published.getTime())) {
+        return false;
+    }
+
+    return (Date.now() - published.getTime()) <= hours * 60 * 60 * 1000;
+}
+
 function formatMonthDay(publishedAt: string | undefined): string {
     if (!publishedAt) {
         return '近期';
@@ -1032,6 +1046,132 @@ function classifyMiddleEastImpact(title: string): ClientFocusUpdate['impact'] {
         return '政策变化';
     }
     return '风险抬升';
+}
+
+function classifyMiddleEastChangeImpact(title: string): '风险抬升' | '缓和' | null {
+    const normalized = title.toLowerCase();
+    const deEscalationSignals = [
+        'extends deadline',
+        'extends pause',
+        'extend deadline',
+        'extend pause',
+        'extension on',
+        'another extension',
+        'grants iran',
+        'grants extension',
+        'pauses strikes',
+        'pause on',
+        'pauses threat',
+        'ceasefire',
+        'truce',
+        'peace proposal',
+        'peace plan',
+        'peace deal',
+        'peace agreement',
+        'peace talks',
+        'indirect talks',
+        'backchannel',
+        'mediation',
+        'mediator',
+        'productive conversations',
+        'talks ongoing',
+        'talks underway',
+        'facilitating',
+        'diplomatic',
+        'de-escalat',
+        'deescalat',
+        'withdraw',
+        'pullback',
+        'pull back',
+        'stand down',
+        'postpone',
+        'delay strike',
+        'hold fire',
+        'suspend'
+    ];
+
+    if (deEscalationSignals.some((signal) => normalized.includes(signal))) {
+        return '缓和';
+    }
+
+    return classifyMiddleEastImpact(title) === '风险抬升' ? '风险抬升' : null;
+}
+
+async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<string[]> {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) {
+        return [];
+    }
+
+    const candidates = newsItems
+        .filter((item) => isWithinHours(item.published_at, WHAT_CHANGED_WINDOW_HOURS))
+        .map((item) => ({
+            item,
+            impact: classifyMiddleEastChangeImpact(item.title)
+        }))
+        .filter((entry): entry is { item: NewsItem; impact: '风险抬升' | '缓和' } => Boolean(entry.impact))
+        .sort((left, right) => {
+            const leftTs = left.item.published_at ? new Date(left.item.published_at).getTime() : 0;
+            const rightTs = right.item.published_at ? new Date(right.item.published_at).getTime() : 0;
+            return rightTs - leftTs;
+        })
+        .slice(0, 3);
+
+    if (candidates.length === 0) {
+        return [];
+    }
+
+    const systemPrompt = '你是香港私人银行的市场简报助手。请将英文新闻标题压缩成一句可直接给RM使用的中文市场变化提示。';
+
+    const results = await Promise.all(
+        candidates.map(async ({ item, impact }) => {
+            const userPrompt = `
+你是香港私人银行的市场简报助手。
+
+将以下英文新闻标题压缩成一句中文（不超过40字），格式：
+[事件概述] → [对市场/资产的含义]
+
+来源媒体在括号内附上，格式：（来源名）
+
+新闻标题：${item.title}
+影响分类：${impact}
+来源媒体：${item.source ?? 'Unknown'}
+
+只输出一句话，不要解释，不要换行。
+`.trim();
+
+            try {
+                const response = await fetch(`${process.env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL}/chat/completions`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: 'deepseek-chat',
+                        messages: [
+                            { role: 'system', content: systemPrompt },
+                            { role: 'user', content: userPrompt }
+                        ]
+                    })
+                });
+
+                if (!response.ok) {
+                    return null;
+                }
+
+                const payload = (await response.json()) as {
+                    choices?: Array<{ message?: { content?: string } }>;
+                };
+                const content = payload.choices?.[0]?.message?.content?.trim() ?? '';
+                return content ? content.replace(/\s+/g, ' ') : null;
+            } catch {
+                return null;
+            }
+        })
+    );
+
+    return results.filter((item): item is string => Boolean(item)).slice(0, 3);
 }
 
 function summarizeMiddleEastHeadline(title: string, source?: string): string {
@@ -1976,6 +2116,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
     const skipWeeklyProgress = topic.slug === 'middle-east-tensions' || topic.slug === 'private-credit-stress';
     const weeklyProgress = skipWeeklyProgress ? null : await generateWeeklyProgress(topic, newsItems);
     const transmissionChain = await generateTransmissionChain(topic, newsItems);
+    const whatChanged = topic.slug === 'middle-east-tensions' ? await generateMiddleEastWhatChanged(newsItems) : [];
 
     const detail: ClientFocusDetailResponse = {
         slug: topic.slug,
@@ -2001,6 +2142,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
                     : topic.slug === 'usd-strength'
                         ? []
                         : sanitizeWeeklyProgress(weeklyProgress?.items, newsItems),
+        what_changed: whatChanged.length > 0 ? whatChanged : undefined,
         client_questions: topic.clientQuestions,
         transmission_chain: transmissionChain ?? buildFallbackTransmission(topic),
         related_assets: topic.relatedAssets,
