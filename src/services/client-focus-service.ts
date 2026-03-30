@@ -1782,27 +1782,50 @@ function buildFallbackWhatChangedGroups(newsItems: NewsItem[]): WhatChangedGroup
 
 function sanitizeGeneratedMiddleEastHeadline(headline: string) {
     const trimmed = headline.replace(/\s+/g, ' ').trim();
-    if (!trimmed) {
-        return '';
-    }
-
-    const chineseMatches = trimmed.match(/[\u4e00-\u9fff]/g) ?? [];
-    const latinWordMatches = trimmed.match(/[A-Za-z]{3,}/g) ?? [];
-    const contentAfterActor = trimmed.replace(/^【[^】]+】/, '').trim();
-
-    if (chineseMatches.length < 4) {
-        return '';
-    }
-
-    if (latinWordMatches.length >= 4) {
-        return '';
-    }
-
-    if (/[A-Za-z]{3,}\s+[A-Za-z]{3,}/.test(contentAfterActor)) {
+    if (!trimmed || isBadMiddleEastHeadline(trimmed)) {
         return '';
     }
 
     return trimmed;
+}
+
+function isBadMiddleEastHeadline(headline: string) {
+    const normalized = headline.replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+        return true;
+    }
+
+    const lower = normalized.toLowerCase();
+    const chineseMatches = normalized.match(/[\u4e00-\u9fff]/g) ?? [];
+    const latinWordMatches = normalized.match(/[A-Za-z]{3,}/g) ?? [];
+    const contentAfterActor = normalized.replace(/^【[^】]+】/, '').trim();
+    const blockedFragments = [
+        'bitcoin',
+        'crypto',
+        'the latest',
+        'ticks up',
+        'market update',
+        'live updates',
+        'breaking news'
+    ];
+
+    if (blockedFragments.some((fragment) => lower.includes(fragment))) {
+        return true;
+    }
+
+    if (chineseMatches.length < 4) {
+        return true;
+    }
+
+    if (latinWordMatches.length >= 3) {
+        return true;
+    }
+
+    if (/[A-Za-z]{3,}\s+[A-Za-z]{3,}/.test(contentAfterActor)) {
+        return true;
+    }
+
+    return false;
 }
 
 function buildFallbackWhatChangedItems(
@@ -1942,15 +1965,17 @@ function buildFallbackWhatChangedHeadline(title: string) {
         return '';
     }
 
-    if (actor) {
+    const candidate = actor
+        ? (() => {
         const actorPrefix = `【${actor}】`;
         if (cleanedTitle.startsWith(actorPrefix)) {
             return cleanedTitle.slice(0, 35);
         }
         return `${actorPrefix}${cleanedTitle}`.slice(0, 35);
-    }
+        })()
+        : cleanedTitle.slice(0, 35);
 
-    return cleanedTitle.slice(0, 35);
+    return isBadMiddleEastHeadline(candidate) ? '' : candidate;
 }
 
 function summarizeMiddleEastHeadline(title: string, source?: string): string {
