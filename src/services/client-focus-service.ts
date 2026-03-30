@@ -20,6 +20,7 @@ const POLYMARKET_CACHE_TTL_MS = 5 * 60 * 1000;
 const POLYMARKET_HISTORY_WINDOW_DAYS = 30;
 const POLYMARKET_HISTORY_CHUNK_DAYS = 14;
 const WHAT_CHANGED_WINDOW_HOURS = 72;
+const PRIVATE_CREDIT_WHAT_CHANGED_WINDOW_DAYS = 7;
 
 interface FocusTopicConfig {
     slug: string;
@@ -1331,11 +1332,131 @@ ${newsList}
     }
 }
 
+async function generatePrivateCreditWhatChanged(newsItems: NewsItem[]): Promise<WhatChangedGroup[]> {
+    const candidates = dedupeRecentNews(newsItems)
+        .filter((item) => isWithinDays(item.published_at, PRIVATE_CREDIT_WHAT_CHANGED_WINDOW_DAYS))
+        .filter((item) => isPrivateCreditHardNews(item))
+        .sort((left, right) => {
+            const leftTs = left.published_at ? new Date(left.published_at).getTime() : 0;
+            const rightTs = right.published_at ? new Date(right.published_at).getTime() : 0;
+            return rightTs - leftTs;
+        })
+        .slice(0, 20);
+
+    if (candidates.length === 0) {
+        return [];
+    }
+
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) {
+        return buildFallbackPrivateCreditWhatChangedGroups(candidates);
+    }
+
+    const newsList = candidates
+        .map((item, index) => `${index + 1}. ${formatMonthDay(item.published_at)} | ${item.title}`)
+        .join('\n');
+
+    const systemPrompt =
+        '你是香港私人银行的市场沟通助手。请把过去一周的私募信贷相关新闻整理成可直接给RM使用的中文分组要点。';
+    const userPrompt = `
+以下是过去7天的私募信贷相关新闻标题。请将它们整理成以下3个固定分组（每组必须出现，无内容则 items 为空数组）：
+
+1. 赎回 & 流动性（icon: 💧）：赎回限制、gate、提款、流动性收紧、融资额度变化
+2. 信用事件（icon: 🧨）：违约、减记、评级动作、重组、损失确认
+3. 风险外溢（icon: 🏦）：银行、保险、养老金、BDC、资管平台敞口与二阶影响
+
+每组最多3条，每条：
+- time: 从新闻时间取 MM-DD；无法判断则留空字符串
+- headline: 不超过35字，必须包含【机构/主体】+【具体动作或事实】
+
+禁止：
+- “市场承压”“风险升温”“持续发酵”等空泛表述
+- 只有判断，没有具体机构或动作
+- 纯背景分析和观点文章
+
+输出格式（JSON数组）：
+[
+  { "group_label": "赎回 & 流动性", "group_icon": "💧", "items": [...] },
+  { "group_label": "信用事件", "group_icon": "🧨", "items": [...] },
+  { "group_label": "风险外溢", "group_icon": "🏦", "items": [...] }
+]
+
+新闻列表：
+${newsList}
+
+只输出 JSON，不要解释。
+`.trim();
+
+    try {
+        const response = await fetch(`${process.env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: 'deepseek-chat',
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt }
+                ]
+            })
+        });
+
+        if (!response.ok) {
+            return buildFallbackPrivateCreditWhatChangedGroups(candidates);
+        }
+
+        const payload = (await response.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+        };
+        const content = payload.choices?.[0]?.message?.content?.trim() ?? '';
+        const parsed = safeParseJson(content) as Array<{
+            group_label?: string;
+            group_icon?: string;
+            items?: Array<{ time?: string; headline?: string }>;
+        }> | null;
+
+        if (!Array.isArray(parsed)) {
+            return buildFallbackPrivateCreditWhatChangedGroups(candidates);
+        }
+
+        const fixedGroups = [
+            { group_label: '赎回 & 流动性', group_icon: '💧' },
+            { group_label: '信用事件', group_icon: '🧨' },
+            { group_label: '风险外溢', group_icon: '🏦' }
+        ] as const;
+
+        return fixedGroups.map((expectedGroup) => {
+            const sourceGroup = parsed.find((group) => group.group_label?.trim() === expectedGroup.group_label);
+            const parsedItems = Array.isArray(sourceGroup?.items)
+                ? sourceGroup.items
+                      .filter((item) => typeof item?.headline === 'string')
+                      .map((item) => ({
+                          time: item.time?.trim() ?? '',
+                          headline: item.headline?.trim() ?? ''
+                      }))
+                      .filter((item) => item.headline)
+                      .slice(0, 3)
+                : [];
+
+            const fallbackItems = buildFallbackPrivateCreditWhatChangedItems(candidates, expectedGroup.group_label);
+            return {
+                group_label: expectedGroup.group_label,
+                group_icon: expectedGroup.group_icon,
+                items: mergeWhatChangedItems(parsedItems, fallbackItems).slice(0, 3)
+            };
+        });
+    } catch {
+        return buildFallbackPrivateCreditWhatChangedGroups(candidates);
+    }
+}
+
 async function generateDynamicClientQuestions(
     topic: FocusTopicConfig,
     newsItems: NewsItem[]
 ): Promise<Array<{ question: string; answer: string }> | null> {
-    if (topic.slug !== 'middle-east-tensions') {
+    if (topic.slug !== 'middle-east-tensions' && topic.slug !== 'private-credit-stress') {
         return null;
     }
 
@@ -1346,6 +1467,11 @@ async function generateDynamicClientQuestions(
 
     const contextItems = newsItems
         .slice()
+        .filter((item) =>
+            topic.slug === 'private-credit-stress'
+                ? isWithinDays(item.published_at, 7)
+                : true
+        )
         .sort((left, right) => {
             const leftTs = left.published_at ? new Date(left.published_at).getTime() : 0;
             const rightTs = right.published_at ? new Date(right.published_at).getTime() : 0;
@@ -1368,7 +1494,8 @@ async function generateDynamicClientQuestions(
         .map((item, index) => `${index + 1}. ${formatClockTime(item.published_at)} | ${item.title}`)
         .join('\n');
 
-    const systemPrompt = `
+    const systemPrompt = topic.slug === 'middle-east-tensions'
+        ? `
 你是香港私人银行的市场沟通助手，面向 RM/IC 生成“客户常问”的标准回答。
 
 回答目标不是复述新闻，而是帮助 RM 向客户解释：
@@ -1382,8 +1509,24 @@ async function generateDynamicClientQuestions(
 - 不要写成快讯，不要像事件播报
 - 不要使用“局势升级”“引发不确定性”等空泛表述
 - 不要直接给投资建议
+`.trim()
+        : `
+你是香港私人银行的市场沟通助手，面向 RM/IC 生成“客户常问”的标准回答。
+
+回答目标不是复述私募信贷新闻，而是帮助 RM 向客户解释：
+1. 风险主要出在哪里
+2. 最近一周新增了什么事实
+3. 这些变化对信用、流动性和相关资产意味着什么
+
+语气要求：
+- 专业、克制、像私行客户沟通口径
+- 先讲机制，再讲本周新增变化，再讲资产含义
+- 不要写成快讯，不要像事件播报
+- 不要使用“市场承压”“风险升温”等空泛表述
+- 不要直接给投资建议
 `.trim();
-    const userPrompt = `
+    const userPrompt = topic.slug === 'middle-east-tensions'
+        ? `
 以下是过去48小时的中东冲突相关新闻。请基于这些最新信息，
 为以下3个固定问题重写回答，供香港私人银行 RM/IC 与客户沟通时使用。
 
@@ -1408,6 +1551,37 @@ ${newsList}
 - 不要以“过去48小时内...”开头
 - 不要整段围绕某个 headline 复述
 - 不要使用“局势升级”“引发不确定性”等空泛表述
+- 不要给具体投资建议
+
+输出格式（JSON数组）：
+[{"question":"原问题文字","answer":"重写后的答案"}]
+
+只输出JSON，不要解释。
+`.trim()
+        : `
+以下是过去7天的私募信贷相关新闻。请基于这些最新信息，
+为以下固定问题重写回答，供香港私人银行 RM/IC 与客户沟通时使用。
+
+${questionsList}
+
+每个问题的当前基准回答如下：
+${baselineAnswers}
+
+新闻列表：
+${newsList}
+
+写作要求：
+- 每条答案 70-110 字
+- 必须采用“风险机制 → 本周新增变化 → 资产含义”的结构
+- 必须至少包含 1 个具体机构、金额、比例、评级动作或违约/减记事实
+- 重点解释对流动性、违约风险、BDC/另类资管股或银行融资行为的影响
+- 回答要有 1-2 周可用性，不要写成单条新闻复述
+- 在保留基准回答逻辑框架的基础上，用本周新事实更新答案
+
+禁止：
+- 不要以“过去一周...”开头
+- 不要整段围绕某个 headline 复述
+- 不要使用“风险升温”“市场承压”等空泛表述
 - 不要给具体投资建议
 
 输出格式（JSON数组）：
@@ -1457,6 +1631,139 @@ ${newsList}
     } catch {
         return null;
     }
+}
+
+function buildFallbackPrivateCreditWhatChangedGroups(newsItems: NewsItem[]): WhatChangedGroup[] {
+    const fixedGroups = [
+        { group_label: '赎回 & 流动性', group_icon: '💧' },
+        { group_label: '信用事件', group_icon: '🧨' },
+        { group_label: '风险外溢', group_icon: '🏦' }
+    ] as const;
+
+    return fixedGroups.map((group) => ({
+        group_label: group.group_label,
+        group_icon: group.group_icon,
+        items: buildFallbackPrivateCreditWhatChangedItems(newsItems, group.group_label)
+    }));
+}
+
+function buildFallbackPrivateCreditWhatChangedItems(
+    newsItems: NewsItem[],
+    groupLabel: '赎回 & 流动性' | '信用事件' | '风险外溢'
+) {
+    return newsItems
+        .filter((item) => classifyPrivateCreditWhatChangedGroup(item.title) === groupLabel)
+        .map((item) => ({
+            time: formatMonthDay(item.published_at),
+            headline: buildFallbackPrivateCreditHeadline(item.title)
+        }))
+        .filter((item) => item.headline)
+        .slice(0, 3);
+}
+
+function classifyPrivateCreditWhatChangedGroup(
+    title: string
+): '赎回 & 流动性' | '信用事件' | '风险外溢' | null {
+    const normalized = title.toLowerCase();
+
+    const liquidityKeywords = [
+        'redemption',
+        'withdrawal',
+        'gate',
+        'limit',
+        'liquidity',
+        'freeze',
+        'frozen',
+        'suspend',
+        'warehouse',
+        'credit line',
+        'facility',
+        'funding'
+    ];
+    if (liquidityKeywords.some((keyword) => normalized.includes(keyword))) {
+        return '赎回 & 流动性';
+    }
+
+    const creditKeywords = [
+        'default',
+        'restructuring',
+        'restructure',
+        'write-down',
+        'writedown',
+        'haircut',
+        'downgrade',
+        'rating',
+        'loss',
+        'losses',
+        'missed payment'
+    ];
+    if (creditKeywords.some((keyword) => normalized.includes(keyword))) {
+        return '信用事件';
+    }
+
+    const spilloverKeywords = [
+        'bank',
+        'banks',
+        'insurer',
+        'insurance',
+        'pension',
+        'bdc',
+        'apollo',
+        'ares',
+        'blackstone',
+        'blue owl',
+        'jpmorgan',
+        'morgan stanley',
+        'goldman',
+        'blackrock'
+    ];
+    if (spilloverKeywords.some((keyword) => normalized.includes(keyword))) {
+        return '风险外溢';
+    }
+
+    return null;
+}
+
+function buildFallbackPrivateCreditHeadline(title: string) {
+    const actor = extractPrivateCreditActor(title);
+    const cleanedTitle = title
+        .replace(/\s+-\s+[^-]+$/, '')
+        .replace(/^['"]|['"]$/g, '')
+        .trim();
+
+    if (!cleanedTitle) {
+        return '';
+    }
+
+    if (actor) {
+        const actorPrefix = `【${actor}】`;
+        if (cleanedTitle.startsWith(actorPrefix)) {
+            return cleanedTitle.slice(0, 35);
+        }
+        return `${actorPrefix}${cleanedTitle}`.slice(0, 35);
+    }
+
+    return cleanedTitle.slice(0, 35);
+}
+
+function extractPrivateCreditActor(title: string) {
+    const normalized = title.toLowerCase();
+    const actorMap: Array<[string, string]> = [
+        ['apollo', 'Apollo'],
+        ['ares', 'Ares'],
+        ['blackstone', 'Blackstone'],
+        ['blue owl', 'Blue Owl'],
+        ['jpmorgan', 'JPMorgan'],
+        ['morgan stanley', 'Morgan Stanley'],
+        ['goldman', 'Goldman'],
+        ['blackrock', 'BlackRock'],
+        ['bdc', 'BDC'],
+        ['insurer', '保险机构'],
+        ['pension', '养老金']
+    ];
+
+    const found = actorMap.find(([keyword]) => normalized.includes(keyword));
+    return found?.[1] ?? null;
 }
 
 function buildFallbackWhatChangedGroups(newsItems: NewsItem[]): WhatChangedGroup[] {
@@ -2563,7 +2870,12 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
     const skipWeeklyProgress = topic.slug === 'middle-east-tensions' || topic.slug === 'private-credit-stress';
     const weeklyProgress = skipWeeklyProgress ? null : await generateWeeklyProgress(topic, newsItems);
     const transmissionChain = await generateTransmissionChain(topic, newsItems);
-    const whatChanged = topic.slug === 'middle-east-tensions' ? await generateMiddleEastWhatChanged(newsItems) : [];
+    const whatChanged =
+        topic.slug === 'middle-east-tensions'
+            ? await generateMiddleEastWhatChanged(newsItems)
+            : topic.slug === 'private-credit-stress'
+                ? await generatePrivateCreditWhatChanged(newsItems)
+                : [];
     const dynamicClientQuestions = await generateDynamicClientQuestions(topic, newsItems);
 
     const detail: ClientFocusDetailResponse = {
@@ -2583,10 +2895,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
             topic.slug === 'middle-east-tensions'
                 ? sanitizeLatestUpdates(topic, modelOutput?.latest_updates, newsItems)
                 : topic.slug === 'private-credit-stress'
-                    ? (() => {
-                        const headlines = buildPrivateCreditLatestUpdates(newsItems);
-                        return headlines.length > 0 ? headlines : buildWeeklyFallbackUpdates(newsItems);
-                    })()
+                    ? []
                     : topic.slug === 'usd-strength'
                         ? []
                         : sanitizeWeeklyProgress(weeklyProgress?.items, newsItems),
