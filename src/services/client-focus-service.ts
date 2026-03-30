@@ -1331,6 +1331,97 @@ ${newsList}
     }
 }
 
+async function generateDynamicClientQuestions(
+    topic: FocusTopicConfig,
+    newsItems: NewsItem[]
+): Promise<Array<{ question: string; answer: string }> | null> {
+    if (topic.slug !== 'middle-east-tensions') {
+        return null;
+    }
+
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) {
+        return null;
+    }
+
+    const contextItems = newsItems
+        .slice()
+        .sort((left, right) => {
+            const leftTs = left.published_at ? new Date(left.published_at).getTime() : 0;
+            const rightTs = right.published_at ? new Date(right.published_at).getTime() : 0;
+            return rightTs - leftTs;
+        })
+        .slice(0, 10);
+
+    if (contextItems.length === 0) {
+        return null;
+    }
+
+    const questionsList = topic.clientQuestions.map((item, index) => `${index + 1}. ${item.question}`).join('\n');
+    const newsList = contextItems
+        .map((item, index) => `${index + 1}. ${formatClockTime(item.published_at)} | ${item.title}`)
+        .join('\n');
+
+    const systemPrompt = '你是香港私人银行的市场简报助手。';
+    const userPrompt = `
+以下是过去48小时的中东冲突相关新闻。请基于这些最新信息，
+为以下3个固定问题重新撰写答案（每条答案不超过100字，
+必须包含具体数字或最新事实，禁止模糊表述）：
+
+${questionsList}
+
+新闻列表：
+${newsList}
+
+输出格式（JSON数组）：
+[{"question":"原问题文字","answer":"重写后的答案"}]
+
+只输出JSON，不要解释。
+`.trim();
+
+    try {
+        const response = await fetch(`${process.env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: 'deepseek-chat',
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt }
+                ]
+            })
+        });
+
+        if (!response.ok) {
+            return null;
+        }
+
+        const payload = (await response.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+        };
+        const content = payload.choices?.[0]?.message?.content?.trim() ?? '';
+        const parsed = safeParseJson(content) as Array<{ question?: string; answer?: string }> | null;
+
+        if (!Array.isArray(parsed)) {
+            return null;
+        }
+
+        return topic.clientQuestions.map((item) => {
+            const matched = parsed.find((entry) => entry.question?.trim() === item.question);
+            const answer = matched?.answer?.trim();
+            return {
+                question: item.question,
+                answer: answer ? answer : item.answer
+            };
+        });
+    } catch {
+        return null;
+    }
+}
+
 function buildFallbackWhatChangedGroups(newsItems: NewsItem[]): WhatChangedGroup[] {
     const fixedGroups = [
         { group_label: '霍尔木兹海峡', group_icon: '🛢️' },
@@ -2436,6 +2527,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
     const weeklyProgress = skipWeeklyProgress ? null : await generateWeeklyProgress(topic, newsItems);
     const transmissionChain = await generateTransmissionChain(topic, newsItems);
     const whatChanged = topic.slug === 'middle-east-tensions' ? await generateMiddleEastWhatChanged(newsItems) : [];
+    const dynamicClientQuestions = await generateDynamicClientQuestions(topic, newsItems);
 
     const detail: ClientFocusDetailResponse = {
         slug: topic.slug,
@@ -2462,7 +2554,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
                         ? []
                         : sanitizeWeeklyProgress(weeklyProgress?.items, newsItems),
         what_changed: whatChanged.length > 0 ? whatChanged : undefined,
-        client_questions: topic.clientQuestions,
+        client_questions: dynamicClientQuestions ?? topic.clientQuestions,
         transmission_chain: transmissionChain ?? buildFallbackTransmission(topic),
         related_assets: topic.relatedAssets,
         disclaimer: DEFAULT_DISCLAIMER
