@@ -16,6 +16,8 @@ const DEFAULT_DISCLAIMER = '本页内容仅供市场讨论准备，客户沟通�
 const FOCUS_CACHE_TTL_MS = 60 * 60 * 1000;
 const FOCUS_CHAIN_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const POLYMARKET_CACHE_TTL_MS = 5 * 60 * 1000;
+const POLYMARKET_HISTORY_WINDOW_DAYS = 30;
+const POLYMARKET_HISTORY_CHUNK_DAYS = 14;
 
 interface FocusTopicConfig {
     slug: string;
@@ -230,6 +232,110 @@ function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+interface PolymarketPageMarket {
+    id: string;
+    question: string;
+    groupItemTitle: string;
+    outcomePrices: string[];
+    clobTokenIds: string[];
+}
+
+function decodeHtmlEntities(value: string): string {
+    return value
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&#x27;/g, "'")
+        .replace(/&quot;/g, '"')
+        .replace(/&amp;/g, '&');
+}
+
+function extractPolymarketPageMarkets(html: string): PolymarketPageMarket[] {
+    const pattern = /\{"id":"(?<id>\d+)".*?"question":"(?<question>.*?)".*?"outcomes":\[(?<outcomes>.*?)\].*?"outcomePrices":\[(?<prices>.*?)\].*?"groupItemTitle":"(?<title>.*?)".*?"clobTokenIds":\[(?<tokens>.*?)\]/gs;
+    const markets: PolymarketPageMarket[] = [];
+
+    for (const match of html.matchAll(pattern)) {
+        const groups = match.groups;
+        if (!groups) {
+            continue;
+        }
+
+        const outcomePrices = Array.from(groups.prices.matchAll(/"([^"]+)"/g)).map((item) => item[1]);
+        const clobTokenIds = Array.from(groups.tokens.matchAll(/"([^"]+)"/g)).map((item) => item[1]);
+
+        markets.push({
+            id: groups.id,
+            question: decodeHtmlEntities(groups.question),
+            groupItemTitle: decodeHtmlEntities(groups.title),
+            outcomePrices,
+            clobTokenIds
+        });
+    }
+
+    return markets;
+}
+
+async function fetchPolymarketHistoryChunk(
+    yesTokenId: string,
+    startTs: number,
+    endTs: number
+): Promise<Array<{ t: number; p: number }>> {
+    const response = await axios.get<{ history?: Array<{ t?: number; p?: number }> }>(
+        'https://clob.polymarket.com/prices-history',
+        {
+            params: {
+                market: yesTokenId,
+                startTs,
+                endTs,
+                fidelity: 1440
+            },
+            headers: {
+                'User-Agent': 'Josan/1.0',
+                Accept: 'application/json'
+            },
+            timeout: 15000
+        }
+    );
+
+    return (response.data.history ?? [])
+        .filter((point): point is { t: number; p: number } =>
+            Number.isFinite(point.t) && Number.isFinite(point.p)
+        )
+        .map((point) => ({
+            t: Number(point.t),
+            p: Number(point.p)
+        }));
+}
+
+async function fetchPolymarketHistory(yesTokenId: string): Promise<Array<{ t: number; p: number }>> {
+    const endTs = Math.floor(Date.now() / 1000);
+    const chunks: Array<Promise<Array<{ t: number; p: number }>>> = [];
+
+    for (let offsetDays = 0; offsetDays < POLYMARKET_HISTORY_WINDOW_DAYS; offsetDays += POLYMARKET_HISTORY_CHUNK_DAYS) {
+        const chunkEnd = endTs - offsetDays * 24 * 60 * 60;
+        const chunkStart = Math.max(
+            endTs - POLYMARKET_HISTORY_WINDOW_DAYS * 24 * 60 * 60,
+            chunkEnd - POLYMARKET_HISTORY_CHUNK_DAYS * 24 * 60 * 60
+        );
+        chunks.push(fetchPolymarketHistoryChunk(yesTokenId, chunkStart, chunkEnd));
+    }
+
+    const settled = await Promise.allSettled(chunks);
+    const deduped = new Map<number, number>();
+
+    settled.forEach((result) => {
+        if (result.status !== 'fulfilled') {
+            return;
+        }
+
+        result.value.forEach((point) => {
+            deduped.set(point.t, point.p);
+        });
+    });
+
+    return Array.from(deduped.entries())
+        .map(([t, p]) => ({ t, p }))
+        .sort((left, right) => left.t - right.t);
+}
+
 async function fetchPolymarketMarket(
     market: (typeof MIDDLE_EAST_POLYMARKET_MARKETS)[number]
 ): Promise<ClientFocusPolymarketMarket> {
@@ -244,33 +350,29 @@ async function fetchPolymarketMarket(
         }
     );
 
-    const normalized = response.data
-        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&#x27;/g, "'")
-        .replace(/&quot;/g, '"')
-        .replace(/&amp;/g, '&')
-        .replace(/\s+/g, ' ');
-
-    const probabilityPattern = new RegExp(`${escapeRegExp(market.outcomeLabel)}[\\s\\S]{0,120}?(\\d{1,3}(?:\\.\\d+)?)%`, 'i');
-    const match = normalized.match(probabilityPattern);
-    if (!match) {
-        throw new Error('Probability not found');
+    const pageMarkets = extractPolymarketPageMarkets(response.data);
+    const targetMarket = pageMarkets.find((pageMarket) => pageMarket.groupItemTitle === market.outcomeLabel);
+    if (!targetMarket) {
+        throw new Error(`Target market not found for ${market.outcomeLabel}`);
     }
 
-    const probability = Number(match[1]);
-    if (!Number.isFinite(probability)) {
-        throw new Error('Invalid probability');
+    const yesProbability = Number(targetMarket.outcomePrices[0]);
+    const yesTokenId = targetMarket.clobTokenIds[0];
+    if (!Number.isFinite(yesProbability) || !yesTokenId) {
+        throw new Error('Invalid Polymarket market metadata');
     }
+
+    const history = await fetchPolymarketHistory(yesTokenId);
 
     return {
-        condition_id: market.pageUrl,
+        condition_id: targetMarket.id,
         label: market.label,
         description: market.description,
-        probability,
-        history: []
+        probability: Math.round(yesProbability * 1000) / 10,
+        history: history.map((point) => ({
+            t: point.t,
+            p: Math.round(point.p * 1000) / 10
+        }))
     };
 }
 
