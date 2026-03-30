@@ -410,11 +410,24 @@ async function fetchFocusNewsItems(topic: FocusTopicConfig): Promise<NewsItem[]>
     );
     const newsDataResultsPromise = topic.slug === 'middle-east-tensions'
         ? Promise.all(
-              queries.map((query) =>
-                  fetchNewsItemsFromNewsData(query, {
-                      timeframeHours: 24,
-                      language: 'en',
+              [
+                  {
+                      query: 'Iran Israel military attack strike war',
                       categories: ['politics', 'world']
+                  },
+                  {
+                      query: 'Hormuz Iran oil shipping tanker',
+                      categories: ['politics', 'world', 'business']
+                  },
+                  {
+                      query: 'Iran ceasefire negotiations deal diplomacy',
+                      categories: ['politics', 'world']
+                  }
+              ].map(({ query, categories }) =>
+                  fetchNewsItemsFromNewsData(query, {
+                      timeframeHours: 48,
+                      language: 'en',
+                      categories
                   })
               )
           )
@@ -470,6 +483,22 @@ function isUsefulMiddleEastNewsTitle(title: string): boolean {
     }
 
     const usefulSignals = [
+        'iran',
+        'irgc',
+        'idf',
+        'israel',
+        'killed',
+        'casualties',
+        'escalat',
+        'nuclear',
+        'threatened',
+        'warned',
+        'combat',
+        'destroyed',
+        'bombed',
+        'air defense',
+        'gulf',
+        'forces',
         'hormuz',
         'tanker',
         'shipping',
@@ -1407,6 +1436,16 @@ function classifyWhatChangedGroup(title: string): '军事动态' | '霍尔木兹
         'airstrike',
         'drone',
         'missile',
+        'killed',
+        'casualties',
+        'escalat',
+        'bombed',
+        'destroyed',
+        'combat',
+        'threatened',
+        'warned',
+        'air defense',
+        'gulf',
         'troops',
         'forces',
         'base',
