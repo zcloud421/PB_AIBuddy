@@ -1230,9 +1230,9 @@ async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<Wha
 以下是过去72小时的中东冲突相关新闻标题列表。请将它们整理成以下3个固定分组（每组必须出现，无内容则 items 为空数组）：
 
 分组定义：
-1. 军事动态（icon: 🔴）：空袭、导弹、地面行动、核设施、无人机
-2. 霍尔木兹 & 能源（icon: 🛢️）：海峡通航、航运、油价、封锁
-3. 谈判 & 外交（icon: 🕊️）：停火提议、外交斡旋、谈判、国际调停
+1. 霍尔木兹海峡（icon: 🛢️）：海峡通航、航运、油价、封锁
+2. 军事动态（icon: 🔴）：空袭、导弹、地面行动、核设施、无人机
+3. 外交进展（icon: 🕊️）：停火提议、外交斡旋、谈判、国际调停
 
 每组最多4条，每条：
 - time: 从新闻时间取 HH:MM（转换为香港时间 UTC+8）
@@ -1247,15 +1247,15 @@ async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<Wha
 
 选取标准：
 - 军事动态：优先选择具体打击、部署、导弹、无人机、基地受损、核设施相关事件
-- 霍尔木兹 & 能源：优先选择海峡通航、油轮、收费、绕道管线、出口、油价、护航等具体变化
-- 谈判 & 外交：优先选择停火提议、四国协调、调停、谈判信号等明确外交动作
+- 霍尔木兹海峡：优先选择海峡通航、油轮、收费、绕道管线、出口、油价、护航等具体变化
+- 外交进展：优先选择停火提议、四国协调、调停、谈判信号等明确外交动作
 - 忽略背景分析、观点类、纯评论类文章
 
 输出格式（JSON数组）：
 [
+  { "group_label": "霍尔木兹海峡", "group_icon": "🛢️", "items": [...] },
   { "group_label": "军事动态", "group_icon": "🔴", "items": [...] },
-  { "group_label": "霍尔木兹 & 能源", "group_icon": "🛢️", "items": [...] },
-  { "group_label": "谈判 & 外交", "group_icon": "🕊️", "items": [...] }
+  { "group_label": "外交进展", "group_icon": "🕊️", "items": [...] }
 ]
 
 新闻列表：
@@ -1299,9 +1299,9 @@ ${newsList}
         }
 
         const fixedGroups = [
+            { group_label: '霍尔木兹海峡', group_icon: '🛢️' },
             { group_label: '军事动态', group_icon: '🔴' },
-            { group_label: '霍尔木兹 & 能源', group_icon: '🛢️' },
-            { group_label: '谈判 & 外交', group_icon: '🕊️' }
+            { group_label: '外交进展', group_icon: '🕊️' }
         ] as const;
 
         return fixedGroups.map((expectedGroup) => {
@@ -1333,9 +1333,9 @@ ${newsList}
 
 function buildFallbackWhatChangedGroups(newsItems: NewsItem[]): WhatChangedGroup[] {
     const fixedGroups = [
+        { group_label: '霍尔木兹海峡', group_icon: '🛢️' },
         { group_label: '军事动态', group_icon: '🔴' },
-        { group_label: '霍尔木兹 & 能源', group_icon: '🛢️' },
-        { group_label: '谈判 & 外交', group_icon: '🕊️' }
+        { group_label: '外交进展', group_icon: '🕊️' }
     ] as const;
 
     return fixedGroups.map((group) => ({
@@ -1347,7 +1347,7 @@ function buildFallbackWhatChangedGroups(newsItems: NewsItem[]): WhatChangedGroup
 
 function buildFallbackWhatChangedItems(
     newsItems: NewsItem[],
-    groupLabel: '军事动态' | '霍尔木兹 & 能源' | '谈判 & 外交'
+    groupLabel: '霍尔木兹海峡' | '军事动态' | '外交进展'
 ) {
     return newsItems
         .filter((item) => classifyWhatChangedGroup(item.title) === groupLabel)
@@ -1381,7 +1381,7 @@ function mergeWhatChangedItems(
     return merged;
 }
 
-function classifyWhatChangedGroup(title: string): '军事动态' | '霍尔木兹 & 能源' | '谈判 & 外交' | null {
+function classifyWhatChangedGroup(title: string): '霍尔木兹海峡' | '军事动态' | '外交进展' | null {
     const normalized = title.toLowerCase();
 
     const energyKeywords = [
@@ -1405,7 +1405,7 @@ function classifyWhatChangedGroup(title: string): '军事动态' | '霍尔木兹
         'fifth fleet'
     ];
     if (energyKeywords.some((keyword) => normalized.includes(keyword))) {
-        return '霍尔木兹 & 能源';
+        return '霍尔木兹海峡';
     }
 
     const diplomacyKeywords = [
@@ -1429,7 +1429,7 @@ function classifyWhatChangedGroup(title: string): '军事动态' | '霍尔木兹
         'white house'
     ];
     if (diplomacyKeywords.some((keyword) => normalized.includes(keyword))) {
-        return '谈判 & 外交';
+        return '外交进展';
     }
 
     const militaryKeywords = [
