@@ -6,6 +6,8 @@ import type {
     ClientFocusMarketSnapshot,
     ClientFocusPolymarketMarket,
     ClientFocusPolymarketResponse,
+    ClientFocusPriceHistoryPoint,
+    ClientFocusPriceSnapshot,
     ClientFocusQuestion,
     ClientFocusSectorRotation,
     ClientFocusTransmissionItem,
@@ -17,7 +19,7 @@ import { fetchNewsItemsByQuery, fetchNewsItemsFromNewsData } from '../data/news-
 import axios from 'axios';
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
-const DEFAULT_DISCLAIMER = '本页内容仅供市场讨论准备，客户沟通请结合所属机构的 house view 与合规要求。';
+const DEFAULT_DISCLAIMER = '本页内容仅供市场讨论准备，客户沟通请结合所属机构的策略观点与合规要求。';
 const FOCUS_CACHE_TTL_MS = 60 * 60 * 1000;
 const FOCUS_CHAIN_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const POLYMARKET_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -3293,6 +3295,209 @@ async function fetchSectorRotation(): Promise<ClientFocusSectorRotation | null> 
     }
 }
 
+async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientFocusPriceSnapshot | null> {
+    try {
+        const url = new URL('https://push2.eastmoney.com/api/qt/clist/get');
+        url.searchParams.set('pn', '1');
+        url.searchParams.set('pz', '500');
+        url.searchParams.set('po', '1');
+        url.searchParams.set('np', '1');
+        url.searchParams.set('ut', 'bd1d9ddb04089700cf9c27f6f7426281');
+        url.searchParams.set('fltt', '2');
+        url.searchParams.set('invt', '2');
+        url.searchParams.set('fid', 'f3');
+        url.searchParams.set('fs', 'm:106,m:107,m:108');
+        url.searchParams.set('fields', 'f12,f2,f3,f124');
+
+        const response = await fetch(url.toString(), {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)',
+                Accept: 'application/json'
+            }
+        });
+        if (!response.ok) {
+            return null;
+        }
+
+        const payload = (await response.json()) as {
+            data?: {
+                diff?: Array<{ f12?: string; f2?: number | string; f3?: number | string; f124?: number | string }>;
+            };
+        };
+        const rows = Array.isArray(payload.data?.diff) ? payload.data?.diff ?? [] : [];
+        const match = rows.find((item) => String(item.f12 ?? '').toUpperCase() === symbol.toUpperCase());
+        if (!match) {
+            return null;
+        }
+
+        const latest = Number(match.f2);
+        const changePct = Number(match.f3);
+        const ts = Number(match.f124);
+        return {
+            code: symbol,
+            name,
+            latest: Number.isFinite(latest) ? latest : null,
+            change_pct: Number.isFinite(changePct) ? changePct : null,
+            as_of: Number.isFinite(ts) ? new Date(ts * 1000).toISOString().slice(0, 10) : null
+        };
+    } catch {
+        return null;
+    }
+}
+
+async function fetchGoldSnapshot(): Promise<ClientFocusPriceSnapshot | null> {
+    try {
+        const response = await fetch('https://hq.sinajs.cn/list=hf_XAU', {
+            headers: {
+                Referer: 'https://finance.sina.com.cn/',
+                'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)'
+            }
+        });
+        if (!response.ok) {
+            return null;
+        }
+
+        const text = await response.text();
+        const raw = text.split('"')[1]?.split(',') ?? [];
+        if (raw.length < 8) {
+            return null;
+        }
+
+        const latest = Number(raw[0]);
+        const changePct = Number(raw[7]);
+        const asOfRaw = raw[12] ?? raw[13] ?? '';
+        const asOf = asOfRaw ? asOfRaw.slice(0, 10).replace(/\//g, '-') : null;
+        return {
+            code: 'XAU',
+            name: '伦敦金',
+            latest: Number.isFinite(latest) ? latest : null,
+            change_pct: Number.isFinite(changePct) ? changePct : null,
+            as_of: asOf
+        };
+    } catch {
+        return null;
+    }
+}
+
+async function fetchFocusPriceSnapshot(slug: string): Promise<ClientFocusPriceSnapshot | null> {
+    if (slug === 'usd-strength') {
+        return fetchForexSnapshot('USDCNH', '美元人民币');
+    }
+    if (slug === 'gold-repricing') {
+        return fetchGoldSnapshot();
+    }
+    return null;
+}
+
+async function fetchForexHistory(symbol: string): Promise<ClientFocusPriceHistoryPoint[]> {
+    try {
+        const marketCode = symbol.toUpperCase() === 'USDCNH' ? 133 : null;
+        if (!marketCode) {
+            return [];
+        }
+
+        const url = new URL('https://push2his.eastmoney.com/api/qt/stock/kline/get');
+        url.searchParams.set('secid', `${marketCode}.${symbol.toUpperCase()}`);
+        url.searchParams.set('klt', '101');
+        url.searchParams.set('fqt', '1');
+        url.searchParams.set('lmt', '500');
+        url.searchParams.set('end', '20500000');
+        url.searchParams.set('iscca', '1');
+        url.searchParams.set('fields1', 'f1,f2,f3,f4,f5,f6,f7,f8');
+        url.searchParams.set('fields2', 'f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64');
+        url.searchParams.set('ut', 'f057cbcbce2a86e2866ab8877db1d059');
+        url.searchParams.set('forcect', '1');
+
+        const response = await fetch(url.toString(), {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)',
+                Accept: 'application/json'
+            }
+        });
+        if (!response.ok) {
+            return [];
+        }
+
+        const payload = (await response.json()) as {
+            data?: {
+                klines?: string[];
+            };
+        };
+        const klines = Array.isArray(payload.data?.klines) ? payload.data?.klines ?? [] : [];
+        return klines
+            .map((item) => {
+                const [date, , close] = item.split(',');
+                const closeValue = Number(close);
+                return {
+                    date,
+                    close: Number.isFinite(closeValue) ? closeValue : null
+                };
+            })
+            .filter((item): item is ClientFocusPriceHistoryPoint => Boolean(item.date) && item.close !== null);
+    } catch {
+        return [];
+    }
+}
+
+async function fetchGoldHistory(): Promise<ClientFocusPriceHistoryPoint[]> {
+    const candidates = [
+        'https://stooq.com/q/d/l/?s=xauusd&i=d',
+        'https://stooq.com/q/d/l/?s=xauusd.us&i=d'
+    ];
+
+    for (const url of candidates) {
+        try {
+            const response = await fetch(url, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)',
+                    Accept: 'text/csv,text/plain'
+                }
+            });
+            if (!response.ok) {
+                continue;
+            }
+
+            const text = await response.text();
+            const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+            if (lines.length < 10 || !/^date[,;]/i.test(lines[0])) {
+                continue;
+            }
+
+            const rows = lines.slice(1)
+                .map((line) => line.split(','))
+                .map((parts) => ({
+                    date: parts[0]?.trim() ?? '',
+                    close: Number(parts[4] ?? parts[1] ?? '')
+                }))
+                .filter((item) => item.date && Number.isFinite(item.close))
+                .map((item) => ({
+                    date: item.date,
+                    close: item.close
+                }));
+
+            if (rows.length >= 20) {
+                return rows;
+            }
+        } catch {
+            continue;
+        }
+    }
+
+    return [];
+}
+
+async function fetchFocusPriceHistory(slug: string): Promise<ClientFocusPriceHistoryPoint[] | null> {
+    if (slug === 'usd-strength') {
+        const history = await fetchForexHistory('USDCNH');
+        return history.length > 1 ? history : null;
+    }
+    if (slug === 'gold-repricing') {
+        const history = await fetchGoldHistory();
+        return history.length > 1 ? history : null;
+    }
+    return null;
+}
+
 async function fetchHongKongSpotIndices() {
     const response = await fetch(
         'https://hq.sinajs.cn/rn=mtf2t&list=hkHSI,hkHSTECH',
@@ -3769,14 +3974,23 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         || topic.slug === 'hk-market-sentiment';
     const weeklyProgress = skipWeeklyProgress ? null : await generateWeeklyProgress(topic, newsItems);
     const transmissionChain = await generateTransmissionChain(topic, newsItems);
-    const [marketSnapshot, marketChart, hibor, sectorRotation] = topic.slug === 'hk-market-sentiment'
+    const [marketSnapshot, marketChart, hibor, sectorRotation, focusPriceSnapshot, focusPriceHistory] = topic.slug === 'hk-market-sentiment'
         ? await Promise.all([
             fetchHongKongMarketSnapshot(),
             fetchSouthboundFlowChart(),
             fetchHiborRates(),
-            fetchSectorRotation()
+            fetchSectorRotation(),
+            Promise.resolve(null),
+            Promise.resolve(null)
         ])
-        : [null, null, null, null];
+        : await Promise.all([
+            Promise.resolve(null),
+            Promise.resolve(null),
+            Promise.resolve(null),
+            Promise.resolve(null),
+            fetchFocusPriceSnapshot(topic.slug),
+            fetchFocusPriceHistory(topic.slug)
+        ]);
     const whatChanged =
         topic.slug === 'middle-east-tensions'
             ? await generateMiddleEastWhatChanged(newsItems)
@@ -3814,6 +4028,8 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         market_chart: marketChart,
         hibor: hibor ?? undefined,
         sector_rotation: sectorRotation ?? undefined,
+        focus_price_snapshot: focusPriceSnapshot ?? undefined,
+        focus_price_history: focusPriceHistory ?? undefined,
         disclaimer: DEFAULT_DISCLAIMER
     };
 

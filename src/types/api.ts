@@ -160,6 +160,8 @@ export interface ClientFocusDetailResponse {
     market_chart?: ClientFocusMarketChart | null;
     hibor?: ClientFocusHibor | null;
     sector_rotation?: ClientFocusSectorRotation | null;
+    focus_price_snapshot?: ClientFocusPriceSnapshot | null;
+    focus_price_history?: ClientFocusPriceHistoryPoint[] | null;
     disclaimer: string;
 }
 
@@ -213,6 +215,19 @@ export interface ClientFocusSectorRotation {
     top: ClientFocusSectorRotationItem[];
     bottom: ClientFocusSectorRotationItem[];
     as_of: string;
+}
+
+export interface ClientFocusPriceSnapshot {
+    code: string;
+    name: string;
+    latest: number | null;
+    change_pct: number | null;
+    as_of: string | null;
+}
+
+export interface ClientFocusPriceHistoryPoint {
+    date: string;
+    close: number;
 }
 
 export interface ClientFocusPolymarketHistoryPoint {
