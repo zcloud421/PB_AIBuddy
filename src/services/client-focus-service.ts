@@ -1,4 +1,5 @@
 import type {
+    ClientFocusDriverItem,
     ClientFocusDetailResponse,
     ClientFocusHibor,
     ClientFocusListItem,
@@ -3547,6 +3548,48 @@ async function fetchFocusSecondaryPriceHistory(slug: string): Promise<ClientFocu
     return null;
 }
 
+function buildGoldDrivers(newsItems: NewsItem[]): ClientFocusDriverItem[] {
+    const titles = newsItems.map((item) => item.title.toLowerCase()).join(' | ');
+
+    const realYieldStatus =
+        /real yield|actual yield|treasury yield|higher yield|yield rise|yield climbs|hawkish/.test(titles)
+            ? '压制'
+            : '压制';
+    const inflationStatus =
+        /inflation|cpi|pce|oil price|energy price|通胀|滞胀|inflation expectation|inflation expectations/.test(titles)
+            ? '抬升'
+            : '中性';
+    const dollarStatus =
+        /dollar|usd|greenback|stronger dollar|dxy/.test(titles)
+            ? '偏强'
+            : '偏强';
+    const centralBankStatus =
+        /central bank|央行|official buying|purchase|buying slows|购金放缓/.test(titles)
+            ? /slows|放缓|moderate|cool/.test(titles)
+                ? '支撑放缓'
+                : '支撑'
+            : '支撑';
+    const havenStatus =
+        /iran|israel|war|conflict|geopolitical|hormuz|避险/.test(titles)
+            ? '有限支撑'
+            : '中性';
+    const etfStatus =
+        /etf outflow|outflow|fund outflow|redemption/.test(titles)
+            ? '流出'
+            : /etf inflow|inflow|fund inflow/.test(titles)
+                ? '流入'
+                : '分化';
+
+    return [
+        { label: '实际利率', status: realYieldStatus },
+        { label: '通胀预期', status: inflationStatus },
+        { label: '美元强弱', status: dollarStatus },
+        { label: '央行购金', status: centralBankStatus },
+        { label: '避险需求', status: havenStatus },
+        { label: 'ETF资金流', status: etfStatus }
+    ];
+}
+
 async function fetchHongKongSpotIndices() {
     const response = await fetch(
         'https://hq.sinajs.cn/rn=mtf2t&list=hkHSI,hkHSTECH',
@@ -4092,6 +4135,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         focus_price_history: focusPriceHistory ?? undefined,
         focus_secondary_price_snapshot: focusSecondaryPriceSnapshot ?? undefined,
         focus_secondary_price_history: focusSecondaryPriceHistory ?? undefined,
+        gold_drivers: topic.slug === 'gold-repricing' ? buildGoldDrivers(newsItems) : undefined,
         disclaimer: DEFAULT_DISCLAIMER
     };
 
