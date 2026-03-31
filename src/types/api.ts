@@ -162,6 +162,8 @@ export interface ClientFocusDetailResponse {
     sector_rotation?: ClientFocusSectorRotation | null;
     focus_price_snapshot?: ClientFocusPriceSnapshot | null;
     focus_price_history?: ClientFocusPriceHistoryPoint[] | null;
+    focus_secondary_price_snapshot?: ClientFocusPriceSnapshot | null;
+    focus_secondary_price_history?: ClientFocusPriceHistoryPoint[] | null;
     disclaimer: string;
 }
 

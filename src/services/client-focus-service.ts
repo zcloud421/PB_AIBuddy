@@ -78,7 +78,7 @@ interface FocusTransmissionModelOutput {
     };
 }
 
-const ALLOWED_FOCUS_STATUS = ['持续发酵', '风险抬升', '局势缓和', '逻辑重估', '压力回升', '趋势明朗', '阶段性结束'] as const;
+const ALLOWED_FOCUS_STATUS = ['关注升温', '持续发酵', '压力上升'] as const;
 const ALLOWED_UPDATE_IMPACTS = ['风险抬升', '信用事件', '政策变化', '持续发酵'] as const;
 const PREFERRED_WEEKLY_SOURCES = ['Bloomberg', 'Reuters', 'FT', 'CNBC', 'WSJ', 'Financial Times'] as const;
 const BLOCKED_WEEKLY_SOURCE_PATTERNS = [
@@ -224,7 +224,7 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
     },
     {
         slug: 'usd-strength',
-        title: '美元反弹',
+        title: '美元走势重估',
         accent: '#C9A45C',
         query: 'US dollar strength USDCNH Hong Kong stocks China assets rates latest',
         clientQuestions: [
@@ -3438,6 +3438,20 @@ async function fetchFocusPriceSnapshot(slug: string): Promise<ClientFocusPriceSn
     return null;
 }
 
+async function fetchFocusSecondaryPriceSnapshot(slug: string): Promise<ClientFocusPriceSnapshot | null> {
+    if (slug === 'usd-strength') {
+        const result = await fetchYahooChartSeries('DX-Y.NYB');
+        return result.snapshot
+            ? {
+                ...result.snapshot,
+                code: 'DXY',
+                name: '美元指数'
+            }
+            : null;
+    }
+    return null;
+}
+
 async function fetchForexHistory(symbol: string): Promise<ClientFocusPriceHistoryPoint[]> {
     try {
         const marketCode = symbol.toUpperCase() === 'USDCNH' ? 133 : null;
@@ -3501,6 +3515,14 @@ async function fetchFocusPriceHistory(slug: string): Promise<ClientFocusPriceHis
     if (slug === 'gold-repricing') {
         const history = await fetchGoldHistory();
         return history.length > 1 ? history : null;
+    }
+    return null;
+}
+
+async function fetchFocusSecondaryPriceHistory(slug: string): Promise<ClientFocusPriceHistoryPoint[] | null> {
+    if (slug === 'usd-strength') {
+        const result = await fetchYahooChartSeries('DX-Y.NYB');
+        return result.history && result.history.length > 1 ? result.history : null;
     }
     return null;
 }
@@ -3981,12 +4003,14 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         || topic.slug === 'hk-market-sentiment';
     const weeklyProgress = skipWeeklyProgress ? null : await generateWeeklyProgress(topic, newsItems);
     const transmissionChain = await generateTransmissionChain(topic, newsItems);
-    const [marketSnapshot, marketChart, hibor, sectorRotation, focusPriceSnapshot, focusPriceHistory] = topic.slug === 'hk-market-sentiment'
+    const [marketSnapshot, marketChart, hibor, sectorRotation, focusPriceSnapshot, focusPriceHistory, focusSecondaryPriceSnapshot, focusSecondaryPriceHistory] = topic.slug === 'hk-market-sentiment'
         ? await Promise.all([
             fetchHongKongMarketSnapshot(),
             fetchSouthboundFlowChart(),
             fetchHiborRates(),
             fetchSectorRotation(),
+            Promise.resolve(null),
+            Promise.resolve(null),
             Promise.resolve(null),
             Promise.resolve(null)
         ])
@@ -3996,7 +4020,9 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
             Promise.resolve(null),
             Promise.resolve(null),
             fetchFocusPriceSnapshot(topic.slug),
-            fetchFocusPriceHistory(topic.slug)
+            fetchFocusPriceHistory(topic.slug),
+            fetchFocusSecondaryPriceSnapshot(topic.slug),
+            fetchFocusSecondaryPriceHistory(topic.slug)
         ]);
     const whatChanged =
         topic.slug === 'middle-east-tensions'
@@ -4037,6 +4063,8 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         sector_rotation: sectorRotation ?? undefined,
         focus_price_snapshot: focusPriceSnapshot ?? undefined,
         focus_price_history: focusPriceHistory ?? undefined,
+        focus_secondary_price_snapshot: focusSecondaryPriceSnapshot ?? undefined,
+        focus_secondary_price_history: focusSecondaryPriceHistory ?? undefined,
         disclaimer: DEFAULT_DISCLAIMER
     };
 
