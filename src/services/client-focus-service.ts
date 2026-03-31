@@ -3072,7 +3072,7 @@ async function fetchHongKongSpotIndices() {
 
     const text = await response.text();
     const lines = text.split('\n').filter(Boolean);
-    return lines
+    const baseItems = lines
         .map((line) => {
             const codeMatch = line.match(/hq_str_hk([A-Z0-9]+)=/);
             const raw = line.split('"')[1]?.split(',') ?? [];
@@ -3081,12 +3081,26 @@ async function fetchHongKongSpotIndices() {
             }
             return {
                 code: codeMatch[1],
-                name: raw[1] ?? codeMatch[1],
+                name:
+                    codeMatch[1] === 'HSI'
+                        ? '恒生指数'
+                        : codeMatch[1] === 'HSTECH'
+                            ? '恒生科技指数'
+                            : (raw[1] ?? codeMatch[1]),
                 latest: Number(raw[6]),
                 change_pct: Number(raw[8])
             };
         })
         .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+    const enriched = await Promise.all(
+        baseItems.map(async (item) => ({
+            ...item,
+            change_pct: await fetchHongKongIndex5dChange(item.code, item.change_pct)
+        }))
+    );
+
+    return enriched;
 }
 
 function buildHongKongSnapshotSummary(
@@ -3133,6 +3147,62 @@ function buildHongKongSnapshotSummary(
     })();
 
     return `${leadSentence}，${flowSentence}。`;
+}
+
+async function fetchHongKongIndex5dChange(code: string, fallbackChangePct: number | null) {
+    const internalMap: Record<string, string> = {
+        HSI: '128',
+        HSTECH: '128'
+    };
+
+    try {
+        const url = new URL('https://push2his.eastmoney.com/api/qt/stock/kline/get');
+        url.searchParams.set('secid', `${internalMap[code] ?? '128'}.${code}`);
+        url.searchParams.set('klt', '101');
+        url.searchParams.set('fqt', '1');
+        url.searchParams.set('lmt', '10');
+        url.searchParams.set('end', '20500000');
+        url.searchParams.set('iscca', '1');
+        url.searchParams.set('fields1', 'f1,f2,f3,f4,f5,f6,f7,f8');
+        url.searchParams.set('fields2', 'f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64');
+        url.searchParams.set('ut', 'f057cbcbce2a86e2866ab8877db1d059');
+        url.searchParams.set('forcect', '1');
+
+        const response = await fetch(url.toString(), {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)',
+                Accept: 'application/json'
+            }
+        });
+        if (!response.ok) {
+            return fallbackChangePct;
+        }
+
+        const payload = (await response.json()) as {
+            data?: {
+                klines?: string[];
+            };
+        };
+        const klines = Array.isArray(payload.data?.klines) ? payload.data?.klines ?? [] : [];
+        const closes = klines
+            .map((item) => Number(item.split(',')[2]))
+            .filter((value) => Number.isFinite(value));
+
+        if (closes.length < 2) {
+            return fallbackChangePct;
+        }
+
+        const window = closes.slice(-6);
+        const start = window[0];
+        const end = window[window.length - 1];
+        if (!Number.isFinite(start) || !Number.isFinite(end) || start === 0) {
+            return fallbackChangePct;
+        }
+
+        return ((end - start) / start) * 100;
+    } catch {
+        return fallbackChangePct;
+    }
 }
 
 async function generateFocusContent(topic: FocusTopicConfig, newsItems: NewsItem[]): Promise<FocusTopicModelOutput | null> {
