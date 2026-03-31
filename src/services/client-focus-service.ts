@@ -3033,10 +3033,65 @@ function sumRecentNetBuy(points: Array<{ net_buy: number | null }>, length: numb
     return Number(recent.reduce((sum, value) => sum + value, 0).toFixed(2));
 }
 
+const hkIndexSecIdCache = new Map<string, string>();
+
+async function fetchHongKongIndexSecId(code: string) {
+    const cached = hkIndexSecIdCache.get(code);
+    if (cached) {
+        return cached;
+    }
+
+    try {
+        const url = new URL('https://15.push2.eastmoney.com/api/qt/clist/get');
+        url.searchParams.set('pn', '1');
+        url.searchParams.set('pz', '200');
+        url.searchParams.set('po', '1');
+        url.searchParams.set('np', '1');
+        url.searchParams.set('ut', 'bd1d9ddb04089700cf9c27f6f7426281');
+        url.searchParams.set('fltt', '2');
+        url.searchParams.set('invt', '2');
+        url.searchParams.set('fid', 'f3');
+        url.searchParams.set('fs', 'm:124,m:125,m:305');
+        url.searchParams.set('fields', 'f12,f13');
+
+        const response = await fetch(url.toString(), {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)',
+                Accept: 'application/json'
+            }
+        });
+        if (!response.ok) {
+            return null;
+        }
+
+        const payload = (await response.json()) as {
+            data?: {
+                diff?: Array<{ f12?: string; f13?: number | string }>;
+            };
+        };
+        const rows = Array.isArray(payload.data?.diff) ? payload.data?.diff ?? [] : [];
+        const match = rows.find((item) => String(item.f12 ?? '').toUpperCase() === code.toUpperCase());
+        const marketId = match?.f13;
+        if (marketId === undefined || marketId === null || marketId === '') {
+            return null;
+        }
+
+        const secId = `${marketId}.${code}`;
+        hkIndexSecIdCache.set(code, secId);
+        return secId;
+    } catch {
+        return null;
+    }
+}
+
 async function fetchHongKongIndexHistory(code: string, limit: number) {
     try {
+        const secId = await fetchHongKongIndexSecId(code);
+        if (!secId) {
+            return [];
+        }
         const url = new URL('https://push2his.eastmoney.com/api/qt/stock/kline/get');
-        url.searchParams.set('secid', `128.${code}`);
+        url.searchParams.set('secid', secId);
         url.searchParams.set('klt', '101');
         url.searchParams.set('fqt', '1');
         url.searchParams.set('lmt', String(limit));
