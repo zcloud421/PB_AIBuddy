@@ -818,7 +818,21 @@ function isPrivateCreditHardNews(item: NewsItem): boolean {
         'apollo', 'ares', 'blackstone', 'blue owl', 'blueowl',
         'jpmorgan', 'j.p. morgan', 'goldman', 'morgan stanley',
         'blackrock', 'carlyle', 'kkr', 'oaktree', 'bdc',
-        'brookfield', 'sixth street', 'owl rock'
+        'brookfield', 'sixth street', 'owl rock',
+        'fed', 'federal reserve', 'powell',
+        'treasury', 'u.s. treasury', 'us treasury',
+        'insurance regulator', 'insurance regulators'
+    ];
+    const regulatoryKeywords = [
+        'private credit',
+        'fed watching',
+        'signs of trouble',
+        'powell says',
+        'treasury reportedly',
+        'meet with insurance regulators',
+        'discuss private credit issues',
+        'watching developments',
+        'regulators to discuss'
     ];
     const analysisKeywords = [
         'analysis', 'outlook', 'what it means', 'impact on',
@@ -828,10 +842,11 @@ function isPrivateCreditHardNews(item: NewsItem): boolean {
 
     const hasAction = actionKeywords.some((kw) => normalized.includes(kw));
     const hasInstitution = institutionKeywords.some((kw) => normalized.includes(kw));
+    const hasRegulatorySignal = regulatoryKeywords.some((kw) => normalized.includes(kw));
     const isAnalysis = analysisKeywords.some((kw) => normalized.includes(kw));
     const isBlocked = blockedSources.some((kw) => source.includes(kw));
 
-    return (hasAction || hasInstitution) && !isAnalysis && !isBlocked;
+    return (hasAction || hasInstitution || hasRegulatorySignal) && !isAnalysis && !isBlocked;
 }
 
 function buildPrivateCreditLatestUpdates(newsItems: NewsItem[]): ClientFocusUpdate[] {
