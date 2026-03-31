@@ -1,11 +1,13 @@
 import type {
     ClientFocusDetailResponse,
+    ClientFocusHibor,
     ClientFocusListItem,
     ClientFocusMarketChart,
     ClientFocusMarketSnapshot,
     ClientFocusPolymarketMarket,
     ClientFocusPolymarketResponse,
     ClientFocusQuestion,
+    ClientFocusSectorRotation,
     ClientFocusTransmissionItem,
     ClientFocusUpdate,
     NewsItem,
@@ -3154,6 +3156,142 @@ async function fetchHongKongMarketSnapshot(): Promise<ClientFocusMarketSnapshot 
     }
 }
 
+async function fetchHiborSeries(indicator: '1月' | '3月') {
+    try {
+        const indicatorId = indicator === '1月' ? '201' : '203';
+        const url = new URL('https://datacenter-web.eastmoney.com/api/data/v1/get');
+        url.searchParams.set('reportName', 'RPT_IMP_INTRESTRATEN');
+        url.searchParams.set('columns', 'REPORT_DATE,IR_RATE');
+        url.searchParams.set('filter', `(MARKET_CODE="005")(CURRENCY_CODE="HKD")(INDICATOR_ID="${indicatorId}")`);
+        url.searchParams.set('pageNumber', '1');
+        url.searchParams.set('pageSize', '60');
+        url.searchParams.set('sortTypes', '-1');
+        url.searchParams.set('sortColumns', 'REPORT_DATE');
+        url.searchParams.set('source', 'WEB');
+        url.searchParams.set('client', 'WEB');
+
+        const response = await fetch(url.toString(), {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)',
+                Accept: 'application/json'
+            }
+        });
+        if (!response.ok) {
+            return [];
+        }
+
+        const payload = (await response.json()) as {
+            result?: {
+                data?: Array<{ REPORT_DATE?: string; IR_RATE?: number | string }>;
+            };
+        };
+        const rows = Array.isArray(payload.result?.data) ? payload.result?.data ?? [] : [];
+        return rows
+            .map((row) => {
+                const reportDate = typeof row.REPORT_DATE === 'string' ? row.REPORT_DATE.slice(0, 10) : '';
+                const rate = Number(row.IR_RATE);
+                return {
+                    date: reportDate,
+                    rate: Number.isFinite(rate) ? rate : null
+                };
+            })
+            .filter((item): item is { date: string; rate: number } => Boolean(item.date) && item.rate !== null)
+            .sort((left, right) => left.date.localeCompare(right.date));
+    } catch {
+        return [];
+    }
+}
+
+function getBpsChangeFrom7Days(series: Array<{ date: string; rate: number }>) {
+    if (series.length === 0) {
+        return null;
+    }
+
+    const latest = series[series.length - 1];
+    const targetTs = new Date(`${latest.date}T00:00:00Z`).getTime() - 7 * 24 * 60 * 60 * 1000;
+    const previous = [...series].reverse().find((item) => new Date(`${item.date}T00:00:00Z`).getTime() <= targetTs);
+    if (!previous) {
+        return null;
+    }
+
+    return Number(((latest.rate - previous.rate) * 100).toFixed(0));
+}
+
+async function fetchHiborRates(): Promise<ClientFocusHibor | null> {
+    const [series1m, series3m] = await Promise.all([
+        fetchHiborSeries('1月'),
+        fetchHiborSeries('3月')
+    ]);
+
+    const latest1m = series1m[series1m.length - 1] ?? null;
+    const latest3m = series3m[series3m.length - 1] ?? null;
+    const asOf = latest1m?.date ?? latest3m?.date ?? null;
+    if (!asOf) {
+        return null;
+    }
+
+    return {
+        rate_1m: latest1m?.rate ?? null,
+        rate_3m: latest3m?.rate ?? null,
+        change_1m: getBpsChangeFrom7Days(series1m),
+        change_3m: getBpsChangeFrom7Days(series3m),
+        as_of: asOf
+    };
+}
+
+async function fetchSectorRotation(): Promise<ClientFocusSectorRotation | null> {
+    try {
+        const url = new URL('https://push2.eastmoney.com/api/qt/clist/get');
+        url.searchParams.set('pn', '1');
+        url.searchParams.set('pz', '100');
+        url.searchParams.set('po', '1');
+        url.searchParams.set('np', '1');
+        url.searchParams.set('ut', 'b2884a393a59ad64002292a3e90d46a5');
+        url.searchParams.set('fltt', '2');
+        url.searchParams.set('invt', '2');
+        url.searchParams.set('fid0', 'f62');
+        url.searchParams.set('fs', 'm:90 t:2');
+        url.searchParams.set('stat', '1');
+        url.searchParams.set('fields', 'f14,f3,f124');
+
+        const response = await fetch(url.toString(), {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)',
+                Accept: 'application/json'
+            }
+        });
+        if (!response.ok) {
+            return null;
+        }
+
+        const payload = (await response.json()) as {
+            data?: {
+                diff?: Array<{ f14?: string; f3?: number | string; f124?: number | string }>;
+            };
+        };
+        const rows = Array.isArray(payload.data?.diff) ? payload.data?.diff ?? [] : [];
+        const sectors = rows
+            .map((row) => ({
+                name: typeof row.f14 === 'string' ? row.f14.trim() : '',
+                change_pct: Number(row.f3)
+            }))
+            .filter((item) => item.name && Number.isFinite(item.change_pct));
+
+        if (sectors.length === 0) {
+            return null;
+        }
+
+        const sorted = [...sectors].sort((left, right) => right.change_pct - left.change_pct);
+        return {
+            top: sorted.slice(0, 3),
+            bottom: [...sorted].reverse().slice(0, 3),
+            as_of: new Date().toISOString().slice(0, 10)
+        };
+    } catch {
+        return null;
+    }
+}
+
 async function fetchHongKongSpotIndices() {
     const response = await fetch(
         'https://hq.sinajs.cn/rn=mtf2t&list=hkHSI,hkHSTECH',
@@ -3630,8 +3768,14 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         || topic.slug === 'hk-market-sentiment';
     const weeklyProgress = skipWeeklyProgress ? null : await generateWeeklyProgress(topic, newsItems);
     const transmissionChain = await generateTransmissionChain(topic, newsItems);
-    const marketSnapshot = topic.slug === 'hk-market-sentiment' ? await fetchHongKongMarketSnapshot() : null;
-    const marketChart = topic.slug === 'hk-market-sentiment' ? await fetchSouthboundFlowChart() : null;
+    const [marketSnapshot, marketChart, hibor, sectorRotation] = topic.slug === 'hk-market-sentiment'
+        ? await Promise.all([
+            fetchHongKongMarketSnapshot(),
+            fetchSouthboundFlowChart(),
+            fetchHiborRates(),
+            fetchSectorRotation()
+        ])
+        : [null, null, null, null];
     const whatChanged =
         topic.slug === 'middle-east-tensions'
             ? await generateMiddleEastWhatChanged(newsItems)
@@ -3667,6 +3811,8 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         related_assets: topic.relatedAssets,
         market_snapshot: marketSnapshot,
         market_chart: marketChart,
+        hibor: hibor ?? undefined,
+        sector_rotation: sectorRotation ?? undefined,
         disclaimer: DEFAULT_DISCLAIMER
     };
 
