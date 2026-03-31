@@ -1434,7 +1434,7 @@ ${newsList}
                       .filter((item) => typeof item?.headline === 'string')
                       .map((item) => ({
                           time: item.time?.trim() ?? '',
-                          headline: item.headline?.trim() ?? ''
+                          headline: sanitizeGeneratedPrivateCreditHeadline(item.headline?.trim() ?? '')
                       }))
                       .filter((item) => item.headline)
                       .slice(0, 3)
@@ -1704,6 +1704,11 @@ function classifyPrivateCreditWhatChangedGroup(
     const spilloverKeywords = [
         'bank',
         'banks',
+        'fed',
+        'powell',
+        'treasury',
+        'regulator',
+        'regulators',
         'insurer',
         'insurance',
         'pension',
@@ -1735,15 +1740,112 @@ function buildFallbackPrivateCreditHeadline(title: string) {
         return '';
     }
 
+    const translated = translatePrivateCreditHeadline(cleanedTitle, actor);
+    if (translated) {
+        return translated;
+    }
+
     if (actor) {
         const actorPrefix = `【${actor}】`;
+        if (containsLongEnglishFragment(cleanedTitle)) {
+            return '';
+        }
         if (cleanedTitle.startsWith(actorPrefix)) {
             return cleanedTitle.slice(0, 35);
         }
         return `${actorPrefix}${cleanedTitle}`.slice(0, 35);
     }
 
+    if (containsLongEnglishFragment(cleanedTitle)) {
+        return '';
+    }
+
     return cleanedTitle.slice(0, 35);
+}
+
+function translatePrivateCreditHeadline(title: string, actor: string | null) {
+    const normalized = title.toLowerCase();
+
+    if (
+        normalized.includes('treasury')
+        && normalized.includes('insurance regulator')
+        && normalized.includes('private credit')
+    ) {
+        return '【美国财政部】拟与保险监管方讨论私募信贷风险';
+    }
+
+    if (
+        normalized.includes('fed watching')
+        && normalized.includes('private credit')
+        && normalized.includes('powell')
+    ) {
+        return '【美联储】鲍威尔称正密切关注私募信贷风险';
+    }
+
+    if (
+        normalized.includes('apollo')
+        && normalized.includes('private credit fund')
+        && normalized.includes('withdraw')
+        && (normalized.includes('limit') || normalized.includes('limits'))
+    ) {
+        return '【Apollo】私募信贷基金限制赎回，申请激增';
+    }
+
+    if (
+        normalized.includes('ares')
+        && normalized.includes('private credit fund')
+        && normalized.includes('withdraw')
+        && (normalized.includes('limit') || normalized.includes('limits'))
+    ) {
+        return '【Ares】限制私募信贷基金赎回，申请激增';
+    }
+
+    if (
+        normalized.includes('private credit')
+        && normalized.includes('wait to pull out')
+        && (normalized.includes('$5 billion') || normalized.includes('5 billion'))
+    ) {
+        return '【投资者】约50亿美元赎回申请排队等待退出';
+    }
+
+    if (
+        normalized.includes('private credit funds halt withdraw')
+        || (normalized.includes('private credit funds') && normalized.includes('halt') && normalized.includes('withdraw'))
+    ) {
+        return '【私募信贷基金】多只产品暂停提款或赎回';
+    }
+
+    if (
+        actor
+        && normalized.includes('redemption')
+        && normalized.includes('surge')
+    ) {
+        return `【${actor}】赎回申请激增，资金流动受限`;
+    }
+
+    return '';
+}
+
+function containsLongEnglishFragment(text: string) {
+    return /[A-Za-z]{4,}\s+[A-Za-z]{4,}/.test(text);
+}
+
+function sanitizeGeneratedPrivateCreditHeadline(headline: string) {
+    const trimmed = headline.replace(/\s+/g, ' ').trim();
+    if (!trimmed) {
+        return '';
+    }
+
+    if (containsLongEnglishFragment(trimmed)) {
+        return '';
+    }
+
+    const chineseMatches = trimmed.match(/[\u4e00-\u9fff]/g) ?? [];
+    if (chineseMatches.length < 4) {
+        return '';
+    }
+
+    return trimmed;
 }
 
 function extractPrivateCreditActor(title: string) {
