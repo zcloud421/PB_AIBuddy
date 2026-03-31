@@ -2979,7 +2979,7 @@ async function fetchSouthboundFlowChart(): Promise<ClientFocusMarketChart | null
             };
         };
         const rows = Array.isArray(payload.result?.data) ? payload.result?.data ?? [] : [];
-        const points = rows
+        const rawPoints = rows
             .map((row) => {
                 const tradeDate = typeof row.TRADE_DATE === 'string' ? row.TRADE_DATE.slice(0, 10) : '';
                 const rawNetBuy = Number(row.NET_DEAL_AMT);
@@ -2992,30 +2992,28 @@ async function fetchSouthboundFlowChart(): Promise<ClientFocusMarketChart | null
             .sort((left, right) => left.date.localeCompare(right.date))
             .slice(-60);
 
-        if (points.length === 0) {
+        if (rawPoints.length === 0) {
             return null;
         }
 
-        const withAverage = points.map((point, index, list) => {
-            const window = list.slice(Math.max(0, index - 4), index + 1).map((entry) => entry.net_buy ?? 0);
-            const sum = window.reduce((acc, value) => acc + value, 0);
-            return {
-                date: point.date,
-                net_buy: point.net_buy,
-                ma5: Number((sum / window.length).toFixed(2))
-            };
-        });
+        const hsiHistory = await fetchHongKongIndexHistory('HSI', 90);
+        const hsiMap = new Map(hsiHistory.map((item) => [item.date, item.close]));
+        const points = rawPoints.map((point) => ({
+            date: point.date,
+            net_buy: point.net_buy,
+            hsi_close: hsiMap.get(point.date) ?? null
+        }));
 
         const chart: ClientFocusMarketChart = {
             series_name: '南向资金',
             unit: '亿元',
-            latest_trade_date: withAverage[withAverage.length - 1]?.date ?? null,
-            points: withAverage,
+            latest_trade_date: points[points.length - 1]?.date ?? null,
+            points,
             stats: {
-                latest_net_buy: withAverage[withAverage.length - 1]?.net_buy ?? null,
-                sum_10d: sumRecentNetBuy(withAverage, 10),
-                sum_20d: sumRecentNetBuy(withAverage, 20),
-                sum_60d: sumRecentNetBuy(withAverage, 60)
+                latest_net_buy: points[points.length - 1]?.net_buy ?? null,
+                sum_10d: sumRecentNetBuy(points, 10),
+                sum_20d: sumRecentNetBuy(points, 20),
+                sum_60d: sumRecentNetBuy(points, 60)
             }
         };
 
@@ -3033,6 +3031,51 @@ async function fetchSouthboundFlowChart(): Promise<ClientFocusMarketChart | null
 function sumRecentNetBuy(points: Array<{ net_buy: number | null }>, length: number) {
     const recent = points.slice(-length).map((point) => point.net_buy ?? 0);
     return Number(recent.reduce((sum, value) => sum + value, 0).toFixed(2));
+}
+
+async function fetchHongKongIndexHistory(code: string, limit: number) {
+    try {
+        const url = new URL('https://push2his.eastmoney.com/api/qt/stock/kline/get');
+        url.searchParams.set('secid', `128.${code}`);
+        url.searchParams.set('klt', '101');
+        url.searchParams.set('fqt', '1');
+        url.searchParams.set('lmt', String(limit));
+        url.searchParams.set('end', '20500000');
+        url.searchParams.set('iscca', '1');
+        url.searchParams.set('fields1', 'f1,f2,f3,f4,f5,f6,f7,f8');
+        url.searchParams.set('fields2', 'f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64');
+        url.searchParams.set('ut', 'f057cbcbce2a86e2866ab8877db1d059');
+        url.searchParams.set('forcect', '1');
+
+        const response = await fetch(url.toString(), {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)',
+                Accept: 'application/json'
+            }
+        });
+        if (!response.ok) {
+            return [];
+        }
+
+        const payload = (await response.json()) as {
+            data?: {
+                klines?: string[];
+            };
+        };
+        const klines = Array.isArray(payload.data?.klines) ? payload.data?.klines ?? [] : [];
+        return klines
+            .map((item) => {
+                const [date, , close] = item.split(',');
+                const closeValue = Number(close);
+                return {
+                    date,
+                    close: Number.isFinite(closeValue) ? closeValue : null
+                };
+            })
+            .filter((item): item is { date: string; close: number } => Boolean(item.date) && item.close !== null);
+    } catch {
+        return [];
+    }
 }
 
 async function fetchHongKongMarketSnapshot(): Promise<ClientFocusMarketSnapshot | null> {
@@ -3150,43 +3193,8 @@ function buildHongKongSnapshotSummary(
 }
 
 async function fetchHongKongIndex5dChange(code: string, fallbackChangePct: number | null) {
-    const internalMap: Record<string, string> = {
-        HSI: '128',
-        HSTECH: '128'
-    };
-
     try {
-        const url = new URL('https://push2his.eastmoney.com/api/qt/stock/kline/get');
-        url.searchParams.set('secid', `${internalMap[code] ?? '128'}.${code}`);
-        url.searchParams.set('klt', '101');
-        url.searchParams.set('fqt', '1');
-        url.searchParams.set('lmt', '10');
-        url.searchParams.set('end', '20500000');
-        url.searchParams.set('iscca', '1');
-        url.searchParams.set('fields1', 'f1,f2,f3,f4,f5,f6,f7,f8');
-        url.searchParams.set('fields2', 'f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64');
-        url.searchParams.set('ut', 'f057cbcbce2a86e2866ab8877db1d059');
-        url.searchParams.set('forcect', '1');
-
-        const response = await fetch(url.toString(), {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)',
-                Accept: 'application/json'
-            }
-        });
-        if (!response.ok) {
-            return fallbackChangePct;
-        }
-
-        const payload = (await response.json()) as {
-            data?: {
-                klines?: string[];
-            };
-        };
-        const klines = Array.isArray(payload.data?.klines) ? payload.data?.klines ?? [] : [];
-        const closes = klines
-            .map((item) => Number(item.split(',')[2]))
-            .filter((value) => Number.isFinite(value));
+        const closes = (await fetchHongKongIndexHistory(code, 10)).map((item) => item.close);
 
         if (closes.length < 2) {
             return fallbackChangePct;

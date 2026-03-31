@@ -176,7 +176,7 @@ export interface ClientFocusMarketSnapshot {
 export interface ClientFocusMarketChartPoint {
     date: string;
     net_buy: number | null;
-    ma5: number | null;
+    hsi_close: number | null;
 }
 
 export interface ClientFocusMarketChartStats {
