@@ -123,7 +123,7 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
             '今年还能降息吗，还是反而会加息？'
         ],
         relatedAssets: ['股票', '债券', '贵金属', '原油', '美元', '港股'],
-        fallbackSummary: '地缘风险正在通过原油、黄金与利率预期重塑市场定价，客户对风险传导的提问明显升温。',
+        fallbackSummary: '地缘冲突推升油价与避险需求，客户近期高频追问黄金、降息路径与风险资产波动。',
         fallbackLatestUpdates: [
             {
                 time: '近期',
@@ -170,7 +170,7 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
             }
         ],
         relatedAssets: ['信用市场', '金融股', '私募信贷基金', 'BDC', '另类资管股'],
-        fallbackSummary: '信用事件开始从个别机构蔓延到风险偏好层面，客户更关注流动性与估值压缩风险。'
+        fallbackSummary: '私募信贷赎回限制与风险事件增多，持有相关产品的客户近期更关注流动性与估值压力。'
     },
     {
         slug: 'hk-market-sentiment',
@@ -198,7 +198,7 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
             }
         ],
         relatedAssets: ['恒生指数', '恒生科技指数', '港股', '南下资金', '中国科技股'],
-        fallbackSummary: '港股正从资金推动转向盈利与情绪共同定价，客户更关注南下资金与科技股波动。'
+        fallbackSummary: '2025年港股强势后2026年转弱，客户近期更关注南下资金、科技股波动与情绪变化。'
     },
     {
         slug: 'gold-repricing',
@@ -220,7 +220,7 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
             }
         ],
         relatedAssets: ['实物黄金', '黄金ETF', '金矿股', '美元'],
-        fallbackSummary: '支撑黄金上涨的核心驱动正在变化，市场开始重新评估黄金、ETF与金矿股之间的关系。'
+        fallbackSummary: '弱美元与央行购金曾支撑黄金牛市，近期逻辑转向后客户更关心金价还能否继续上行。'
     },
     {
         slug: 'usd-strength',
@@ -242,7 +242,7 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
             }
         ],
         relatedAssets: ['USDCNH', '港股', '中国资产', '美元资产'],
-        fallbackSummary: '美元反弹正在重新影响 USDCNH、中国资产与非美风险偏好，汇率压力重新进入客户视野。'
+        fallbackSummary: '2025年弱美元后近期因避险与利差反弹，客户重新关注美元方向及对人民币资产的压力。'
     }
 ];
 
@@ -700,11 +700,31 @@ function sanitizeFocusSummary(summary: string | undefined, topic: FocusTopicConf
     return trimmed;
 }
 
-function buildFocusSummaryFallback(topic: FocusTopicConfig): string {
-    if (topic.slug === 'gold-repricing') {
-        return '本周黄金表现弱于地缘避险直觉，客户沟通宜聚焦美元、实际利率与降息预期是否重新主导定价。';
+function buildFocusSummaryGuidance(topic: FocusTopicConfig): string {
+    if (topic.slug === 'middle-east-tensions') {
+        return '近期中东冲突反复升级，油价、黄金、美元与降息预期一起波动，客户会集中追问地缘风险如何影响资产价格。';
     }
 
+    if (topic.slug === 'private-credit-stress') {
+        return '2026年私募信贷集中出现赎回限制、风险事件与监管讨论，不少私人银行客户持有相关产品，因此更关心流动性、估值与是否会继续扩散。';
+    }
+
+    if (topic.slug === 'hk-market-sentiment') {
+        return '2025年港股曾显著走强，但2026年走势转弱、波动加大，客户近期更关心港股情绪是否转向、南下资金是否持续以及科技股还能否支撑指数。';
+    }
+
+    if (topic.slug === 'gold-repricing') {
+        return '弱美元、降息预期与央行购金曾推动黄金牛市，但近期驱动开始变化，客户更关心黄金上涨逻辑是否转向，以及金价与金矿股的关系。';
+    }
+
+    if (topic.slug === 'usd-strength') {
+        return '2025年弱美元是大话题，近期因避险需求和利差变化美元阶段性反弹，客户重新关心美元方向、人民币压力以及对中国资产和港股的影响。';
+    }
+
+    return topic.fallbackSummary;
+}
+
+function buildFocusSummaryFallback(topic: FocusTopicConfig): string {
     return topic.fallbackSummary;
 }
 
@@ -3656,16 +3676,20 @@ async function generateFocusContent(topic: FocusTopicConfig, newsItems: NewsItem
 
     const systemPrompt =
         '你是一位香港私人银行前台助手，负责整理客户高频市场话题。请输出简洁、结构化、专业的中文 JSON。不要输出 markdown。不要写投资建议，不要替代机构 house view。';
+    const topicGuidance = buildFocusSummaryGuidance(topic);
     const userPrompt = `
 主题：${topic.title}
+
+该主题近期进入客户沟通的背景：
+${topicGuidance}
 
 最新新闻：
 ${newsSection}
 
 请输出 JSON，字段如下：
 {
-  "status": "只能从以下选一个：持续发酵 / 风险抬升 / 局势缓和 / 逻辑重估 / 压力回升。不可自创。",
-  "summary": "24字以内。描述当前最关键的市场变化及其对资产价格的直接影响。禁止出现RM、IC、客户经理等内部角色词汇。",
+  "status": "只能从以下选一个：关注升温 / 持续发酵 / 压力上升。不可自创。",
+  "summary": "28到40字。一句话说明为什么这个话题最近会成为客户高频关注点，必须同时包含：1）近期市场背景或变化；2）客户最关心的核心变量或资产。禁止出现RM、IC、客户经理等内部角色词汇。",
   "latest_updates": [
     {
       "title": "一句话，必须包含具体机构名称或数据，禁止直译英文标题，禁止使用“市场”“投资者”等主语",
@@ -3677,7 +3701,10 @@ ${newsSection}
 要求：
 - latest_updates 最多2条
 - summary、title 都必须完整，不要半句
-- summary 严禁输出情绪描述、泛化判断、无数据支撑的方向性表达
+- summary 必须回答“为什么最近客户会问这个话题”，而不只是复述新闻
+- summary 可以提“客户近期关注/高频追问”，但不能写成销售口吻
+- summary 优先连接该主题与具体资产、价格变量或持仓暴露
+- summary 严禁输出空泛情绪描述、无数据支撑的方向性表达
 - latest_updates 应尽量基于给定新闻做翻译、压缩和总结，不要照抄英文标题
 - 若新闻不足以支撑具体数据，宁可减少条数，不要编造
 - status、summary 与 latest_updates 的方向必须一致
