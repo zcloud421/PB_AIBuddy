@@ -3345,37 +3345,86 @@ async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientF
     }
 }
 
-async function fetchGoldSnapshot(): Promise<ClientFocusPriceSnapshot | null> {
+async function fetchYahooChartSeries(
+    symbol: string
+): Promise<{ snapshot: ClientFocusPriceSnapshot | null; history: ClientFocusPriceHistoryPoint[] | null }> {
     try {
-        const response = await fetch('https://hq.sinajs.cn/list=hf_XAU', {
+        const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`);
+        url.searchParams.set('range', '1y');
+        url.searchParams.set('interval', '1d');
+        url.searchParams.set('includePrePost', 'false');
+        url.searchParams.set('events', 'div,splits');
+
+        const response = await fetch(url.toString(), {
             headers: {
-                Referer: 'https://finance.sina.com.cn/',
+                Accept: 'application/json',
+                Referer: 'https://finance.yahoo.com/',
                 'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)'
             }
         });
         if (!response.ok) {
-            return null;
+            return { snapshot: null, history: null };
         }
 
-        const text = await response.text();
-        const raw = text.split('"')[1]?.split(',') ?? [];
-        if (raw.length < 8) {
-            return null;
+        const payload = (await response.json()) as {
+            chart?: {
+                result?: Array<{
+                    meta?: {
+                        regularMarketPrice?: number;
+                        previousClose?: number;
+                        currency?: string;
+                    };
+                    timestamp?: number[];
+                    indicators?: {
+                        quote?: Array<{
+                            close?: Array<number | null>;
+                        }>;
+                    };
+                }>;
+            };
+        };
+        const result = payload.chart?.result?.[0];
+        const timestamps = Array.isArray(result?.timestamp) ? result?.timestamp ?? [] : [];
+        const closes = Array.isArray(result?.indicators?.quote?.[0]?.close)
+            ? result?.indicators?.quote?.[0]?.close ?? []
+            : [];
+
+        const history = timestamps
+            .map((ts, index) => {
+                const close = closes[index];
+                return {
+                    date: new Date(ts * 1000).toISOString().slice(0, 10),
+                    close: typeof close === 'number' && Number.isFinite(close) ? close : null
+                };
+            })
+            .filter((item): item is ClientFocusPriceHistoryPoint => Boolean(item.date) && item.close !== null);
+
+        if (history.length === 0) {
+            return { snapshot: null, history: null };
         }
 
-        const latest = Number(raw[0]);
-        const changePct = Number(raw[7]);
-        const asOfRaw = raw[12] ?? raw[13] ?? '';
-        const asOf = asOfRaw ? asOfRaw.slice(0, 10).replace(/\//g, '-') : null;
+        const latestPoint = history[history.length - 1];
+        const previousClose = Number(result?.meta?.previousClose);
+        const latest = Number(result?.meta?.regularMarketPrice);
+        const effectiveLatest = Number.isFinite(latest) ? latest : latestPoint.close;
+        const changePct = Number.isFinite(previousClose) && previousClose !== 0
+            ? ((effectiveLatest - previousClose) / previousClose) * 100
+            : history.length >= 2
+                ? ((latestPoint.close - history[history.length - 2].close) / history[history.length - 2].close) * 100
+                : null;
+
         return {
-            code: 'XAU',
-            name: '伦敦金',
-            latest: Number.isFinite(latest) ? latest : null,
-            change_pct: Number.isFinite(changePct) ? changePct : null,
-            as_of: asOf
+            snapshot: {
+                code: 'GC=F',
+                name: 'COMEX黄金期货',
+                latest: Number.isFinite(effectiveLatest) ? effectiveLatest : null,
+                change_pct: Number.isFinite(changePct) ? changePct : null,
+                as_of: latestPoint.date
+            },
+            history
         };
     } catch {
-        return null;
+        return { snapshot: null, history: null };
     }
 }
 
@@ -3384,7 +3433,7 @@ async function fetchFocusPriceSnapshot(slug: string): Promise<ClientFocusPriceSn
         return fetchForexSnapshot('USDCNH', '美元人民币');
     }
     if (slug === 'gold-repricing') {
-        return fetchGoldSnapshot();
+        return (await fetchYahooChartSeries('GC=F')).snapshot;
     }
     return null;
 }
@@ -3440,50 +3489,8 @@ async function fetchForexHistory(symbol: string): Promise<ClientFocusPriceHistor
 }
 
 async function fetchGoldHistory(): Promise<ClientFocusPriceHistoryPoint[]> {
-    const candidates = [
-        'https://stooq.com/q/d/l/?s=xauusd&i=d',
-        'https://stooq.com/q/d/l/?s=xauusd.us&i=d'
-    ];
-
-    for (const url of candidates) {
-        try {
-            const response = await fetch(url, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)',
-                    Accept: 'text/csv,text/plain'
-                }
-            });
-            if (!response.ok) {
-                continue;
-            }
-
-            const text = await response.text();
-            const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-            if (lines.length < 10 || !/^date[,;]/i.test(lines[0])) {
-                continue;
-            }
-
-            const rows = lines.slice(1)
-                .map((line) => line.split(','))
-                .map((parts) => ({
-                    date: parts[0]?.trim() ?? '',
-                    close: Number(parts[4] ?? parts[1] ?? '')
-                }))
-                .filter((item) => item.date && Number.isFinite(item.close))
-                .map((item) => ({
-                    date: item.date,
-                    close: item.close
-                }));
-
-            if (rows.length >= 20) {
-                return rows;
-            }
-        } catch {
-            continue;
-        }
-    }
-
-    return [];
+    const result = await fetchYahooChartSeries('GC=F');
+    return result.history ?? [];
 }
 
 async function fetchFocusPriceHistory(slug: string): Promise<ClientFocusPriceHistoryPoint[] | null> {
