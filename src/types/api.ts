@@ -164,6 +164,7 @@ export interface ClientFocusDetailResponse {
     focus_price_history?: ClientFocusPriceHistoryPoint[] | null;
     focus_secondary_price_snapshot?: ClientFocusPriceSnapshot | null;
     focus_secondary_price_history?: ClientFocusPriceHistoryPoint[] | null;
+    gold_drivers?: ClientFocusDriverItem[] | null;
     disclaimer: string;
 }
 
@@ -230,6 +231,11 @@ export interface ClientFocusPriceSnapshot {
 export interface ClientFocusPriceHistoryPoint {
     date: string;
     close: number;
+}
+
+export interface ClientFocusDriverItem {
+    label: string;
+    status: string;
 }
 
 export interface ClientFocusPolymarketHistoryPoint {
