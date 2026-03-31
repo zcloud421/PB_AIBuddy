@@ -156,8 +156,21 @@ export interface ClientFocusDetailResponse {
     client_questions: ClientFocusQuestion[];
     transmission_chain: ClientFocusTransmissionItem[];
     related_assets: string[];
+    market_snapshot?: ClientFocusMarketSnapshot | null;
     market_chart?: ClientFocusMarketChart | null;
     disclaimer: string;
+}
+
+export interface ClientFocusMarketSnapshotItem {
+    code: string;
+    name: string;
+    latest: number | null;
+    change_pct: number | null;
+}
+
+export interface ClientFocusMarketSnapshot {
+    summary: string;
+    indices: ClientFocusMarketSnapshotItem[];
 }
 
 export interface ClientFocusMarketChartPoint {

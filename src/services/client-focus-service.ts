@@ -2,6 +2,7 @@ import type {
     ClientFocusDetailResponse,
     ClientFocusListItem,
     ClientFocusMarketChart,
+    ClientFocusMarketSnapshot,
     ClientFocusPolymarketMarket,
     ClientFocusPolymarketResponse,
     ClientFocusQuestion,
@@ -3034,6 +3035,106 @@ function sumRecentNetBuy(points: Array<{ net_buy: number | null }>, length: numb
     return Number(recent.reduce((sum, value) => sum + value, 0).toFixed(2));
 }
 
+async function fetchHongKongMarketSnapshot(): Promise<ClientFocusMarketSnapshot | null> {
+    try {
+        const [indices, southboundChart] = await Promise.all([fetchHongKongSpotIndices(), fetchSouthboundFlowChart()]);
+
+        if (indices.length === 0) {
+            return null;
+        }
+
+        return {
+            summary: buildHongKongSnapshotSummary(indices, southboundChart),
+            indices: indices.map((item) => ({
+                ...item,
+                latest: Number.isFinite(item.latest) ? item.latest : null,
+                change_pct: Number.isFinite(item.change_pct) ? item.change_pct : null
+            }))
+        };
+    } catch {
+        return null;
+    }
+}
+
+async function fetchHongKongSpotIndices() {
+    const response = await fetch(
+        'https://hq.sinajs.cn/rn=mtf2t&list=hkHSI,hkHSTECH',
+        {
+            headers: {
+                Referer: 'https://vip.stock.finance.sina.com.cn/',
+                'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)'
+            }
+        }
+    );
+    if (!response.ok) {
+        return [];
+    }
+
+    const text = await response.text();
+    const lines = text.split('\n').filter(Boolean);
+    return lines
+        .map((line) => {
+            const codeMatch = line.match(/hq_str_hk([A-Z0-9]+)=/);
+            const raw = line.split('"')[1]?.split(',') ?? [];
+            if (!codeMatch || raw.length < 8) {
+                return null;
+            }
+            return {
+                code: codeMatch[1],
+                name: raw[1] ?? codeMatch[1],
+                latest: Number(raw[6]),
+                change_pct: Number(raw[8])
+            };
+        })
+        .filter((item): item is NonNullable<typeof item> => Boolean(item));
+}
+
+function buildHongKongSnapshotSummary(
+    indices: Array<{ code: string; name: string; latest: number | null; change_pct: number | null }>,
+    southboundChart: ClientFocusMarketChart | null,
+) {
+    const hsi = indices.find((item) => item.code === 'HSI');
+    const hstech = indices.find((item) => item.code === 'HSTECH');
+    const southbound5d = southboundChart ? sumRecentNetBuy(southboundChart.points, 5) : null;
+
+    const leadSentence = (() => {
+        if (hsi?.change_pct === null || hsi?.change_pct === undefined || hstech?.change_pct === null || hstech?.change_pct === undefined) {
+            return '恒指与恒生科技近期走势分化';
+        }
+
+        const hsiMove = hsi.change_pct;
+        const techMove = hstech.change_pct;
+        if (hsiMove < 0 && techMove < 0 && Math.abs(techMove) > Math.abs(hsiMove) + 0.6) {
+            return '恒指回落幅度有限，但恒生科技波动更大';
+        }
+        if (hsiMove > 0 && techMove > 0 && techMove > hsiMove + 0.6) {
+            return '恒指与恒生科技同步反弹，科技板块弹性更强';
+        }
+        if (hsiMove < 0 && techMove > 0) {
+            return '恒指偏弱，但恒生科技相对更有韧性';
+        }
+        if (hsiMove > 0 && techMove < 0) {
+            return '恒指表现尚稳，但恒生科技情绪仍偏谨慎';
+        }
+        return '恒指与恒生科技走势仍以情绪波动为主';
+    })();
+
+    const flowSentence = (() => {
+        if (southbound5d === null) {
+            return '港股仍偏资金驱动';
+        }
+        if (southbound5d > 120) {
+            return '南向资金持续净流入，港股暂时仍有资金支撑';
+        }
+        if (southbound5d < -120) {
+            return '南向资金明显转弱，港股短线更受情绪影响';
+        }
+        return '南向资金方向不强，港股仍偏资金驱动';
+    })();
+
+    return `${leadSentence}，${flowSentence}。`;
+}
+
 async function generateFocusContent(topic: FocusTopicConfig, newsItems: NewsItem[]): Promise<FocusTopicModelOutput | null> {
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
@@ -3390,9 +3491,13 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
 
     const newsItems = await fetchFocusNewsItems(topic);
     const modelOutput = await generateFocusContent(topic, newsItems);
-    const skipWeeklyProgress = topic.slug === 'middle-east-tensions' || topic.slug === 'private-credit-stress';
+    const skipWeeklyProgress =
+        topic.slug === 'middle-east-tensions'
+        || topic.slug === 'private-credit-stress'
+        || topic.slug === 'hk-market-sentiment';
     const weeklyProgress = skipWeeklyProgress ? null : await generateWeeklyProgress(topic, newsItems);
     const transmissionChain = await generateTransmissionChain(topic, newsItems);
+    const marketSnapshot = topic.slug === 'hk-market-sentiment' ? await fetchHongKongMarketSnapshot() : null;
     const marketChart = topic.slug === 'hk-market-sentiment' ? await fetchSouthboundFlowChart() : null;
     const whatChanged =
         topic.slug === 'middle-east-tensions'
@@ -3427,6 +3532,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         client_questions: dynamicClientQuestions ?? topic.clientQuestions,
         transmission_chain: transmissionChain ?? buildFallbackTransmission(topic),
         related_assets: topic.relatedAssets,
+        market_snapshot: marketSnapshot,
         market_chart: marketChart,
         disclaimer: DEFAULT_DISCLAIMER
     };
