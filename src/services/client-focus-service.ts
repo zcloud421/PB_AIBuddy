@@ -141,6 +141,14 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
         title: '私募信贷风险',
         accent: '#C9A45C',
         query: 'private credit fund redemptions withdrawal limits investors loss record Apollo Ares Blackstone BDC JPMorgan default',
+        newsQueries: [
+            'private credit insurance regulators treasury',
+            'Fed Powell private credit signs of trouble',
+            'Apollo private credit fund limits investor withdrawals',
+            'Ares private credit fund withdrawals redemptions surge',
+            'private credit investors wait to pull out 5 billion',
+            'private credit fund redemptions withdrawal limits Apollo Ares'
+        ],
         clientQuestions: [
             {
                 question: '这会不会演变成新的信用风险事件？',
@@ -433,7 +441,30 @@ async function fetchFocusNewsItems(topic: FocusTopicConfig): Promise<NewsItem[]>
                   })
               )
           )
-        : Promise.resolve([]);
+        : topic.slug === 'private-credit-stress'
+            ? Promise.all(
+                  [
+                      {
+                          query: 'private credit insurance regulators treasury',
+                          categories: ['business']
+                      },
+                      {
+                          query: 'Fed Powell private credit signs of trouble',
+                          categories: ['business']
+                      },
+                      {
+                          query: 'Apollo Ares private credit fund withdrawals',
+                          categories: ['business']
+                      }
+                  ].map(({ query, categories }) =>
+                      fetchNewsItemsFromNewsData(query, {
+                          timeframeHours: 48,
+                          language: 'en',
+                          categories
+                      })
+                  )
+              )
+            : Promise.resolve([]);
 
     const [googleResults, newsDataResults] = await Promise.all([googleResultsPromise, newsDataResultsPromise]);
     const results = [...googleResults, ...(Array.isArray(newsDataResults) ? newsDataResults : [])];
@@ -1359,15 +1390,16 @@ async function generatePrivateCreditWhatChanged(newsItems: NewsItem[]): Promise<
     const systemPrompt =
         '你是香港私人银行的市场沟通助手。请把过去一周的私募信贷相关新闻整理成可直接给RM使用的中文分组要点。';
     const userPrompt = `
-以下是过去7天的私募信贷相关新闻标题。请将它们整理成以下3个固定分组（每组必须出现，无内容则 items 为空数组）：
+以下是过去7天的私募信贷相关新闻标题。请将它们整理成以下2个固定分组：
 
-1. 赎回 & 流动性（icon: 💧）：赎回限制、gate、提款、流动性收紧、融资额度变化
-2. 信用事件（icon: 🧨）：违约、减记、评级动作、重组、损失确认
-3. 风险外溢（icon: 🏦）：银行、保险、养老金、BDC、资管平台敞口与二阶影响
+1. 流动性与赎回（icon: 💧）：赎回限制、gate、提款、流动性收紧、融资额度变化
+2. 监管动向（icon: 🏦）：财政部、美联储、监管机构、保险监管、银行及相关表态
 
 每组最多3条，每条：
 - time: 从新闻时间取 MM-DD；无法判断则留空字符串
-- headline: 不超过35字，必须包含【机构/主体】+【具体动作或事实】
+- headline: 不超过35字，尽量接近原始新闻标题的中文翻译
+- headline 中需要高亮的关键词请用 {{关键词}} 标记，例如 {{Apollo}} 限制投资者赎回
+- 不要使用【】符号
 
 禁止：
 - “市场承压”“风险升温”“持续发酵”等空泛表述
@@ -1376,9 +1408,8 @@ async function generatePrivateCreditWhatChanged(newsItems: NewsItem[]): Promise<
 
 输出格式（JSON数组）：
 [
-  { "group_label": "赎回 & 流动性", "group_icon": "💧", "items": [...] },
-  { "group_label": "信用事件", "group_icon": "🧨", "items": [...] },
-  { "group_label": "风险外溢", "group_icon": "🏦", "items": [...] }
+  { "group_label": "流动性与赎回", "group_icon": "💧", "items": [...] },
+  { "group_label": "监管动向", "group_icon": "🏦", "items": [...] }
 ]
 
 新闻列表：
@@ -1422,9 +1453,8 @@ ${newsList}
         }
 
         const fixedGroups = [
-            { group_label: '赎回 & 流动性', group_icon: '💧' },
-            { group_label: '信用事件', group_icon: '🧨' },
-            { group_label: '风险外溢', group_icon: '🏦' }
+            { group_label: '流动性与赎回', group_icon: '💧' },
+            { group_label: '监管动向', group_icon: '🏦' }
         ] as const;
 
         return fixedGroups.map((expectedGroup) => {
@@ -1446,7 +1476,7 @@ ${newsList}
                 group_icon: expectedGroup.group_icon,
                 items: mergeWhatChangedItems(parsedItems, fallbackItems).slice(0, 3)
             };
-        });
+        }).filter((group) => group.items.length > 0);
     } catch {
         return buildFallbackPrivateCreditWhatChangedGroups(candidates);
     }
@@ -1635,21 +1665,22 @@ ${newsList}
 
 function buildFallbackPrivateCreditWhatChangedGroups(newsItems: NewsItem[]): WhatChangedGroup[] {
     const fixedGroups = [
-        { group_label: '赎回 & 流动性', group_icon: '💧' },
-        { group_label: '信用事件', group_icon: '🧨' },
-        { group_label: '风险外溢', group_icon: '🏦' }
+        { group_label: '流动性与赎回', group_icon: '💧' },
+        { group_label: '监管动向', group_icon: '🏦' }
     ] as const;
 
-    return fixedGroups.map((group) => ({
-        group_label: group.group_label,
-        group_icon: group.group_icon,
-        items: buildFallbackPrivateCreditWhatChangedItems(newsItems, group.group_label)
-    }));
+    return fixedGroups
+        .map((group) => ({
+            group_label: group.group_label,
+            group_icon: group.group_icon,
+            items: buildFallbackPrivateCreditWhatChangedItems(newsItems, group.group_label)
+        }))
+        .filter((group) => group.items.length > 0);
 }
 
 function buildFallbackPrivateCreditWhatChangedItems(
     newsItems: NewsItem[],
-    groupLabel: '赎回 & 流动性' | '信用事件' | '风险外溢'
+    groupLabel: '流动性与赎回' | '监管动向'
 ) {
     return newsItems
         .filter((item) => classifyPrivateCreditWhatChangedGroup(item.title) === groupLabel)
@@ -1663,7 +1694,7 @@ function buildFallbackPrivateCreditWhatChangedItems(
 
 function classifyPrivateCreditWhatChangedGroup(
     title: string
-): '赎回 & 流动性' | '信用事件' | '风险外溢' | null {
+): '流动性与赎回' | '监管动向' | null {
     const normalized = title.toLowerCase();
 
     const liquidityKeywords = [
@@ -1681,49 +1712,27 @@ function classifyPrivateCreditWhatChangedGroup(
         'funding'
     ];
     if (liquidityKeywords.some((keyword) => normalized.includes(keyword))) {
-        return '赎回 & 流动性';
+        return '流动性与赎回';
     }
 
-    const creditKeywords = [
-        'default',
-        'restructuring',
-        'restructure',
-        'write-down',
-        'writedown',
-        'haircut',
-        'downgrade',
-        'rating',
-        'loss',
-        'losses',
-        'missed payment'
-    ];
-    if (creditKeywords.some((keyword) => normalized.includes(keyword))) {
-        return '信用事件';
-    }
-
-    const spilloverKeywords = [
-        'bank',
-        'banks',
+    const regulatoryKeywords = [
         'fed',
         'powell',
         'treasury',
         'regulator',
         'regulators',
+        'watching',
+        'signs of trouble',
+        'meet',
+        'discussion',
         'insurer',
         'insurance',
-        'pension',
-        'bdc',
-        'apollo',
-        'ares',
-        'blackstone',
-        'blue owl',
-        'jpmorgan',
-        'morgan stanley',
-        'goldman',
-        'blackrock'
+        'bank',
+        'banks',
+        'watch'
     ];
-    if (spilloverKeywords.some((keyword) => normalized.includes(keyword))) {
-        return '风险外溢';
+    if (regulatoryKeywords.some((keyword) => normalized.includes(keyword))) {
+        return '监管动向';
     }
 
     return null;
@@ -1746,14 +1755,14 @@ function buildFallbackPrivateCreditHeadline(title: string) {
     }
 
     if (actor) {
-        const actorPrefix = `【${actor}】`;
         if (containsLongEnglishFragment(cleanedTitle)) {
             return '';
         }
+        const actorPrefix = `{{${actor}}}`;
         if (cleanedTitle.startsWith(actorPrefix)) {
             return cleanedTitle.slice(0, 35);
         }
-        return `${actorPrefix}${cleanedTitle}`.slice(0, 35);
+        return `${actorPrefix} ${cleanedTitle}`.slice(0, 35);
     }
 
     if (containsLongEnglishFragment(cleanedTitle)) {
@@ -1768,10 +1777,10 @@ function translatePrivateCreditHeadline(title: string, actor: string | null) {
 
     if (
         normalized.includes('treasury')
-        && normalized.includes('insurance regulator')
+        && (normalized.includes('insurance regulator') || normalized.includes('insurance regulators'))
         && normalized.includes('private credit')
     ) {
-        return '【美国财政部】拟与保险监管方讨论私募信贷风险';
+        return '{{美国财政部}}与保险监管机构讨论私募信贷风险';
     }
 
     if (
@@ -1779,7 +1788,15 @@ function translatePrivateCreditHeadline(title: string, actor: string | null) {
         && normalized.includes('private credit')
         && normalized.includes('powell')
     ) {
-        return '【美联储】鲍威尔称正密切关注私募信贷风险';
+        return '{{美联储}}称正在关注私募信贷潜在压力';
+    }
+
+    if (
+        normalized.includes('powell says')
+        && normalized.includes('private credit')
+        && normalized.includes('signs of trouble')
+    ) {
+        return '{{美联储}}称正在关注私募信贷潜在压力';
     }
 
     if (
@@ -1788,7 +1805,7 @@ function translatePrivateCreditHeadline(title: string, actor: string | null) {
         && normalized.includes('withdraw')
         && (normalized.includes('limit') || normalized.includes('limits'))
     ) {
-        return '【Apollo】私募信贷基金限制赎回，申请激增';
+        return '{{Apollo}} 限制投资者赎回';
     }
 
     if (
@@ -1797,7 +1814,15 @@ function translatePrivateCreditHeadline(title: string, actor: string | null) {
         && normalized.includes('withdraw')
         && (normalized.includes('limit') || normalized.includes('limits'))
     ) {
-        return '【Ares】限制私募信贷基金赎回，申请激增';
+        return '{{Ares}} 限制赎回请求';
+    }
+
+    if (
+        normalized.includes('redemptions surge')
+        && normalized.includes('ares')
+        && normalized.includes('withdraw')
+    ) {
+        return '{{Ares}} 限制赎回请求';
     }
 
     if (
@@ -1805,14 +1830,21 @@ function translatePrivateCreditHeadline(title: string, actor: string | null) {
         && normalized.includes('wait to pull out')
         && (normalized.includes('$5 billion') || normalized.includes('5 billion'))
     ) {
-        return '【投资者】约50亿美元赎回申请排队等待退出';
+        return '{{投资者资金}}被锁约50亿美元';
+    }
+
+    if (
+        normalized.includes('trapped in private credit')
+        && (normalized.includes('$5 billion') || normalized.includes('5 billion'))
+    ) {
+        return '{{投资者资金}}被锁约50亿美元';
     }
 
     if (
         normalized.includes('private credit funds halt withdraw')
         || (normalized.includes('private credit funds') && normalized.includes('halt') && normalized.includes('withdraw'))
     ) {
-        return '【私募信贷基金】多只产品暂停提款或赎回';
+        return '{{私募信贷基金}}多只产品暂停提款或赎回';
     }
 
     if (
@@ -1820,7 +1852,7 @@ function translatePrivateCreditHeadline(title: string, actor: string | null) {
         && normalized.includes('redemption')
         && normalized.includes('surge')
     ) {
-        return `【${actor}】赎回申请激增，资金流动受限`;
+        return `{{${actor}}} 赎回申请激增`;
     }
 
     return '';
@@ -1831,7 +1863,8 @@ function containsLongEnglishFragment(text: string) {
 }
 
 function sanitizeGeneratedPrivateCreditHeadline(headline: string) {
-    const trimmed = headline.replace(/\s+/g, ' ').trim();
+    const normalizedMarkers = headline.replace(/【([^】]+)】/g, '{{$1}}');
+    const trimmed = normalizedMarkers.replace(/\s+/g, ' ').trim();
     if (!trimmed) {
         return '';
     }
