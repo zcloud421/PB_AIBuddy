@@ -1,6 +1,7 @@
 import type {
     ClientFocusDetailResponse,
     ClientFocusListItem,
+    ClientFocusMarketChart,
     ClientFocusPolymarketMarket,
     ClientFocusPolymarketResponse,
     ClientFocusQuestion,
@@ -167,6 +168,34 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
         fallbackSummary: '信用事件开始从个别机构蔓延到风险偏好层面，客户更关注流动性与估值压缩风险。'
     },
     {
+        slug: 'hk-market-sentiment',
+        title: '港股资金与情绪',
+        accent: '#5E88D9',
+        query: 'Hong Kong stocks Hang Seng Hang Seng Tech southbound inflow China equities market sentiment',
+        newsQueries: [
+            'Hong Kong stocks Hang Seng Tech selloff rebound',
+            'southbound inflow Hong Kong stocks',
+            'Hang Seng index China equities sentiment',
+            'Hong Kong market China tech valuation'
+        ],
+        clientQuestions: [
+            {
+                question: '港股为什么从2025强势转向2026疲弱？',
+                answer: '当前更像估值与风险偏好的回摆，而不是长期逻辑突然逆转。2025年的强势很大程度来自资金集中回流与中国科技重估，但进入2026年后，美元偏强、增长预期反复和获利回吐一起压缩了估值弹性。整体来看，港股并非失去结构性机会，而是从单边修复转入更看资金与盈利兑现的阶段。'
+            },
+            {
+                question: '港股现在更受资金情绪还是基本面驱动？',
+                answer: '短期仍是资金情绪主导，尤其是南下资金、外资风险偏好和中国科技情绪变化，会直接影响港股波动；但中期能否站稳，仍要看盈利预期是否跟上。整体来看，当前港股更像“资金先走、基本面后验证”，因此走势往往快于基本面变化。'
+            },
+            {
+                question: '恒生科技回调是否意味着中国科技叙事转弱？',
+                answer: '不一定。恒生科技回调更多是在重估之后进入消化期，市场重新区分哪些公司有真实盈利兑现，哪些只是情绪带动。若美元继续偏强或风险偏好回落，科技股波动会更大；但这不等于长期叙事结束。整体来看，板块逻辑仍在，只是市场开始提高验证门槛。'
+            }
+        ],
+        relatedAssets: ['恒生指数', '恒生科技指数', '港股', '南下资金', '中国科技股'],
+        fallbackSummary: '港股正从资金推动转向盈利与情绪共同定价，客户更关注南下资金与科技股波动。'
+    },
+    {
         slug: 'gold-repricing',
         title: '黄金逻辑重估',
         accent: '#C9A45C',
@@ -214,7 +243,13 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
 
 const focusCache = new Map<string, { expiresAt: number; value: ClientFocusDetailResponse }>();
 const focusChainCache = new Map<string, { expiresAt: number; value: ClientFocusTransmissionItem[] }>();
+const focusMarketChartCache = new Map<string, { expiresAt: number; value: ClientFocusMarketChart | null }>();
 const polymarketCache = new Map<string, { expiresAt: number; value: ClientFocusPolymarketResponse }>();
+
+interface EastMoneySouthboundRow {
+    TRADE_DATE?: string;
+    NET_DEAL_AMT?: string | number | null;
+}
 
 const MIDDLE_EAST_POLYMARKET_MARKETS = [
     {
@@ -1501,7 +1536,13 @@ async function generateDynamicClientQuestions(
     topic: FocusTopicConfig,
     newsItems: NewsItem[]
 ): Promise<Array<{ question: string; answer: string }> | null> {
-    if (topic.slug !== 'middle-east-tensions' && topic.slug !== 'private-credit-stress') {
+    if (
+        topic.slug !== 'middle-east-tensions'
+        && topic.slug !== 'private-credit-stress'
+        && topic.slug !== 'hk-market-sentiment'
+        && topic.slug !== 'gold-repricing'
+        && topic.slug !== 'usd-strength'
+    ) {
         return null;
     }
 
@@ -1515,7 +1556,11 @@ async function generateDynamicClientQuestions(
         .filter((item) =>
             topic.slug === 'private-credit-stress'
                 ? isWithinDays(item.published_at, 7)
-                : true
+                : topic.slug === 'hk-market-sentiment'
+                    ? isWithinDays(item.published_at, 7)
+                : topic.slug === 'middle-east-tensions'
+                    ? true
+                    : isWithinDays(item.published_at, 7)
         )
         .sort((left, right) => {
             const leftTs = left.published_at ? new Date(left.published_at).getTime() : 0;
@@ -1555,7 +1600,8 @@ async function generateDynamicClientQuestions(
 - 不要使用“局势升级”“引发不确定性”等空泛表述
 - 不要直接给投资建议
 `.trim()
-        : `
+        : topic.slug === 'private-credit-stress'
+            ? `
 你是香港私人银行的市场沟通助手，面向 RM/IC 生成“客户常问”的标准回答。
 
 回答目标不是写研究摘要，而是生成“可直接发给客户”的简洁答复。
@@ -1570,6 +1616,65 @@ async function generateDynamicClientQuestions(
 - 像客户沟通短信，不像研究报告
 - 句子要短，少用术语，避免层层展开
 - 先讲结论，再补事实，再讲整体判断
+- 不要写成快讯，不要像事件播报
+- 不要使用“市场承压”“风险升温”等空泛表述
+- 不要直接给投资建议
+`.trim()
+            : topic.slug === 'gold-repricing'
+                ? `
+你是香港私人银行的市场沟通助手，面向 RM/IC 生成“客户常问”的标准回答。
+
+回答目标不是写研究摘要，而是生成“可直接发给客户”的简洁答复。
+
+每条回答都要做到：
+1. 先解释当前黄金定价的核心驱动
+2. 再说明本周新增变化验证了什么
+3. 最后给一句整体判断，说明黄金、ETF或金矿股应如何理解
+
+语气要求：
+- 专业、克制、像私行客户沟通口径
+- 像客户沟通短信，不像研究报告
+- 先讲结论，再补原因，再做总结
+- 句子要短，不要堆太多变量
+- 不要写成快讯，不要像事件播报
+- 不要使用“市场承压”“逻辑崩塌”等夸张表述
+- 不要直接给投资建议
+`.trim()
+                : topic.slug === 'hk-market-sentiment'
+                    ? `
+你是香港私人银行的市场沟通助手，面向 RM/IC 生成“客户常问”的标准回答。
+
+回答目标不是写研究摘要，而是生成“可直接发给客户”的简洁答复。
+
+每条回答都要做到：
+1. 开头先给明确判断
+2. 中间补 1 个近期资金、指数或情绪变化
+3. 结尾说明港股目前更该看什么变量
+
+语气要求：
+- 专业、克制、像私行客户沟通口径
+- 像客户沟通短信，不像研究报告
+- 先讲结论，再补事实，再讲整体判断
+- 句子要短，少用术语，避免层层展开
+- 不要写成快讯，不要像事件播报
+- 不要使用“市场承压”“风险升温”等空泛表述
+- 不要直接给投资建议
+`.trim()
+                : `
+你是香港私人银行的市场沟通助手，面向 RM/IC 生成“客户常问”的标准回答。
+
+回答目标不是写研究摘要，而是生成“可直接发给客户”的简洁答复。
+
+每条回答都要做到：
+1. 开头先给明确判断
+2. 中间补 1 个最新市场或政策事实
+3. 结尾说明对美元、人民币或港股的直接含义
+
+语气要求：
+- 专业、克制、像私行客户沟通口径
+- 像客户沟通短信，不像研究报告
+- 先讲结论，再补事实，再讲含义
+- 句子要短，少用术语，避免层层展开
 - 不要写成快讯，不要像事件播报
 - 不要使用“市场承压”“风险升温”等空泛表述
 - 不要直接给投资建议
@@ -1607,7 +1712,8 @@ ${newsList}
 
 只输出JSON，不要解释。
 `.trim()
-        : `
+        : topic.slug === 'private-credit-stress'
+            ? `
 以下是过去7天的私募信贷相关新闻。请基于这些最新信息，
 为以下固定问题重写回答，供香港私人银行 RM/IC 与客户沟通时使用。
 
@@ -1637,6 +1743,109 @@ ${newsList}
 - 不要使用“风险升温”“市场承压”等空泛表述
 - 不要堆太多数字，不要一段塞入多个括号说明
 - 不要写成长段分析，不要出现“这意味着需要持续关注”这类套话
+- 不要给具体投资建议
+
+输出格式（JSON数组）：
+[{"question":"原问题文字","answer":"重写后的答案"}]
+
+只输出JSON，不要解释。
+`.trim()
+            : topic.slug === 'gold-repricing'
+                ? `
+以下是过去7天与黄金、实际利率、美元、央行购金和金矿股相关的新闻。请基于这些最新信息，
+为以下固定问题重写回答，供香港私人银行 RM/IC 与客户沟通时使用。
+
+${questionsList}
+
+每个问题的当前基准回答如下：
+${baselineAnswers}
+
+新闻列表：
+${newsList}
+
+写作要求：
+- 每条答案 85-130 字
+- 必须采用“先判断 → 再补原因/事实 → 最后总结”的结构
+- 第一两句必须能单独成立，像直接回复客户
+- 必须至少包含 1 个具体变量或事实，例如美元、实际利率、央行购金、ETF资金流、金矿成本
+- 尽量用“当前更关键的是…”“本周新增变化是…”“整体来看…”这类客户沟通句式
+- 回答要有 1-2 周可用性，不要写成单条新闻复述
+- 若问题是“为何黄金反而下跌”，重点回答避险需求为何被美元/实际利率压过
+- 若问题是“金矿股为何跑输”，重点回答经营杠杆、成本与利润弹性
+
+禁止：
+- 不要以“过去一周...”开头
+- 不要整段围绕某个 headline 复述
+- 不要写成长段分析，不要堆太多数字
+- 不要给具体投资建议
+
+输出格式（JSON数组）：
+[{"question":"原问题文字","answer":"重写后的答案"}]
+
+只输出JSON，不要解释。
+`.trim()
+                : topic.slug === 'hk-market-sentiment'
+                    ? `
+以下是过去7天与港股、恒生指数、恒生科技和南下资金情绪相关的新闻。请基于这些最新信息，
+为以下固定问题重写回答，供香港私人银行 RM/IC 与客户沟通时使用。
+
+${questionsList}
+
+每个问题的当前基准回答如下：
+${baselineAnswers}
+
+新闻列表：
+${newsList}
+
+写作要求：
+- 每条答案 85-130 字
+- 必须采用“先判断 → 再补事实 → 最后总结”的结构
+- 第一两句必须能单独成立，像直接回复客户
+- 必须至少包含 1 个具体变量或事实，例如恒指、恒生科技、南下资金、资金回流、估值消化、风险偏好
+- 尽量用“当前更像…”“本周新增变化是…”“整体来看…”这类客户沟通句式
+- 回答要有 1-2 周可用性，不要写成单条新闻复述
+- 若问题是“为什么转弱”，重点回答资金、估值和风险偏好
+- 若问题是“谁在驱动”，重点回答短期资金与中期盈利验证的关系
+- 若问题是“科技股回调”，重点回答重估消化与盈利验证门槛
+
+禁止：
+- 不要以“过去一周...”开头
+- 不要整段围绕某个 headline 复述
+- 不要写成长段分析，不要堆太多数字
+- 不要给具体投资建议
+
+输出格式（JSON数组）：
+[{"question":"原问题文字","answer":"重写后的答案"}]
+
+只输出JSON，不要解释。
+`.trim()
+                : `
+以下是过去7天与美元、人民币、港股和利率路径相关的新闻。请基于这些最新信息，
+为以下固定问题重写回答，供香港私人银行 RM/IC 与客户沟通时使用。
+
+${questionsList}
+
+每个问题的当前基准回答如下：
+${baselineAnswers}
+
+新闻列表：
+${newsList}
+
+写作要求：
+- 每条答案 85-130 字
+- 必须采用“先判断 → 再补事实 → 最后总结”的结构
+- 第一两句必须能单独成立，像直接回复客户
+- 必须至少包含 1 个具体变量或事实，例如 DXY、USDCNH、联储表态、人民币中间价、港元流动性
+- 尽量用“当前更像…”“本周新增变化是…”“整体来看…”这类客户沟通句式
+- 回答要有 1-2 周可用性，不要写成单条新闻复述
+- 若问题是“美元为何反弹”，重点回答避险需求与利率路径
+- 若问题是“央行如何表态”，重点回答政策态度与波动容忍度
+- 若问题是“强美元对港股意味着什么”，重点回答外资、流动性与估值
+
+禁止：
+- 不要以“过去一周...”开头
+- 不要整段围绕某个 headline 复述
+- 不要写成长段分析，不要堆太多数字
 - 不要给具体投资建议
 
 输出格式（JSON数组）：
@@ -2454,6 +2663,20 @@ function buildFallbackTransmission(topic: FocusTopicConfig): ClientFocusTransmis
                 pricing: '部分定价',
                 summary: '联系汇率机制下本地流动性收紧对港股估值的压制仍属部分定价。'
             }
+        ],
+        'hk-market-sentiment': [
+            {
+                order: '一阶传导',
+                title: '资金情绪主导指数波动',
+                pricing: '已定价',
+                summary: '港股短线表现先反映在恒指与恒生科技的情绪波动和估值收缩上。'
+            },
+            {
+                order: '二阶传导',
+                title: '盈利验证决定持续性',
+                pricing: '部分定价',
+                summary: '若盈利兑现跟不上资金回流节奏，科技与平台股估值弹性会继续受限。'
+            }
         ]
     };
 
@@ -2719,6 +2942,96 @@ function safeParseJson(content: string): FocusTopicModelOutput | null {
             return null;
         }
     }
+}
+
+async function fetchSouthboundFlowChart(): Promise<ClientFocusMarketChart | null> {
+    const cached = focusMarketChartCache.get('hk-market-sentiment');
+    if (cached && cached.expiresAt > Date.now()) {
+        return cached.value;
+    }
+
+    try {
+        const url = new URL('https://datacenter-web.eastmoney.com/api/data/v1/get');
+        url.searchParams.set('sortColumns', 'TRADE_DATE');
+        url.searchParams.set('sortTypes', '-1');
+        url.searchParams.set('pageSize', '80');
+        url.searchParams.set('pageNumber', '1');
+        url.searchParams.set('reportName', 'RPT_MUTUAL_DEAL_HISTORY');
+        url.searchParams.set('columns', 'ALL');
+        url.searchParams.set('source', 'WEB');
+        url.searchParams.set('client', 'WEB');
+        url.searchParams.set('filter', '(MUTUAL_TYPE="006")');
+
+        const response = await fetch(url.toString(), {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)',
+                Accept: 'application/json'
+            }
+        });
+        if (!response.ok) {
+            return null;
+        }
+
+        const payload = (await response.json()) as {
+            result?: {
+                data?: EastMoneySouthboundRow[];
+            };
+        };
+        const rows = Array.isArray(payload.result?.data) ? payload.result?.data ?? [] : [];
+        const points = rows
+            .map((row) => {
+                const tradeDate = typeof row.TRADE_DATE === 'string' ? row.TRADE_DATE.slice(0, 10) : '';
+                const rawNetBuy = Number(row.NET_DEAL_AMT);
+                return {
+                    date: tradeDate,
+                    net_buy: Number.isFinite(rawNetBuy) ? rawNetBuy / 100 : null
+                };
+            })
+            .filter((item) => item.date && item.net_buy !== null)
+            .sort((left, right) => left.date.localeCompare(right.date))
+            .slice(-60);
+
+        if (points.length === 0) {
+            return null;
+        }
+
+        const withAverage = points.map((point, index, list) => {
+            const window = list.slice(Math.max(0, index - 4), index + 1).map((entry) => entry.net_buy ?? 0);
+            const sum = window.reduce((acc, value) => acc + value, 0);
+            return {
+                date: point.date,
+                net_buy: point.net_buy,
+                ma5: Number((sum / window.length).toFixed(2))
+            };
+        });
+
+        const chart: ClientFocusMarketChart = {
+            series_name: '南向资金',
+            unit: '亿元',
+            latest_trade_date: withAverage[withAverage.length - 1]?.date ?? null,
+            points: withAverage,
+            stats: {
+                latest_net_buy: withAverage[withAverage.length - 1]?.net_buy ?? null,
+                sum_10d: sumRecentNetBuy(withAverage, 10),
+                sum_20d: sumRecentNetBuy(withAverage, 20),
+                sum_60d: sumRecentNetBuy(withAverage, 60)
+            }
+        };
+
+        focusMarketChartCache.set('hk-market-sentiment', {
+            expiresAt: Date.now() + FOCUS_CACHE_TTL_MS,
+            value: chart
+        });
+
+        return chart;
+    } catch {
+        return null;
+    }
+}
+
+function sumRecentNetBuy(points: Array<{ net_buy: number | null }>, length: number) {
+    const recent = points.slice(-length).map((point) => point.net_buy ?? 0);
+    return Number(recent.reduce((sum, value) => sum + value, 0).toFixed(2));
 }
 
 async function generateFocusContent(topic: FocusTopicConfig, newsItems: NewsItem[]): Promise<FocusTopicModelOutput | null> {
@@ -3080,6 +3393,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
     const skipWeeklyProgress = topic.slug === 'middle-east-tensions' || topic.slug === 'private-credit-stress';
     const weeklyProgress = skipWeeklyProgress ? null : await generateWeeklyProgress(topic, newsItems);
     const transmissionChain = await generateTransmissionChain(topic, newsItems);
+    const marketChart = topic.slug === 'hk-market-sentiment' ? await fetchSouthboundFlowChart() : null;
     const whatChanged =
         topic.slug === 'middle-east-tensions'
             ? await generateMiddleEastWhatChanged(newsItems)
@@ -3113,6 +3427,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         client_questions: dynamicClientQuestions ?? topic.clientQuestions,
         transmission_chain: transmissionChain ?? buildFallbackTransmission(topic),
         related_assets: topic.relatedAssets,
+        market_chart: marketChart,
         disclaimer: DEFAULT_DISCLAIMER
     };
 

@@ -156,7 +156,29 @@ export interface ClientFocusDetailResponse {
     client_questions: ClientFocusQuestion[];
     transmission_chain: ClientFocusTransmissionItem[];
     related_assets: string[];
+    market_chart?: ClientFocusMarketChart | null;
     disclaimer: string;
+}
+
+export interface ClientFocusMarketChartPoint {
+    date: string;
+    net_buy: number | null;
+    ma5: number | null;
+}
+
+export interface ClientFocusMarketChartStats {
+    latest_net_buy: number | null;
+    sum_10d: number | null;
+    sum_20d: number | null;
+    sum_60d: number | null;
+}
+
+export interface ClientFocusMarketChart {
+    series_name: string;
+    unit: string;
+    latest_trade_date: string | null;
+    points: ClientFocusMarketChartPoint[];
+    stats: ClientFocusMarketChartStats;
 }
 
 export interface ClientFocusPolymarketHistoryPoint {
