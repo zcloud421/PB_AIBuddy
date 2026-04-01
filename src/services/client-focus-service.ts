@@ -22,6 +22,7 @@ import axios from 'axios';
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
 const DEFAULT_DISCLAIMER = '本页内容仅供市场讨论准备，客户沟通请结合所属机构的策略观点与合规要求。';
 const FOCUS_CACHE_TTL_MS = 60 * 60 * 1000;
+const FOCUS_LIVE_MARKET_CACHE_TTL_MS = 5 * 60 * 1000;
 const FOCUS_CHAIN_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const POLYMARKET_CACHE_TTL_MS = 5 * 60 * 1000;
 const POLYMARKET_HISTORY_WINDOW_DAYS = 30;
@@ -3054,7 +3055,7 @@ async function fetchSouthboundFlowChart(): Promise<ClientFocusMarketChart | null
         };
 
         focusMarketChartCache.set('hk-market-sentiment', {
-            expiresAt: Date.now() + FOCUS_CACHE_TTL_MS,
+            expiresAt: Date.now() + FOCUS_LIVE_MARKET_CACHE_TTL_MS,
             value: chart
         });
 
@@ -4176,7 +4177,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
     };
 
     focusCache.set(topic.slug, {
-        expiresAt: Date.now() + FOCUS_CACHE_TTL_MS,
+        expiresAt: Date.now() + (topic.slug === 'hk-market-sentiment' ? FOCUS_LIVE_MARKET_CACHE_TTL_MS : FOCUS_CACHE_TTL_MS),
         value: detail
     });
 
