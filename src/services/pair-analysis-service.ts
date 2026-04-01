@@ -270,14 +270,14 @@ function determineCorrelationStability(
 
 function getSuitabilityNote(suitability: 'HIGH' | 'MEDIUM' | 'LOW'): string {
     if (suitability === 'HIGH') {
-        return '两只标的历史走势高度联动，Worst-of 结构适配度较高';
+        return '相关性与下跌同步率均达标，可考虑提供双标的报价参考';
     }
 
     if (suitability === 'LOW') {
-        return '两只标的历史走势分化明显，Worst-of 结构风险较高';
+        return '两标的走势分化显著，双标的挂钩结构不建议直接使用，可考虑单标的方案';
     }
 
-    return '两只标的存在一定联动性，但分化风险不可忽视';
+    return '相关性中等，建议优先讨论执行价下调或缩短期限以控制风险';
 }
 
 function calculateMean(values: number[]): number {
