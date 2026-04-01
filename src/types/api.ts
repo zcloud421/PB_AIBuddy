@@ -335,6 +335,7 @@ export interface PairAnalysisResponse {
         d60: number;
         d120: number;
         d252: number;
+        bear_2022: number;
     };
     volatility: {
         symbolA_annualized: number;

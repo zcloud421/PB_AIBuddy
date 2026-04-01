@@ -22,7 +22,7 @@ export async function postPairAnalysisController(
     const result = await analyzePairSuitability(symbolA, symbolB);
 
     if (result.kind === 'not_found') {
-        res.status(404).json({ message: 'Symbol not found in price_history table' });
+        res.status(404).json({ message: 'Symbol not found in historical price data' });
         return;
     }
 

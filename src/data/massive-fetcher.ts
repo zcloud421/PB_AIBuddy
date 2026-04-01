@@ -110,16 +110,17 @@ export class MassiveDataFetcher implements DataFetcherInterface {
         };
     }
 
-    async fetchPriceHistory(symbol: string): Promise<DailyPriceBar[]> {
-        const fromDate = isoDateOffsetDays(-365);
+    async fetchPriceHistory(symbol: string, lookbackDays = 365): Promise<DailyPriceBar[]> {
+        const fromDate = isoDateOffsetDays(-lookbackDays);
         const toDate = todayIsoDate();
+        const limit = Math.max(365, Math.min(5000, lookbackDays + 32));
 
         const historyResponse = await this.client.get<MassiveAggregatesResponse>(
             `/v2/aggs/ticker/${symbol}/range/1/day/${fromDate}/${toDate}`,
             {
                 adjusted: true,
                 sort: 'asc',
-                limit: 365
+                limit
             }
         );
 

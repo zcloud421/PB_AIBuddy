@@ -1,3 +1,4 @@
+import { MassiveDataFetcher } from '../data/massive-fetcher';
 import { getRecentPriceHistoryBySymbol, type PriceHistoryPointRow } from '../db/queries/ideas';
 
 export interface PairAnalysisResponse {
@@ -9,6 +10,7 @@ export interface PairAnalysisResponse {
         d60: number;
         d120: number;
         d252: number;
+        bear_2022: number;
     };
     volatility: {
         symbolA_annualized: number;
@@ -39,14 +41,18 @@ interface ReturnPoint {
 }
 
 const MAX_TRADING_DAYS = 252;
+const EXTENDED_LOOKBACK_DAYS = 1900;
+const BEAR_2022_START = '2022-01-01';
+const BEAR_2022_END = '2022-12-31';
+const massiveFetcher = new MassiveDataFetcher();
 
 export async function analyzePairSuitability(symbolA: string, symbolB: string): Promise<PairAnalysisResult> {
     const normalizedA = symbolA.trim().toUpperCase();
     const normalizedB = symbolB.trim().toUpperCase();
 
     const [historyA, historyB] = await Promise.all([
-        getRecentPriceHistoryBySymbol(normalizedA, MAX_TRADING_DAYS),
-        getRecentPriceHistoryBySymbol(normalizedB, MAX_TRADING_DAYS)
+        getPairPriceHistory(normalizedA),
+        getPairPriceHistory(normalizedB)
     ]);
 
     if (historyA.length === 0 && historyB.length === 0) {
@@ -71,6 +77,11 @@ export async function analyzePairSuitability(symbolA: string, symbolB: string): 
     const corr60 = roundMetric(calculateCorrelation(takeRecentTradingWindow(returnSeries, 60).map((point) => point.returnA), takeRecentTradingWindow(returnSeries, 60).map((point) => point.returnB)));
     const corr120 = roundMetric(calculateCorrelation(takeRecentTradingWindow(returnSeries, 120).map((point) => point.returnA), takeRecentTradingWindow(returnSeries, 120).map((point) => point.returnB)));
     const corr252 = roundMetric(calculateCorrelation(takeRecentTradingWindow(returnSeries, 252).map((point) => point.returnA), takeRecentTradingWindow(returnSeries, 252).map((point) => point.returnB)));
+    const bear2022Series = filterReturnSeriesByDateRange(returnSeries, BEAR_2022_START, BEAR_2022_END);
+    const corrBear2022 = roundMetric(calculateCorrelation(
+        bear2022Series.map((point) => point.returnA),
+        bear2022Series.map((point) => point.returnB)
+    ));
     const recent60Returns = takeRecentTradingWindow(returnSeries, 60);
     const volA = roundMetric(calculateAnnualizedVolatility(recent60Returns.map((point) => point.returnA)));
     const volB = roundMetric(calculateAnnualizedVolatility(recent60Returns.map((point) => point.returnB)));
@@ -89,7 +100,8 @@ export async function analyzePairSuitability(symbolA: string, symbolB: string): 
             correlation: {
                 d60: corr60,
                 d120: corr120,
-                d252: corr252
+                d252: corr252,
+                bear_2022: corrBear2022
             },
             volatility: {
                 symbolA_annualized: volA,
@@ -102,6 +114,31 @@ export async function analyzePairSuitability(symbolA: string, symbolB: string): 
             suitability_note: getSuitabilityNote(suitability)
         }
     };
+}
+
+async function getPairPriceHistory(symbol: string): Promise<PriceHistoryPointRow[]> {
+    try {
+        const bars = await massiveFetcher.fetchPriceHistory(symbol, EXTENDED_LOOKBACK_DAYS);
+        const massiveHistory = bars
+            .map((bar) => ({
+                date: bar.date,
+                close: bar.close
+            }))
+            .filter((point) => Number.isFinite(point.close) && point.close > 0)
+            .slice(-MAX_TRADING_DAYS);
+
+        if (massiveHistory.length > 0) {
+            return massiveHistory;
+        }
+    } catch (error) {
+        console.warn(`[pair-analysis] Massive history fetch failed for ${symbol}`, error);
+    }
+
+    return getRecentPriceHistoryBySymbol(symbol, MAX_TRADING_DAYS);
+}
+
+function filterReturnSeriesByDateRange(series: ReturnPoint[], startDate: string, endDate: string): ReturnPoint[] {
+    return series.filter((point) => point.date >= startDate && point.date <= endDate);
 }
 
 function alignPriceSeries(historyA: PriceHistoryPointRow[], historyB: PriceHistoryPointRow[]): AlignedPricePoint[] {
