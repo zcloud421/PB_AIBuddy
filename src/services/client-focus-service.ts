@@ -3121,11 +3121,16 @@ async function fetchHongKongIndexSecId(code: string) {
 }
 
 async function fetchHongKongIndexHistory(code: string, limit: number) {
-    try {
+    const requestHistory = async (resetSecId = false) => {
+        if (resetSecId) {
+            hkIndexSecIdCache.delete(code);
+        }
+
         const secId = await fetchHongKongIndexSecId(code);
         if (!secId) {
             return [];
         }
+
         const url = new URL('https://push2his.eastmoney.com/api/qt/stock/kline/get');
         url.searchParams.set('secid', secId);
         url.searchParams.set('klt', '101');
@@ -3164,6 +3169,14 @@ async function fetchHongKongIndexHistory(code: string, limit: number) {
                 };
             })
             .filter((item): item is { date: string; close: number } => Boolean(item.date) && item.close !== null);
+    };
+
+    try {
+        const primary = await requestHistory(false);
+        if (primary.length > 0) {
+            return primary;
+        }
+        return requestHistory(true);
     } catch {
         return [];
     }
