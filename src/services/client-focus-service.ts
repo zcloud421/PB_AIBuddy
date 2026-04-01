@@ -208,8 +208,8 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
         query: 'gold price real yields dollar central bank buying gold miners latest',
         clientQuestions: [
             {
-                question: '为什么中东冲突升级黄金反而下跌？',
-                answer: '2024 到 2025 年黄金大牛市由三个因素共同驱动：各国央行持续大规模购金以减少美元依赖、市场对联储降息的预期，以及美元走弱。这三个支撑因素在 2026 年初开始同步发生变化，是当前金价承压的根本原因。'
+                question: '2025年以来黄金牛市驱动力是什么？',
+                answer: '2025年以来黄金上涨主要由四个因素共同推动：一是市场预期美联储进入降息周期，实际利率回落降低了持有黄金的机会成本；二是美元阶段性走弱，提高了黄金对非美元投资者的吸引力；三是各国央行持续增持黄金，形成结构性需求；四是地缘政治风险上升强化避险配置需求。整体来看，这轮黄金牛市是流动性预期、弱美元与避险情绪共同作用的结果，而非单一因素驱动。'
             },
             {
                 question: '中东冲突那么严重，黄金为什么反而下跌？',
@@ -1797,6 +1797,7 @@ ${newsList}
 - 必须采用“先判断 → 再补原因/事实 → 最后总结”的结构
 - 第一两句必须能单独成立，像直接回复客户
 - 必须至少包含 1 个具体变量或事实，例如美元、实际利率、央行购金、ETF资金流、金矿成本
+- 若问题是“2025年以来黄金牛市驱动力是什么”，优先围绕降息预期/实际利率、美元强弱、央行购金、地缘风险与避险需求这四个核心驱动来回答，并明确说明这轮上涨不是单一因素推动
 - 尽量用“当前更关键的是…”“本周新增变化是…”“整体来看…”这类客户沟通句式
 - 回答要有 1-2 周可用性，不要写成单条新闻复述
 - 若问题是“为何黄金反而下跌”，重点回答避险需求为何被美元/实际利率压过
@@ -3554,31 +3555,44 @@ function buildGoldDrivers(newsItems: NewsItem[]): ClientFocusDriverItem[] {
     const titles = newsItems.map((item) => item.title.toLowerCase()).join(' | ');
 
     const realYieldStatus =
-        /real yield|actual yield|treasury yield|higher yield|yield rise|yield climbs|hawkish/.test(titles)
+        /yield rise|yield climbs|yields higher|hawkish|rate hike|higher for longer|yields surge/.test(titles)
             ? '压制'
-            : '压制';
+            : /yield fall|yield drop|yields lower|dovish|rate cut|yields decline/.test(titles)
+                ? '中性'
+                : '压制';
+
     const inflationStatus =
-        /inflation|cpi|pce|oil price|energy price|通胀|滞胀|inflation expectation|inflation expectations/.test(titles)
+        /inflation|cpi|pce|oil price|energy price|inflation expectation|inflation expectations/.test(titles)
             ? '抬升'
-            : '中性';
+            : /inflation cool|disinflation|deflation|inflation fall/.test(titles)
+                ? '中性'
+                : '中性';
+
     const dollarStatus =
-        /dollar|usd|greenback|stronger dollar|dxy/.test(titles)
+        /dollar strength|dollar rise|dollar climbs|dxy rise|stronger dollar|dollar index rise/.test(titles)
             ? '偏强'
-            : '偏强';
+            : /dollar weak|dollar fall|dollar drop|dxy fall|dollar decline|weaker dollar/.test(titles)
+                ? '偏弱'
+                : '偏强';
+
     const centralBankStatus =
-        /central bank|央行|official buying|purchase|buying slows|购金放缓/.test(titles)
-            ? /slows|放缓|moderate|cool/.test(titles)
+        /central bank|official buying|央行购金|gold purchase|sovereign buying/.test(titles)
+            ? /slows|放缓|moderate|cool|pause|减少/.test(titles)
                 ? '支撑放缓'
                 : '支撑'
             : '支撑';
+
     const havenStatus =
-        /iran|israel|war|conflict|geopolitical|hormuz|避险/.test(titles)
-            ? '有限支撑'
+        /iran|israel|war|conflict|geopolitical|hormuz|middle east/.test(titles)
+            ? /gold rally|gold surge|haven demand|flight to safety|gold jumps/.test(titles)
+                ? '支撑'
+                : '有限支撑'
             : '中性';
+
     const etfStatus =
-        /etf outflow|outflow|fund outflow|redemption/.test(titles)
+        /etf outflow|gold etf outflow|fund outflow|gold redemption/.test(titles)
             ? '流出'
-            : /etf inflow|inflow|fund inflow/.test(titles)
+            : /etf inflow|gold etf inflow|fund inflow|gold buying/.test(titles)
                 ? '流入'
                 : '分化';
 
