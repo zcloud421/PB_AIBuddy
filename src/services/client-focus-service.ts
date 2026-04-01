@@ -1584,6 +1584,7 @@ async function generateDynamicClientQuestions(
 
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
+        console.warn(`[focus-client-questions] ${topic.slug}: no_api_key`);
         return null;
     }
 
@@ -1606,6 +1607,7 @@ async function generateDynamicClientQuestions(
         .slice(0, 10);
 
     if (contextItems.length === 0) {
+        console.warn(`[focus-client-questions] ${topic.slug}: no_context_items`);
         return null;
     }
 
@@ -1913,6 +1915,7 @@ ${newsList}
         });
 
         if (!response.ok) {
+            console.warn(`[focus-client-questions] ${topic.slug}: http_not_ok status=${response.status}`);
             return null;
         }
 
@@ -1923,6 +1926,7 @@ ${newsList}
         const parsed = safeParseJson(content) as Array<{ question?: string; answer?: string }> | null;
 
         if (!Array.isArray(parsed)) {
+            console.warn(`[focus-client-questions] ${topic.slug}: json_parse_failed`);
             return null;
         }
 
@@ -1935,6 +1939,7 @@ ${newsList}
             };
         });
     } catch {
+        console.warn(`[focus-client-questions] ${topic.slug}: exception`);
         return null;
     }
 }
