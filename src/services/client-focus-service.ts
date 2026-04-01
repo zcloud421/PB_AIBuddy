@@ -687,7 +687,12 @@ function sanitizeFocusSummary(summary: string | undefined, topic: FocusTopicConf
         /客户经理/,
         /口径无需调整/,
         /无需调整/,
-        /本周无符合筛选标准的关键事件/
+        /本周(暂)?无符合筛选标准/,
+        /暂无符合筛选标准/,
+        /无符合筛选标准/,
+        /暂无.*量化信息/,
+        /暂无.*关键信息/,
+        /暂无.*有效信息/
     ];
 
     if (blockedPatterns.some((pattern) => pattern.test(trimmed))) {
