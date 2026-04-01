@@ -25,6 +25,10 @@ const FOCUS_CACHE_TTL_MS = 60 * 60 * 1000;
 const FOCUS_LIVE_MARKET_CACHE_TTL_MS = 5 * 60 * 1000;
 const FOCUS_CHAIN_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const POLYMARKET_CACHE_TTL_MS = 5 * 60 * 1000;
+const KNOWN_HK_INDEX_SECIDS: Record<string, string> = {
+    HSI: '100.HSI',
+    HSTECH: '100.HSTECH',
+};
 const POLYMARKET_HISTORY_WINDOW_DAYS = 30;
 const POLYMARKET_HISTORY_CHUNK_DAYS = 14;
 const WHAT_CHANGED_WINDOW_HOURS = 72;
@@ -3035,10 +3039,18 @@ async function fetchSouthboundFlowChart(): Promise<ClientFocusMarketChart | null
 
         const hsiHistory = await fetchHongKongIndexHistory('HSI', 90);
         const hsiMap = new Map(hsiHistory.map((item) => [item.date, item.close]));
+        const sortedHsiDates = hsiHistory.map((item) => item.date).sort();
+        const getHsiCloseFillForward = (date: string): number | null => {
+            if (hsiMap.has(date)) {
+                return hsiMap.get(date) ?? null;
+            }
+            const prev = sortedHsiDates.filter((item) => item <= date).at(-1);
+            return prev ? (hsiMap.get(prev) ?? null) : null;
+        };
         const points = rawPoints.map((point) => ({
             date: point.date,
             net_buy: point.net_buy,
-            hsi_close: hsiMap.get(point.date) ?? null
+            hsi_close: getHsiCloseFillForward(point.date)
         }));
 
         const chart: ClientFocusMarketChart = {
@@ -3076,6 +3088,12 @@ async function fetchHongKongIndexSecId(code: string) {
     const cached = hkIndexSecIdCache.get(code);
     if (cached) {
         return cached;
+    }
+
+    const knownSecId = KNOWN_HK_INDEX_SECIDS[code.toUpperCase()];
+    if (knownSecId) {
+        hkIndexSecIdCache.set(code, knownSecId);
+        return knownSecId;
     }
 
     try {
@@ -3122,6 +3140,49 @@ async function fetchHongKongIndexSecId(code: string) {
 }
 
 async function fetchHongKongIndexHistory(code: string, limit: number) {
+    async function fetchHongKongIndexHistoryFromYahoo(indexCode: string, historyLimit: number) {
+        try {
+            const yahooTicker = indexCode === 'HSI' ? '%5EHSI' : indexCode === 'HSTECH' ? '%5EHSTECH' : null;
+            if (!yahooTicker) {
+                return [];
+            }
+
+            const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooTicker}?interval=1d&range=6mo&includePrePost=false`;
+            const response = await fetch(url, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FCNAdvisor/1.0)' }
+            });
+            if (!response.ok) {
+                return [];
+            }
+
+            const payload = (await response.json()) as {
+                chart?: {
+                    result?: Array<{
+                        timestamp?: number[];
+                        indicators?: { quote?: Array<{ close?: Array<number | null> }> };
+                    }>;
+                };
+            };
+            const result = payload.chart?.result?.[0];
+            const timestamps = Array.isArray(result?.timestamp) ? result?.timestamp ?? [] : [];
+            const closes = Array.isArray(result?.indicators?.quote?.[0]?.close)
+                ? result?.indicators?.quote?.[0]?.close ?? []
+                : [];
+
+            return timestamps
+                .map((ts, index) => ({
+                    date: new Date(ts * 1000).toISOString().slice(0, 10),
+                    close: closes[index]
+                }))
+                .filter((item): item is { date: string; close: number } =>
+                    Boolean(item.date) && typeof item.close === 'number' && Number.isFinite(item.close)
+                )
+                .slice(-historyLimit);
+        } catch {
+            return [];
+        }
+    }
+
     const requestHistory = async (resetSecId = false) => {
         if (resetSecId) {
             hkIndexSecIdCache.delete(code);
@@ -3177,7 +3238,11 @@ async function fetchHongKongIndexHistory(code: string, limit: number) {
         if (primary.length > 0) {
             return primary;
         }
-        return requestHistory(true);
+        const retry = await requestHistory(true);
+        if (retry.length > 0) {
+            return retry;
+        }
+        return fetchHongKongIndexHistoryFromYahoo(code, limit);
     } catch {
         return [];
     }
