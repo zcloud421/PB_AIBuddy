@@ -40,7 +40,7 @@ interface ReturnPoint {
     returnB: number;
 }
 
-const MAX_TRADING_DAYS = 252;
+const RECENT_TRADING_DAYS = 252;
 const EXTENDED_LOOKBACK_DAYS = 1900;
 const BEAR_2022_START = '2022-01-01';
 const BEAR_2022_END = '2022-12-31';
@@ -74,15 +74,17 @@ export async function analyzePairSuitability(symbolA: string, symbolB: string): 
     }
 
     const returnSeries = computeLogReturns(alignedSeries);
+    const recentReturnSeries = takeRecentTradingWindow(returnSeries, RECENT_TRADING_DAYS);
+    const recentAlignedSeries = alignedSeries.slice(-(recentReturnSeries.length + 1));
     const corr60 = roundMetric(calculateCorrelation(takeRecentTradingWindow(returnSeries, 60).map((point) => point.returnA), takeRecentTradingWindow(returnSeries, 60).map((point) => point.returnB)));
     const corr120 = roundMetric(calculateCorrelation(takeRecentTradingWindow(returnSeries, 120).map((point) => point.returnA), takeRecentTradingWindow(returnSeries, 120).map((point) => point.returnB)));
-    const corr252 = roundMetric(calculateCorrelation(takeRecentTradingWindow(returnSeries, 252).map((point) => point.returnA), takeRecentTradingWindow(returnSeries, 252).map((point) => point.returnB)));
+    const corr252 = roundMetric(calculateCorrelation(recentReturnSeries.map((point) => point.returnA), recentReturnSeries.map((point) => point.returnB)));
     const bear2022Series = filterReturnSeriesByDateRange(returnSeries, BEAR_2022_START, BEAR_2022_END);
     const corrBear2022 = roundMetric(calculateCorrelation(
         bear2022Series.map((point) => point.returnA),
         bear2022Series.map((point) => point.returnB)
     ));
-    const recent60Returns = takeRecentTradingWindow(returnSeries, 60);
+    const recent60Returns = takeRecentTradingWindow(recentReturnSeries, 60);
     const volA = roundMetric(calculateAnnualizedVolatility(recent60Returns.map((point) => point.returnA)));
     const volB = roundMetric(calculateAnnualizedVolatility(recent60Returns.map((point) => point.returnB)));
     const volatilityGap = roundMetric(Math.abs(volA - volB));
@@ -95,8 +97,8 @@ export async function analyzePairSuitability(symbolA: string, symbolB: string): 
         data: {
             symbolA: normalizedA,
             symbolB: normalizedB,
-            data_as_of: alignedSeries[alignedSeries.length - 1].date,
-            trading_days_overlap: alignedSeries.length,
+            data_as_of: recentAlignedSeries[recentAlignedSeries.length - 1].date,
+            trading_days_overlap: recentAlignedSeries.length,
             correlation: {
                 d60: corr60,
                 d120: corr120,
@@ -124,8 +126,7 @@ async function getPairPriceHistory(symbol: string): Promise<PriceHistoryPointRow
                 date: bar.date,
                 close: bar.close
             }))
-            .filter((point) => Number.isFinite(point.close) && point.close > 0)
-            .slice(-MAX_TRADING_DAYS);
+            .filter((point) => Number.isFinite(point.close) && point.close > 0);
 
         if (massiveHistory.length > 0) {
             return massiveHistory;
@@ -134,7 +135,7 @@ async function getPairPriceHistory(symbol: string): Promise<PriceHistoryPointRow
         console.warn(`[pair-analysis] Massive history fetch failed for ${symbol}`, error);
     }
 
-    return getRecentPriceHistoryBySymbol(symbol, MAX_TRADING_DAYS);
+    return getRecentPriceHistoryBySymbol(symbol, RECENT_TRADING_DAYS);
 }
 
 function filterReturnSeriesByDateRange(series: ReturnPoint[], startDate: string, endDate: string): ReturnPoint[] {
