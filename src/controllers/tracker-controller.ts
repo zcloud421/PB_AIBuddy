@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 
-import { getTrackerHistory, getTrackerSummary } from '../services/tracker-service';
+import { getTrackerHistory, getTrackerReview, getTrackerSummary } from '../services/tracker-service';
 
 export async function getTrackerSummaryController(_req: Request, res: Response): Promise<void> {
     const payload = await getTrackerSummary();
@@ -10,6 +10,12 @@ export async function getTrackerSummaryController(_req: Request, res: Response):
 
 export async function getTrackerHistoryController(_req: Request, res: Response): Promise<void> {
     const payload = await getTrackerHistory();
+    res.setHeader('Cache-Control', 'private, max-age=60');
+    res.status(200).json(payload);
+}
+
+export async function getTrackerReviewController(_req: Request, res: Response): Promise<void> {
+    const payload = await getTrackerReview();
     res.setHeader('Cache-Control', 'private, max-age=60');
     res.status(200).json(payload);
 }

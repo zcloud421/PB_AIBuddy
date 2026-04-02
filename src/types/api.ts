@@ -418,6 +418,24 @@ export interface TrackerSummaryBucket {
     breach_rate: string;
 }
 
+export interface TrackerReviewBucket {
+    total_recommendations: number;
+    matured_recommendations: number;
+    active_recommendations: number;
+    ever_breached_count: number;
+    maturity_safe_count: number;
+    maturity_breached_count: number;
+    path_breach_rate: string;
+    maturity_safe_rate: string;
+}
+
+export interface TrackerReviewWindow {
+    label: string;
+    overall: TrackerReviewBucket;
+    hero: TrackerReviewBucket;
+    recommended: TrackerReviewBucket;
+}
+
 export interface TrackerSummaryResponse {
     total_recommendations: number;
     active: number;
@@ -448,4 +466,13 @@ export interface TrackerHistoryEntry {
     status: Extract<RecommendationTrackerStatus, 'EXPIRED_SAFE' | 'EXPIRED_BREACHED'>;
     last_checked: string | null;
     breached_date: string | null;
+}
+
+export interface TrackerReviewResponse {
+    generated_at: string;
+    overall: TrackerReviewBucket;
+    hero: TrackerReviewBucket;
+    recommended: TrackerReviewBucket;
+    recent_expired_window: TrackerReviewWindow;
+    previous_expired_window: TrackerReviewWindow;
 }
