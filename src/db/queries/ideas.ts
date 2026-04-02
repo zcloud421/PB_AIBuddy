@@ -62,6 +62,7 @@ export interface TodayIdeaRow {
     tier: number;
     overall_grade: 'GO' | 'CAUTION' | 'AVOID';
     composite_score: number;
+    risk_reward_score: number | null;
     recommended_strike: number | null;
     recommended_tenor_days: number | null;
     expiry_date: string | null;
@@ -98,6 +99,7 @@ export interface CachedIdeaRow {
     company_name: string | null;
     overall_grade: 'GO' | 'CAUTION' | 'AVOID';
     composite_score: number | null;
+    risk_reward_score: number | null;
     recommended_strike: number | null;
     recommended_tenor_days: number | null;
     expiry_date: string | null;
@@ -128,6 +130,7 @@ export interface SaveIdeaCandidateInput {
     skewScore: number;
     eventRiskScore: number;
     compositeScore: number;
+    riskRewardScore?: number | null;
     recommendedStrike: number | null;
     recommendedTenorDays: number | null;
     recommendedExpiryDate?: string | null;
@@ -252,6 +255,7 @@ export async function getIdeasByRunId(runId: string): Promise<TodayIdeaRow[]> {
             u.tier,
             ic.overall_grade,
             ic.composite_score,
+            ic.risk_reward_score,
             ic.recommended_strike,
             ic.recommended_tenor_days,
             ic.expiry_date::text AS expiry_date,
@@ -351,6 +355,7 @@ export async function getIdeaBySymbolAndDate(symbol: string, date: string): Prom
             u.company_name,
             ic.overall_grade,
             ic.composite_score,
+            ic.risk_reward_score,
             ic.recommended_strike,
             ic.recommended_tenor_days,
             ic.expiry_date::text AS expiry_date,
@@ -412,6 +417,7 @@ export async function getIdeaBySymbolAndRunId(symbol: string, runId: string): Pr
             u.company_name,
             ic.overall_grade,
             ic.composite_score,
+            ic.risk_reward_score,
             ic.recommended_strike,
             ic.recommended_tenor_days,
             ic.expiry_date::text AS expiry_date,
@@ -631,6 +637,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             skew_score,
             event_risk_score,
             composite_score,
+            risk_reward_score,
             recommended_strike,
             recommended_tenor_days,
             expiry_date,
@@ -649,7 +656,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             news_items,
             reasoning_text
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::date, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23::jsonb, $24::jsonb, $25
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::date, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24::jsonb, $25::jsonb, $26
         )
         ON CONFLICT (run_id, symbol) DO UPDATE
         SET overall_grade = EXCLUDED.overall_grade,
@@ -658,6 +665,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             skew_score = EXCLUDED.skew_score,
             event_risk_score = EXCLUDED.event_risk_score,
             composite_score = EXCLUDED.composite_score,
+            risk_reward_score = EXCLUDED.risk_reward_score,
             recommended_strike = EXCLUDED.recommended_strike,
             recommended_tenor_days = EXCLUDED.recommended_tenor_days,
             expiry_date = EXCLUDED.expiry_date,
@@ -685,6 +693,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             result.skewScore,
             result.eventRiskScore,
             result.compositeScore,
+            result.riskRewardScore ?? null,
             result.recommendedStrike,
             result.recommendedTenorDays,
             result.recommendedExpiryDate ?? null,

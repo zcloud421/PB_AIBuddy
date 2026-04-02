@@ -80,6 +80,7 @@ export interface ScoringResult {
     symbol: string;
     overall_grade: OverallGrade;
     composite_score: number;
+    risk_reward_score: number | null;
     iv_rank_score: number;
     trend_score: number;
     skew_score: number;
@@ -657,6 +658,7 @@ export function scoreAndGrade(candidate: {
         symbol,
         overall_grade: overallGrade,
         composite_score: Number(compositeScore.toFixed(4)),
+        risk_reward_score: null,
         iv_rank_score: Number(ivRankScore.toFixed(4)),
         trend_score: Number(trendScore.toFixed(4)),
         skew_score: Number(skewScore.toFixed(4)),
@@ -757,6 +759,7 @@ function applyHighVolCautionOverride(input: {
         ...input.result,
         overall_grade: adjustedGrade,
         composite_score: Number(adjustedCompositeScore.toFixed(4)),
+        risk_reward_score: input.result.risk_reward_score,
         flags,
         reasoning_text: buildReasoningText(
             input.result.symbol,
@@ -785,6 +788,7 @@ export async function runDailyScreener(
                 symbol,
                 overall_grade: 'AVOID',
                 composite_score: 0,
+                risk_reward_score: null,
                 iv_rank_score: 0,
                 trend_score: 0,
                 skew_score: 0,
@@ -841,6 +845,7 @@ export async function runDailyScreener(
                 symbol,
                 overall_grade: 'AVOID',
                 composite_score: 0.2,
+                risk_reward_score: null,
                 iv_rank_score: 0,
                 trend_score: 0,
                 skew_score: 0,
@@ -903,6 +908,7 @@ export async function runDailyScreener(
                     symbol,
                     overall_grade: 'AVOID',
                     composite_score: 0.25,
+                    risk_reward_score: null,
                     iv_rank_score: 0,
                     trend_score: 0,
                     skew_score: 0,
@@ -1014,6 +1020,7 @@ export async function runDailyScreener(
                 symbol,
                 overall_grade: 'AVOID',
                 composite_score: 0.2,
+                risk_reward_score: null,
                 iv_rank_score: 0,
                 trend_score: 0,
                 skew_score: 0,

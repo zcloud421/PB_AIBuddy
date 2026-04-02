@@ -67,6 +67,12 @@ interface FreshSymbolAnalysis {
     symbolData: SymbolData;
 }
 
+interface ThresholdDrawdownEvent {
+    peak_date: string;
+    trough_date: string;
+    max_drawdown_pct: number;
+}
+
 const KNOWN_CONFERENCE_END_DATES: Partial<Record<string, string>> = {
     GTC: '2026-03-19',
     CES: '2026-01-09',
@@ -74,6 +80,10 @@ const KNOWN_CONFERENCE_END_DATES: Partial<Record<string, string>> = {
 };
 
 const COMMODITY_BETA_SYMBOLS = new Set(['GDX', 'USO']);
+
+function clampScore(value: number, min: number, max: number): number {
+    return Math.min(Math.max(value, min), max);
+}
 
 function headlinesContainMaterialEvent(items: NewsItem[]): boolean {
     const text = items.map((item) => item.title).join(' ').toLowerCase();
@@ -492,6 +502,21 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             }
         }
 
+        const extendedPriceHistory = await loadExtendedPriceHistory(normalizedSymbol);
+        const tailRisk = buildTailRiskStats(extendedPriceHistory);
+        const strikeRisk = buildStrikeRiskSummary(
+            extendedPriceHistory,
+            effectiveCurrentPrice,
+            toNullableNumber(cachedRow.recommended_strike)
+        );
+        const riskRewardScore = calculateRiskRewardScore({
+            premiumScore: parseRefCouponPctToPremiumScore(cachedRow.ref_coupon_pct),
+            ivScore: deriveImpliedVolatilityScore(effectiveIv),
+            skewScore: deriveCachedSkewScore(effectiveCurrentPrice, effectiveMa200, effectivePctFrom52wHigh),
+            tailRisk,
+            strikeRisk
+        });
+
         return {
             symbol: cachedRow.symbol,
             exchange: cachedRow.exchange,
@@ -500,6 +525,7 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             cached: true,
             grade: cachedRow.overall_grade,
             composite_score: toNullableNumber(cachedRow.composite_score) ?? 0,
+            risk_reward_score: toNullableNumber(cachedRow.risk_reward_score) ?? riskRewardScore,
             verdict_headline: gradeToHeadline(cachedRow.overall_grade),
             verdict_sub: generateVerdictSub(cachedRow.overall_grade, cachedFlags),
             data_as_of_date: effectiveDataAsOfDate,
@@ -655,6 +681,7 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
 
         const analysis = await runFreshSymbolScoring(symbol);
         const { exchange, scoring, symbolData } = analysis;
+        const extendedPriceHistory = await loadExtendedPriceHistory(symbol, symbolData.price_history);
         const newsContext = await fetchStockNewsContext(
             symbol,
             underlying?.company_name ?? getCompanyName(symbol)
@@ -693,6 +720,7 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
                     skewScore: scoring.skew_score,
                     eventRiskScore: scoring.event_risk_score,
                     compositeScore: scoring.composite_score,
+                    riskRewardScore: scoring.risk_reward_score,
                     recommendedStrike: scoring.recommended_strike,
                     recommendedTenorDays: scoring.recommended_tenor_days,
                     recommendedExpiryDate: scoring.recommended_expiry_date,
@@ -735,6 +763,7 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
             symbol,
             scoring,
             symbolData,
+            extendedPriceHistory,
             exchange,
             underlying?.company_name ?? null,
             narrative,
@@ -761,6 +790,7 @@ function buildUnavailableIdeaResponse(symbol: string): SymbolIdeaResponse {
         cached: false,
         grade: 'AVOID',
         composite_score: 0,
+        risk_reward_score: null,
         verdict_headline: '暂不推荐',
         verdict_sub: '该标的数据暂时无法获取，请稍后重试',
         data_as_of_date: null,
@@ -819,6 +849,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 symbol,
                 overall_grade: 'AVOID',
                 composite_score: 0,
+                risk_reward_score: null,
                 iv_rank_score: 0,
                 trend_score: 0,
                 skew_score: 0,
@@ -876,6 +907,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 symbol,
                 overall_grade: daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3 ? 'AVOID' : 'CAUTION',
                 composite_score: daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3 ? 0.2 : 0.35,
+                risk_reward_score: null,
                 iv_rank_score: 0,
                 trend_score: 0,
                 skew_score: 0,
@@ -911,6 +943,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
         strikeData: Awaited<ReturnType<DataFetcherInterface['fetchChainData']>>[number];
         tenorBucketDays: number;
     } | null = null;
+    const extendedPriceHistory = await loadExtendedPriceHistory(symbol, symbolData.price_history);
     const historicalVolatility = calculateHistoricalVolatility(symbolData.price_history);
     const targetCouponPct =
         historicalVolatility > 0.6
@@ -949,15 +982,22 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 sentimentProxy: newsContext.sentimentProxy,
                 hasMaterialNegativeNews: newsContext.hasMaterialNegativeNews
             });
-            scoring.flags = mergeUniqueFlags(eligibility.flags, scoring.flags);
+            const enhancedScoring = applyRiskRewardOverlay({
+                scoring: {
+                    ...scoring,
+                    flags: mergeUniqueFlags(eligibility.flags, scoring.flags)
+                },
+                symbolData,
+                extendedPriceHistory
+            });
 
             const couponDistance =
-                scoring.ref_coupon_pct === null
+                enhancedScoring.ref_coupon_pct === null
                     ? Number.POSITIVE_INFINITY
-                    : Math.abs(scoring.ref_coupon_pct - targetCouponPct);
+                    : Math.abs(enhancedScoring.ref_coupon_pct - targetCouponPct);
 
             const candidate = {
-                scoring,
+                scoring: enhancedScoring,
                 couponDistance,
                 strikeData,
                 tenorBucketDays: tenorData.preferred_tenor_days
@@ -1011,6 +1051,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 symbol,
                 overall_grade: lowLiquidity ? 'AVOID' : 'CAUTION',
                 composite_score: lowLiquidity ? 0.2 : 0.35,
+                risk_reward_score: null,
                 iv_rank_score: 0,
                 trend_score: 0,
                 skew_score: 0,
@@ -1093,6 +1134,7 @@ function mapScoringResultToSymbolIdea(
     symbol: string,
     scoring: ScoringResult,
     symbolData: SymbolData,
+    extendedPriceHistory: Array<{ date: string; close: number }>,
     exchange: string,
     companyName: string | null,
     narrative: NarrativeOutput | null,
@@ -1106,6 +1148,7 @@ function mapScoringResultToSymbolIdea(
         cached: false,
         grade: scoring.overall_grade,
         composite_score: scoring.composite_score,
+        risk_reward_score: scoring.risk_reward_score,
         verdict_headline: gradeToHeadline(scoring.overall_grade),
         verdict_sub: generateVerdictSub(scoring.overall_grade, scoring.flags),
         data_as_of_date: symbolData.price_history[symbolData.price_history.length - 1]?.date ?? todayIsoDate(),
@@ -1311,6 +1354,309 @@ function buildImpliedVolatilitySignal(iv: number | null): SignalRow {
         color: 'red',
         priority: 30
     };
+}
+
+function deriveImpliedVolatilityScore(iv: number | null): number {
+    if (iv === null || !Number.isFinite(iv)) {
+        return 0.45;
+    }
+
+    return clampScore(iv, 0, 1);
+}
+
+async function loadExtendedPriceHistory(
+    symbol: string,
+    fallbackHistory?: Array<{ date: string; close: number }>
+): Promise<Array<{ date: string; close: number }>> {
+    const historyLimit = 1500;
+    const lookbackDays = 365 * 5;
+    let priceHistory = await getRecentPriceHistoryBySymbol(symbol, historyLimit).catch(() => []);
+
+    if (priceHistory.length >= Math.min(historyLimit, 750)) {
+        return priceHistory;
+    }
+
+    if (fallbackHistory && fallbackHistory.length >= Math.max(2, priceHistory.length)) {
+        return fallbackHistory;
+    }
+
+    try {
+        const fallbackFetcher = new MassiveDataFetcher();
+        const fetchedBars = await fallbackFetcher.fetchPriceHistory(symbol, lookbackDays);
+        if (fetchedBars.length === 0) {
+            return fallbackHistory ?? priceHistory;
+        }
+
+        const normalized = fetchedBars.map((bar) => ({
+            date: bar.date,
+            close: bar.close
+        }));
+
+        void upsertPriceHistory({
+            symbol,
+            bars: fetchedBars
+        }).catch(() => undefined);
+
+        return normalized;
+    } catch {
+        return fallbackHistory ?? priceHistory;
+    }
+}
+
+function calculateRiskRewardScore(input: {
+    premiumScore: number | null;
+    ivScore: number;
+    skewScore: number;
+    tailRisk: ReturnType<typeof buildTailRiskStats>;
+    strikeRisk: ReturnType<typeof buildStrikeRiskSummary>;
+}): number | null {
+    const maxDrawdownScore =
+        input.tailRisk?.max_drawdown_pct === null || input.tailRisk?.max_drawdown_pct === undefined
+            ? 0.45
+            : input.tailRisk.max_drawdown_pct >= -25
+              ? 0.85
+              : input.tailRisk.max_drawdown_pct >= -40
+                ? 0.65
+                : input.tailRisk.max_drawdown_pct >= -55
+                  ? 0.45
+                  : 0.25;
+    const recoveryScore =
+        !input.tailRisk?.worst_episode
+            ? 0.5
+            : !input.tailRisk.worst_episode.recovered
+              ? 0.25
+              : (input.tailRisk.worst_episode.recovery_days ?? 0) <= 60
+                ? 0.85
+                : (input.tailRisk.worst_episode.recovery_days ?? 0) <= 180
+                  ? 0.6
+                  : 0.35;
+    const thresholdBreachScore =
+        !input.strikeRisk
+            ? 0.5
+            : input.strikeRisk.breachCount === 0
+              ? 0.9
+              : input.strikeRisk.breachCount <= 2
+                ? 0.65
+                : input.strikeRisk.breachCount <= 5
+                  ? 0.45
+                  : 0.25;
+
+    const score =
+        ((input.premiumScore ?? 0.5) * 0.25) +
+        (input.ivScore * 0.15) +
+        (input.skewScore * 0.1) +
+        (maxDrawdownScore * 0.2) +
+        (recoveryScore * 0.15) +
+        (thresholdBreachScore * 0.15);
+
+    return Number(clampScore(score, 0, 1).toFixed(4));
+}
+
+function applyRiskRewardOverlay(input: {
+    scoring: ScoringResult;
+    symbolData: SymbolData;
+    extendedPriceHistory: Array<{ date: string; close: number }>;
+}): ScoringResult {
+    const tailRisk = buildTailRiskStats(input.extendedPriceHistory);
+    const strikeRisk = buildStrikeRiskSummary(
+        input.extendedPriceHistory,
+        input.symbolData.current_price,
+        input.scoring.recommended_strike
+    );
+    const riskRewardScore = calculateRiskRewardScore({
+        premiumScore: input.scoring.premium_score,
+        ivScore: input.scoring.iv_rank_score,
+        skewScore: input.scoring.skew_score,
+        tailRisk,
+        strikeRisk
+    });
+
+    if (riskRewardScore === null) {
+        return {
+            ...input.scoring,
+            risk_reward_score: null
+        };
+    }
+
+    const blendedComposite = clampScore(
+        (input.scoring.trend_score * 0.35) +
+            (input.scoring.event_risk_score * 0.25) +
+            (riskRewardScore * 0.40),
+        0,
+        1
+    );
+    const overallGrade =
+        blendedComposite >= 0.65 ? 'GO' : blendedComposite >= 0.45 ? 'CAUTION' : 'AVOID';
+
+    return {
+        ...input.scoring,
+        overall_grade: overallGrade,
+        composite_score: Number(blendedComposite.toFixed(4)),
+        risk_reward_score: riskRewardScore
+    };
+}
+
+function parseRefCouponPctToPremiumScore(refCouponPct: number | null): number | null {
+    if (refCouponPct === null || !Number.isFinite(refCouponPct)) {
+        return null;
+    }
+
+    if (refCouponPct >= 20) {
+        return 1;
+    }
+
+    if (refCouponPct >= 10) {
+        return 0.6;
+    }
+
+    return 0.3;
+}
+
+function deriveCachedSkewScore(
+    currentPrice: number | null,
+    ma200: number | null,
+    pctFrom52wHigh: number | null
+): number {
+    if (currentPrice === null || ma200 === null || pctFrom52wHigh === null) {
+        return 0.45;
+    }
+
+    if (currentPrice > ma200 && pctFrom52wHigh >= -15) {
+        return 0.7;
+    }
+
+    if (currentPrice > ma200 && pctFrom52wHigh >= -30) {
+        return 0.55;
+    }
+
+    return 0.35;
+}
+
+function buildStrikeRiskSummary(
+    history: Array<{ date: string; close: number }>,
+    currentPrice: number | null,
+    strike: number | null
+): { breachCount: number; maxBreachPct: number; thresholdPct: number } | null {
+    if (history.length < 2 || currentPrice === null || currentPrice <= 0 || strike === null || strike <= 0) {
+        return null;
+    }
+
+    const thresholdPct = Math.abs(((strike / currentPrice) - 1) * 100);
+    const events = buildThresholdDrawdownEvents(history, thresholdPct);
+    const worst = events.reduce<ThresholdDrawdownEvent | null>(
+        (current, event) => (current === null || event.max_drawdown_pct < current.max_drawdown_pct ? event : current),
+        null
+    );
+
+    return {
+        breachCount: events.length,
+        maxBreachPct: worst?.max_drawdown_pct ?? 0,
+        thresholdPct: Number(thresholdPct.toFixed(1))
+    };
+}
+
+function buildThresholdDrawdownEvents(
+    history: Array<{ date: string; close: number }>,
+    thresholdPct: number
+): ThresholdDrawdownEvent[] {
+    const extrema = buildLocalExtrema(history, 15);
+    const events: ThresholdDrawdownEvent[] = [];
+
+    for (let index = 0; index < extrema.length - 1; index += 1) {
+        const current = extrema[index];
+        const next = extrema[index + 1];
+        if (current.type !== 'peak' || next.type !== 'trough') {
+            continue;
+        }
+
+        const drawdownPct = ((next.price / current.price) - 1) * 100;
+        if (Math.abs(drawdownPct) < thresholdPct) {
+            continue;
+        }
+
+        events.push({
+            peak_date: current.date,
+            trough_date: next.date,
+            max_drawdown_pct: Number(drawdownPct.toFixed(1))
+        });
+    }
+
+    return dedupeNearbyThresholdEvents(events);
+}
+
+function buildLocalExtrema(history: Array<{ date: string; close: number }>, windowSize: number) {
+    const extrema: Array<{ type: 'peak' | 'trough'; index: number; date: string; price: number }> = [];
+
+    for (let index = 0; index < history.length; index += 1) {
+        const start = Math.max(0, index - windowSize);
+        const end = Math.min(history.length - 1, index + windowSize);
+        const slice = history.slice(start, end + 1).map((point) => point.close);
+        const current = history[index].close;
+        const localMax = Math.max(...slice);
+        const localMin = Math.min(...slice);
+
+        if (current === localMax) {
+            extrema.push({ type: 'peak', index, date: history[index].date, price: current });
+            continue;
+        }
+
+        if (current === localMin) {
+            extrema.push({ type: 'trough', index, date: history[index].date, price: current });
+        }
+    }
+
+    const compressed: Array<{ type: 'peak' | 'trough'; index: number; date: string; price: number }> = [];
+    for (const point of extrema) {
+        const previous = compressed[compressed.length - 1];
+        if (!previous) {
+            compressed.push(point);
+            continue;
+        }
+
+        if (previous.type !== point.type) {
+            compressed.push(point);
+            continue;
+        }
+
+        const shouldReplace = point.type === 'peak' ? point.price >= previous.price : point.price <= previous.price;
+        if (shouldReplace) {
+            compressed[compressed.length - 1] = point;
+        }
+    }
+
+    return compressed;
+}
+
+function dedupeNearbyThresholdEvents(events: ThresholdDrawdownEvent[]): ThresholdDrawdownEvent[] {
+    if (events.length <= 1) {
+        return events;
+    }
+
+    const deduped: ThresholdDrawdownEvent[] = [events[0]];
+    for (let index = 1; index < events.length; index += 1) {
+        const current = events[index];
+        const previous = deduped[deduped.length - 1];
+        const gapDays = daysBetweenIso(previous.trough_date, current.peak_date);
+        if (gapDays !== null && gapDays <= 20) {
+            if (current.max_drawdown_pct < previous.max_drawdown_pct) {
+                deduped[deduped.length - 1] = current;
+            }
+            continue;
+        }
+        deduped.push(current);
+    }
+
+    return deduped;
+}
+
+function daysBetweenIso(fromDate: string, toDate: string): number | null {
+    const from = Date.parse(fromDate);
+    const to = Date.parse(toDate);
+    if (Number.isNaN(from) || Number.isNaN(to)) {
+        return null;
+    }
+
+    return Math.round((to - from) / (24 * 60 * 60 * 1000));
 }
 
 function gradeToHeadline(grade: 'GO' | 'CAUTION' | 'AVOID'): string {

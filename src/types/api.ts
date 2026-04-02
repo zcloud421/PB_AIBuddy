@@ -314,6 +314,7 @@ export interface SymbolIdeaResponse {
     cached: boolean;
     grade: Grade;
     composite_score: number;
+    risk_reward_score: number | null;
     verdict_headline: string;
     verdict_sub: string;
     data_as_of_date: string | null;

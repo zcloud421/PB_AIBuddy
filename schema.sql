@@ -119,6 +119,7 @@ CREATE TABLE idea_candidates (
     skew_score NUMERIC(8, 4) NOT NULL CHECK (skew_score >= 0),
     event_risk_score NUMERIC(8, 4) NOT NULL CHECK (event_risk_score >= 0),
     composite_score NUMERIC(10, 4) NOT NULL CHECK (composite_score >= 0),
+    risk_reward_score NUMERIC(10, 4) CHECK (risk_reward_score IS NULL OR risk_reward_score >= 0),
     recommended_strike NUMERIC(18, 6) CHECK (recommended_strike IS NULL OR recommended_strike > 0),
     recommended_tenor_days INTEGER CHECK (recommended_tenor_days IS NULL OR recommended_tenor_days > 0),
     ref_coupon_pct NUMERIC(10, 4) CHECK (ref_coupon_pct IS NULL OR ref_coupon_pct >= 0),
