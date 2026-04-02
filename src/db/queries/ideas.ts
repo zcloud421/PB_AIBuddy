@@ -1157,10 +1157,22 @@ export async function saveDailyRecommendations(items: SaveDailyRecommendationInp
     }
 }
 
-export async function getRecentDailyRecommendationHistory(limitDays: number): Promise<Array<{ symbol: string }>> {
-    const result = await pool.query<{ symbol: string }>(
+export async function getRecentDailyRecommendationHistory(limitDays: number): Promise<
+    Array<{
+        symbol: string;
+        run_date: string;
+        placement: 'HERO' | 'RECOMMENDED';
+        slot_rank: number;
+    }>
+> {
+    const result = await pool.query<{
+        symbol: string;
+        run_date: string;
+        placement: 'HERO' | 'RECOMMENDED';
+        slot_rank: number;
+    }>(
         `
-        SELECT symbol
+        SELECT symbol, run_date::text, placement, slot_rank
         FROM daily_recommendation_history
         WHERE run_date IN (
             SELECT DISTINCT run_date

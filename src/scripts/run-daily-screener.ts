@@ -225,7 +225,7 @@ async function main(): Promise<void> {
             );
         }
 
-        const showcase = selectDailyRecommendationShowcase(results, dailyBest?.symbol ?? null);
+        const showcase = await selectDailyRecommendationShowcase(results, dailyBest?.symbol ?? null);
         if (runId && showcase.length > 0) {
             const persistedRunId = runId;
             await saveDailyRecommendations(

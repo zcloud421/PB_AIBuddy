@@ -370,10 +370,10 @@ export async function selectDailyBest(candidates: ScoringResult[]): Promise<{
     return bestChoice;
 }
 
-export function selectDailyRecommendationShowcase(
+export async function selectDailyRecommendationShowcase(
     candidates: ScoringResult[],
     dailyBestSymbol: string | null
-): Array<{
+): Promise<Array<{
     symbol: string;
     slotRank: number;
     placement: 'HERO' | 'RECOMMENDED';
@@ -381,10 +381,15 @@ export function selectDailyRecommendationShowcase(
     recommendedStrike: number | null;
     recommendedTenorDays: number | null;
     moneynessPct: number | null;
-}> {
+}>> {
+    const recentHistory = await getRecentDailyRecommendationHistory(5);
     const rankedGo = [...candidates]
         .filter((candidate) => candidate.overall_grade === 'GO')
-        .sort((left, right) => right.composite_score - left.composite_score);
+        .sort(
+            (left, right) =>
+                adjustedShowcaseScore(right, recentHistory, dailyBestSymbol) -
+                adjustedShowcaseScore(left, recentHistory, dailyBestSymbol)
+        );
 
     const showcase: Array<{
         symbol: string;
@@ -1983,7 +1988,10 @@ function dedupeSentences(value: string): string {
     return deduped.join('');
 }
 
-function calculateFreshnessPenalty(symbol: string, history: Array<{ symbol: string }>): number {
+function calculateFreshnessPenalty(
+    symbol: string,
+    history: Array<{ symbol: string; run_date: string; placement: 'HERO' | 'RECOMMENDED'; slot_rank: number }>
+): number {
     const appearances = history.filter((entry) => entry.symbol === symbol).length;
 
     if (appearances <= 1) {
@@ -1999,6 +2007,29 @@ function calculateFreshnessPenalty(symbol: string, history: Array<{ symbol: stri
         return 0.12;
     }
     return 0.16;
+}
+
+function adjustedShowcaseScore(
+    candidate: ScoringResult,
+    history: Array<{ symbol: string; run_date: string; placement: 'HERO' | 'RECOMMENDED'; slot_rank: number }>,
+    dailyBestSymbol: string | null
+): number {
+    const freshnessPenalty = calculateFreshnessPenalty(candidate.symbol, history);
+    const latestRunDate = history[0]?.run_date ?? null;
+    const appearedYesterday =
+        latestRunDate !== null &&
+        history.some((entry) => entry.run_date === latestRunDate && entry.symbol === candidate.symbol);
+    const wasYesterdayHero =
+        latestRunDate !== null &&
+        history.some(
+            (entry) =>
+                entry.run_date === latestRunDate &&
+                entry.symbol === candidate.symbol &&
+                entry.placement === 'HERO'
+        );
+    const repeatPenalty = candidate.symbol === dailyBestSymbol ? 0 : (appearedYesterday ? 0.03 : 0) + (wasYesterdayHero ? 0.05 : 0);
+
+    return candidate.composite_score - freshnessPenalty - repeatPenalty;
 }
 
 function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>) {
