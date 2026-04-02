@@ -173,6 +173,7 @@ export interface ClientFocusMarketSnapshotItem {
     name: string;
     latest: number | null;
     change_pct: number | null;
+    change_5d_pct?: number | null;
 }
 
 export interface ClientFocusMarketSnapshot {

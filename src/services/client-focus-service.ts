@@ -3268,7 +3268,8 @@ async function fetchHongKongMarketSnapshot(): Promise<ClientFocusMarketSnapshot 
             indices: indices.map((item) => ({
                 ...item,
                 latest: Number.isFinite(item.latest) ? item.latest : null,
-                change_pct: Number.isFinite(item.change_pct) ? item.change_pct : null
+                change_pct: Number.isFinite(item.change_pct) ? item.change_pct : null,
+                change_5d_pct: Number.isFinite(item.change_5d_pct) ? item.change_5d_pct : null
             }))
         };
     } catch {
@@ -3739,7 +3740,7 @@ async function fetchHongKongSpotIndices() {
     const enriched = await Promise.all(
         baseItems.map(async (item) => ({
             ...item,
-            change_pct: await fetchHongKongIndex5dChange(item.code, item.change_pct)
+            change_5d_pct: await fetchHongKongIndex5dChange(item.code, item.change_pct)
         }))
     );
 
@@ -3747,7 +3748,13 @@ async function fetchHongKongSpotIndices() {
 }
 
 function buildHongKongSnapshotSummary(
-    indices: Array<{ code: string; name: string; latest: number | null; change_pct: number | null }>,
+    indices: Array<{
+        code: string;
+        name: string;
+        latest: number | null;
+        change_pct: number | null;
+        change_5d_pct?: number | null;
+    }>,
     southboundChart: ClientFocusMarketChart | null,
 ) {
     const hsi = indices.find((item) => item.code === 'HSI');
@@ -3755,12 +3762,12 @@ function buildHongKongSnapshotSummary(
     const southbound5d = southboundChart ? sumRecentNetBuy(southboundChart.points, 5) : null;
 
     const leadSentence = (() => {
-        if (hsi?.change_pct === null || hsi?.change_pct === undefined || hstech?.change_pct === null || hstech?.change_pct === undefined) {
+        const hsiMove = hsi?.change_5d_pct ?? hsi?.change_pct;
+        const techMove = hstech?.change_5d_pct ?? hstech?.change_pct;
+
+        if (hsiMove === null || hsiMove === undefined || techMove === null || techMove === undefined) {
             return '恒指与恒生科技近期走势分化';
         }
-
-        const hsiMove = hsi.change_pct;
-        const techMove = hstech.change_pct;
         if (hsiMove < 0 && techMove < 0 && Math.abs(techMove) > Math.abs(hsiMove) + 0.6) {
             return '恒指回落幅度有限，但恒生科技波动更大';
         }
