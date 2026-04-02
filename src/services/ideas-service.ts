@@ -680,7 +680,12 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
                 runId = await createIdeaRun(symbol, 'manual');
                 await updateIdeaRunStatus(runId, 'running');
             }
-        } catch {
+        } catch (error) {
+            console.error(
+                `[ideas-service] failed to create/run idea_run for ${symbol}: ${
+                    error instanceof Error ? error.stack ?? error.message : String(error)
+                }`
+            );
             runId = null;
         }
 
