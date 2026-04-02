@@ -283,6 +283,29 @@ export interface PriceHistoryPoint {
     close: number;
 }
 
+export interface DrawdownEpisode {
+    peak_date: string;
+    peak_price: number;
+    trough_date: string;
+    trough_price: number;
+    max_drawdown_pct: number;
+    decline_days: number;
+    recovery_days: number | null;
+    recovered: boolean;
+}
+
+export interface TailRiskStats {
+    history_start_date: string | null;
+    history_end_date: string | null;
+    max_drawdown_pct: number | null;
+    max_drawdown_peak_date: string | null;
+    max_drawdown_trough_date: string | null;
+    drawdown_20_count: number;
+    drawdown_30_count: number;
+    median_recovery_days: number | null;
+    worst_episode: DrawdownEpisode | null;
+}
+
 export interface SymbolIdeaResponse {
     symbol: string;
     exchange: string;
@@ -324,6 +347,7 @@ export interface SymbolPriceHistoryResponse {
     symbol: string;
     data_as_of_date: string | null;
     price_history: PriceHistoryPoint[];
+    tail_risk: TailRiskStats | null;
 }
 
 export interface PairAnalysisResponse {

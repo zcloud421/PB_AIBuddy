@@ -606,7 +606,8 @@ export async function getSymbolPriceHistory(symbol: string): Promise<SymbolPrice
     return {
         symbol: normalizedSymbol,
         data_as_of_date: priceHistory[priceHistory.length - 1]?.date ?? latestExpectedMarketDate,
-        price_history: priceHistory
+        price_history: priceHistory,
+        tail_risk: buildTailRiskStats(priceHistory)
     };
 }
 
@@ -1584,6 +1585,132 @@ function calculateFreshnessPenalty(symbol: string, history: Array<{ symbol: stri
         return 0.10;
     }
     return 0.20;
+}
+
+function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>) {
+    if (priceHistory.length < 2) {
+        return null;
+    }
+
+    const episodes: Array<{
+        peak_date: string;
+        peak_price: number;
+        trough_date: string;
+        trough_price: number;
+        max_drawdown_pct: number;
+        decline_days: number;
+        recovery_days: number | null;
+        recovered: boolean;
+    }> = [];
+
+    let peakIndex = 0;
+    let peakPrice = priceHistory[0].close;
+    let activeEpisode:
+        | {
+              peakIndex: number;
+              peakPrice: number;
+              troughIndex: number;
+              troughPrice: number;
+              maxDrawdownPct: number;
+          }
+        | null = null;
+
+    for (let index = 1; index < priceHistory.length; index += 1) {
+        const point = priceHistory[index];
+
+        if (point.close >= peakPrice) {
+            if (activeEpisode) {
+                episodes.push({
+                    peak_date: priceHistory[activeEpisode.peakIndex].date,
+                    peak_price: roundPrice(activeEpisode.peakPrice),
+                    trough_date: priceHistory[activeEpisode.troughIndex].date,
+                    trough_price: roundPrice(activeEpisode.troughPrice),
+                    max_drawdown_pct: roundPct(activeEpisode.maxDrawdownPct),
+                    decline_days: activeEpisode.troughIndex - activeEpisode.peakIndex,
+                    recovery_days: index - activeEpisode.peakIndex,
+                    recovered: true
+                });
+                activeEpisode = null;
+            }
+
+            peakIndex = index;
+            peakPrice = point.close;
+            continue;
+        }
+
+        const drawdownPct = ((point.close / peakPrice) - 1) * 100;
+        if (!activeEpisode) {
+            activeEpisode = {
+                peakIndex,
+                peakPrice,
+                troughIndex: index,
+                troughPrice: point.close,
+                maxDrawdownPct: drawdownPct
+            };
+            continue;
+        }
+
+        if (drawdownPct < activeEpisode.maxDrawdownPct) {
+            activeEpisode.troughIndex = index;
+            activeEpisode.troughPrice = point.close;
+            activeEpisode.maxDrawdownPct = drawdownPct;
+        }
+    }
+
+    if (activeEpisode) {
+        episodes.push({
+            peak_date: priceHistory[activeEpisode.peakIndex].date,
+            peak_price: roundPrice(activeEpisode.peakPrice),
+            trough_date: priceHistory[activeEpisode.troughIndex].date,
+            trough_price: roundPrice(activeEpisode.troughPrice),
+            max_drawdown_pct: roundPct(activeEpisode.maxDrawdownPct),
+            decline_days: activeEpisode.troughIndex - activeEpisode.peakIndex,
+            recovery_days: null,
+            recovered: false
+        });
+    }
+
+    const recoveredEpisodes = episodes.filter((episode) => episode.recovery_days !== null);
+    const sortedRecoveryDays = recoveredEpisodes
+        .map((episode) => episode.recovery_days as number)
+        .sort((left, right) => left - right);
+    const medianRecoveryDays =
+        sortedRecoveryDays.length === 0 ? null : calculateMedian(sortedRecoveryDays);
+    const worstEpisode =
+        episodes.length === 0
+            ? null
+            : episodes.reduce((worst, episode) =>
+                  episode.max_drawdown_pct < worst.max_drawdown_pct ? episode : worst
+              );
+
+    return {
+        history_start_date: priceHistory[0]?.date ?? null,
+        history_end_date: priceHistory[priceHistory.length - 1]?.date ?? null,
+        max_drawdown_pct: worstEpisode?.max_drawdown_pct ?? null,
+        max_drawdown_peak_date: worstEpisode?.peak_date ?? null,
+        max_drawdown_trough_date: worstEpisode?.trough_date ?? null,
+        drawdown_20_count: episodes.filter((episode) => episode.max_drawdown_pct <= -20).length,
+        drawdown_30_count: episodes.filter((episode) => episode.max_drawdown_pct <= -30).length,
+        median_recovery_days: medianRecoveryDays,
+        worst_episode: worstEpisode
+    };
+}
+
+function calculateMedian(values: number[]): number {
+    const middle = Math.floor(values.length / 2);
+    if (values.length % 2 === 1) {
+        return values[middle];
+    }
+
+    return Math.round((values[middle - 1] + values[middle]) / 2);
+}
+
+function roundPrice(value: number): number {
+    return Number(value.toFixed(2));
+}
+
+function roundPct(value: number): number {
+    return Number(value.toFixed(1));
 }
 
 async function mapDailyBestCard(
