@@ -1,18 +1,20 @@
 import { MassiveClient } from '../data/massive-client';
 import {
     getActiveRecommendationTrackers,
+    getDailyRecommendationHistoryRowsInRange,
     getRecommendationTrackerHistoryRows,
     getRecommendationTrackerSummaryRows,
     getShowcaseTrackerSummaryRows,
+    type DailyRecommendationHistoryRow,
     type RecommendationTrackerRow,
     updateRecommendationTrackerStatus
 } from '../db/queries/ideas';
 import type {
     TrackerHistoryEntry,
+    TrackerMonthlyConcentrationItem,
+    TrackerMonthlyMetric,
     TrackerPosition,
-    TrackerReviewBucket,
     TrackerReviewResponse,
-    TrackerReviewWindow,
     TrackerSummaryBucket,
     TrackerSummaryResponse
 } from '../types/api';
@@ -121,18 +123,47 @@ export async function getTrackerHistory(): Promise<TrackerHistoryEntry[]> {
 }
 
 export async function getTrackerReview(): Promise<TrackerReviewResponse> {
-    const rows = await getRecommendationTrackerSummaryRows();
-    const today = todayIsoDate();
-    const rolling30dRows = rows.filter((row) => daysSince(row.recommendation_date, today) <= 30);
-    const rolling90dRows = rows.filter((row) => daysSince(row.recommendation_date, today) <= 90);
-    const matured3mRows = rows.filter((row) => isThreeMonthTenor(row) && isMatured(row));
+    const today = todayInHongKongIsoDate();
+    const { start: reportStart, end: reportEnd, label: reportMonth } = previousCalendarMonth(today);
+    const { start: baselineStart, end: baselineEnd, label: baselineMonth } = previousCalendarMonth(reportStart);
+    const [rows, reportDailyHistory] = await Promise.all([
+        getRecommendationTrackerSummaryRows(),
+        getDailyRecommendationHistoryRowsInRange(reportStart, reportEnd)
+    ]);
+    const reportRows = rows.filter((row) => row.recommendation_date >= reportStart && row.recommendation_date <= reportEnd);
+    const baselineRows = rows.filter((row) => row.recommendation_date >= baselineStart && row.recommendation_date <= baselineEnd);
+    const reportSummary = summarizeMonthlyRows(reportRows);
+    const baselineSummary = summarizeMonthlyRows(baselineRows);
 
     return {
         generated_at: new Date().toISOString(),
-        overall: summarizeReviewRows(rows),
-        rolling_30d: buildReviewWindow('最近30天推荐', rolling30dRows),
-        rolling_90d: buildReviewWindow('最近90天推荐', rolling90dRows),
-        matured_3m: buildReviewWindow('已到期3个月期限', matured3mRows)
+        report_month: reportMonth,
+        baseline_month: baselineMonth,
+        summary: {
+            new_recommendations: metricCountOnly(reportRows.length),
+            path_breach: metricFromSummary(reportSummary.total, reportSummary.pathBreached),
+            still_below_strike: metricFromSummary(reportSummary.total, reportSummary.activeBelowStrike),
+            matured_3m_safe: metricFromSummary(reportSummary.matured3mTotal, reportSummary.matured3mSafe)
+        },
+        comparison: {
+            path_breach_rate_change_pct: rateDelta(reportSummary.total, reportSummary.pathBreached, baselineSummary.total, baselineSummary.pathBreached),
+            still_below_strike_rate_change_pct: rateDelta(
+                reportSummary.total,
+                reportSummary.activeBelowStrike,
+                baselineSummary.total,
+                baselineSummary.activeBelowStrike
+            ),
+            matured_3m_safe_rate_change_pct: rateDelta(
+                reportSummary.matured3mTotal,
+                reportSummary.matured3mSafe,
+                baselineSummary.matured3mTotal,
+                baselineSummary.matured3mSafe
+            )
+        },
+        concentration: buildMonthlyConcentration(reportDailyHistory),
+        rolling_30d: buildMonthlySection('最近30天推荐', rows.filter((row) => daysSince(row.recommendation_date, today) <= 30)),
+        rolling_90d: buildMonthlySection('最近90天推荐', rows.filter((row) => daysSince(row.recommendation_date, today) <= 90)),
+        matured_3m: buildMonthlySection('已到期3个月期限', rows.filter((row) => isThreeMonthTenor(row) && isMatured(row)))
     };
 }
 
@@ -180,37 +211,6 @@ function summarizeTrackerRows(rows: RecommendationTrackerRow[]): TrackerSummaryB
     };
 }
 
-function summarizeReviewRows(rows: RecommendationTrackerRow[]): TrackerReviewBucket {
-    const maturedRows = rows.filter((row) => row.status === 'EXPIRED_SAFE' || row.status === 'EXPIRED_BREACHED');
-    const maturitySafeCount = maturedRows.filter((row) => row.status === 'EXPIRED_SAFE').length;
-    const maturityBreachedCount = maturedRows.filter((row) => row.status === 'EXPIRED_BREACHED').length;
-    const everBreachedCount = rows.filter((row) => row.breached_date !== null).length;
-    const activeRows = rows.filter((row) => row.status === 'ACTIVE' || row.status === 'BREACHED');
-    const activeBelowStrikeCount = activeRows.filter((row) => row.status === 'BREACHED').length;
-
-    return {
-        total_recommendations: rows.length,
-        matured_recommendations: maturedRows.length,
-        active_recommendations: rows.length - maturedRows.length,
-        ever_breached_count: everBreachedCount,
-        maturity_safe_count: maturitySafeCount,
-        maturity_breached_count: maturityBreachedCount,
-        active_below_strike_count: activeBelowStrikeCount,
-        path_breach_rate: rows.length === 0 ? '-' : `${((everBreachedCount / rows.length) * 100).toFixed(1)}%`,
-        maturity_safe_rate:
-            maturedRows.length === 0 ? '-' : `${((maturitySafeCount / maturedRows.length) * 100).toFixed(1)}%`,
-        active_below_strike_rate:
-            activeRows.length === 0 ? '-' : `${((activeBelowStrikeCount / activeRows.length) * 100).toFixed(1)}%`
-    };
-}
-
-function buildReviewWindow(label: string, rows: RecommendationTrackerRow[]): TrackerReviewWindow {
-    return {
-        label,
-        summary: summarizeReviewRows(rows)
-    };
-}
-
 function daysBetween(fromDate: string, toDate: string): number | null {
     const from = Date.parse(fromDate);
     const to = Date.parse(toDate);
@@ -225,16 +225,6 @@ function todayIsoDate(): string {
     return new Date().toISOString().slice(0, 10);
 }
 
-function daysSince(fromDate: string, toDate: string): number {
-    const from = Date.parse(fromDate);
-    const to = Date.parse(toDate);
-    if (Number.isNaN(from) || Number.isNaN(to)) {
-        return Number.POSITIVE_INFINITY;
-    }
-
-    return Math.max(0, Math.floor((to - from) / (24 * 60 * 60 * 1000)));
-}
-
 function isMatured(row: RecommendationTrackerRow): boolean {
     return row.status === 'EXPIRED_SAFE' || row.status === 'EXPIRED_BREACHED';
 }
@@ -246,4 +236,130 @@ function isThreeMonthTenor(row: RecommendationTrackerRow): boolean {
 
 function toNullableNumber(value: number | null): number | null {
     return value === null || value === undefined ? null : Number(value);
+}
+
+interface MonthlyReviewCounters {
+    total: number;
+    pathBreached: number;
+    activeBelowStrike: number;
+    matured3mTotal: number;
+    matured3mSafe: number;
+}
+
+function summarizeMonthlyRows(rows: RecommendationTrackerRow[]): MonthlyReviewCounters {
+    const matured3mRows = rows.filter((row) => isThreeMonthTenor(row) && isMatured(row));
+
+    return {
+        total: rows.length,
+        pathBreached: rows.filter((row) => row.breached_date !== null).length,
+        activeBelowStrike: rows.filter((row) => row.status === 'BREACHED').length,
+        matured3mTotal: matured3mRows.length,
+        matured3mSafe: matured3mRows.filter((row) => row.status === 'EXPIRED_SAFE').length
+    };
+}
+
+function metricFromSummary(total: number, count: number): TrackerMonthlyMetric {
+    return {
+        count,
+        rate: total === 0 ? '-' : `${((count / total) * 100).toFixed(1)}%`
+    };
+}
+
+function metricCountOnly(count: number): TrackerMonthlyMetric {
+    return {
+        count,
+        rate: '-'
+    };
+}
+
+function buildMonthlySection(
+    label: string,
+    rows: RecommendationTrackerRow[]
+): TrackerReviewResponse['rolling_30d'] {
+    const summary = summarizeMonthlyRows(rows);
+
+    return {
+        label,
+        summary: {
+            total_recommendations: rows.length,
+            path_breach_rate: metricFromSummary(summary.total, summary.pathBreached).rate,
+            active_below_strike_rate: metricFromSummary(summary.total, summary.activeBelowStrike).rate,
+            maturity_safe_rate: metricFromSummary(summary.matured3mTotal, summary.matured3mSafe).rate
+        }
+    };
+}
+
+function rateDelta(currentTotal: number, currentCount: number, baselineTotal: number, baselineCount: number): string {
+    if (currentTotal === 0 || baselineTotal === 0) {
+        return '-';
+    }
+
+    const currentRate = (currentCount / currentTotal) * 100;
+    const baselineRate = (baselineCount / baselineTotal) * 100;
+    const delta = currentRate - baselineRate;
+    const sign = delta > 0 ? '+' : '';
+    return `${sign}${delta.toFixed(1)}pct`;
+}
+
+function buildMonthlyConcentration(rows: DailyRecommendationHistoryRow[]): TrackerReviewResponse['concentration'] {
+    const symbolCounts = new Map<string, number>();
+    const heroCounts = new Map<string, number>();
+
+    for (const row of rows) {
+        symbolCounts.set(row.symbol, (symbolCounts.get(row.symbol) ?? 0) + 1);
+        if (row.placement === 'HERO') {
+            heroCounts.set(row.symbol, (heroCounts.get(row.symbol) ?? 0) + 1);
+        }
+    }
+
+    return {
+        unique_symbols: symbolCounts.size,
+        top_symbols: topCounts(symbolCounts, 3),
+        top_hero_symbol: topCounts(heroCounts, 1)[0] ?? null
+    };
+}
+
+function topCounts(counts: Map<string, number>, limit: number): TrackerMonthlyConcentrationItem[] {
+    return [...counts.entries()]
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+        .slice(0, limit)
+        .map(([symbol, appearances]) => ({ symbol, appearances }));
+}
+
+function todayInHongKongIsoDate(): string {
+    return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Hong_Kong',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).format(new Date());
+}
+
+function daysSince(fromDate: string, toDate: string): number {
+    const from = Date.parse(fromDate);
+    const to = Date.parse(toDate);
+    if (Number.isNaN(from) || Number.isNaN(to)) {
+        return Number.POSITIVE_INFINITY;
+    }
+
+    return Math.max(0, Math.floor((to - from) / (24 * 60 * 60 * 1000)));
+}
+
+function previousCalendarMonth(anchorDate: string): { start: string; end: string; label: string } {
+    const [yearText, monthText] = anchorDate.split('-');
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const firstOfCurrentMonthUtc = new Date(Date.UTC(year, month - 1, 1));
+    const endDate = new Date(firstOfCurrentMonthUtc.getTime() - 24 * 60 * 60 * 1000);
+    const startDate = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), 1));
+
+    return {
+        start: formatDateUtc(startDate),
+        end: formatDateUtc(endDate),
+        label: `${endDate.getUTCFullYear()}-${String(endDate.getUTCMonth() + 1).padStart(2, '0')}`
+    };
+}
+
+function formatDateUtc(value: Date): string {
+    return value.toISOString().slice(0, 10);
 }

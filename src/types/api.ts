@@ -418,24 +418,6 @@ export interface TrackerSummaryBucket {
     breach_rate: string;
 }
 
-export interface TrackerReviewBucket {
-    total_recommendations: number;
-    matured_recommendations: number;
-    active_recommendations: number;
-    ever_breached_count: number;
-    maturity_safe_count: number;
-    maturity_breached_count: number;
-    active_below_strike_count: number;
-    path_breach_rate: string;
-    maturity_safe_rate: string;
-    active_below_strike_rate: string;
-}
-
-export interface TrackerReviewWindow {
-    label: string;
-    summary: TrackerReviewBucket;
-}
-
 export interface TrackerSummaryResponse {
     total_recommendations: number;
     active: number;
@@ -468,10 +450,47 @@ export interface TrackerHistoryEntry {
     breached_date: string | null;
 }
 
+export interface TrackerMonthlyMetric {
+    count: number;
+    rate: string;
+}
+
+export interface TrackerMonthlyConcentrationItem {
+    symbol: string;
+    appearances: number;
+}
+
+export interface TrackerReviewSection {
+    label: string;
+    summary: {
+        total_recommendations: number;
+        path_breach_rate: string;
+        active_below_strike_rate: string;
+        maturity_safe_rate: string;
+    };
+}
+
 export interface TrackerReviewResponse {
     generated_at: string;
-    overall: TrackerReviewBucket;
-    rolling_30d: TrackerReviewWindow;
-    rolling_90d: TrackerReviewWindow;
-    matured_3m: TrackerReviewWindow;
+    report_month: string;
+    baseline_month: string;
+    summary: {
+        new_recommendations: TrackerMonthlyMetric;
+        path_breach: TrackerMonthlyMetric;
+        still_below_strike: TrackerMonthlyMetric;
+        matured_3m_safe: TrackerMonthlyMetric;
+    };
+    comparison: {
+        path_breach_rate_change_pct: string;
+        still_below_strike_rate_change_pct: string;
+        matured_3m_safe_rate_change_pct: string;
+    };
+    concentration: {
+        unique_symbols: number;
+        top_symbols: TrackerMonthlyConcentrationItem[];
+        top_hero_symbol: TrackerMonthlyConcentrationItem | null;
+    };
+    rolling_30d: TrackerReviewSection;
+    rolling_90d: TrackerReviewSection;
+    matured_3m: TrackerReviewSection;
 }
