@@ -1941,7 +1941,14 @@ function calculateFreshnessPenalty(symbol: string, history: Array<{ symbol: stri
 }
 
 function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>) {
-    if (priceHistory.length < 2) {
+    const normalizedHistory = priceHistory
+        .map((point) => ({
+            date: point.date,
+            close: toFiniteNumber(point.close)
+        }))
+        .filter((point): point is { date: string; close: number } => point.close !== null);
+
+    if (normalizedHistory.length < 2) {
         return null;
     }
 
@@ -1957,7 +1964,7 @@ function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>
     }> = [];
 
     let peakIndex = 0;
-    let peakPrice = priceHistory[0].close;
+    let peakPrice = normalizedHistory[0].close;
     let activeEpisode:
         | {
               peakIndex: number;
@@ -1968,15 +1975,15 @@ function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>
           }
         | null = null;
 
-    for (let index = 1; index < priceHistory.length; index += 1) {
-        const point = priceHistory[index];
+    for (let index = 1; index < normalizedHistory.length; index += 1) {
+        const point = normalizedHistory[index];
 
         if (point.close >= peakPrice) {
             if (activeEpisode) {
                 episodes.push({
-                    peak_date: priceHistory[activeEpisode.peakIndex].date,
+                    peak_date: normalizedHistory[activeEpisode.peakIndex].date,
                     peak_price: roundPrice(activeEpisode.peakPrice),
-                    trough_date: priceHistory[activeEpisode.troughIndex].date,
+                    trough_date: normalizedHistory[activeEpisode.troughIndex].date,
                     trough_price: roundPrice(activeEpisode.troughPrice),
                     max_drawdown_pct: roundPct(activeEpisode.maxDrawdownPct),
                     decline_days: activeEpisode.troughIndex - activeEpisode.peakIndex,
@@ -2012,9 +2019,9 @@ function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>
 
     if (activeEpisode) {
         episodes.push({
-            peak_date: priceHistory[activeEpisode.peakIndex].date,
+            peak_date: normalizedHistory[activeEpisode.peakIndex].date,
             peak_price: roundPrice(activeEpisode.peakPrice),
-            trough_date: priceHistory[activeEpisode.troughIndex].date,
+            trough_date: normalizedHistory[activeEpisode.troughIndex].date,
             trough_price: roundPrice(activeEpisode.troughPrice),
             max_drawdown_pct: roundPct(activeEpisode.maxDrawdownPct),
             decline_days: activeEpisode.troughIndex - activeEpisode.peakIndex,
@@ -2037,8 +2044,8 @@ function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>
               );
 
     return {
-        history_start_date: priceHistory[0]?.date ?? null,
-        history_end_date: priceHistory[priceHistory.length - 1]?.date ?? null,
+        history_start_date: normalizedHistory[0]?.date ?? null,
+        history_end_date: normalizedHistory[normalizedHistory.length - 1]?.date ?? null,
         max_drawdown_pct: worstEpisode?.max_drawdown_pct ?? null,
         max_drawdown_peak_date: worstEpisode?.peak_date ?? null,
         max_drawdown_trough_date: worstEpisode?.trough_date ?? null,
@@ -2059,11 +2066,22 @@ function calculateMedian(values: number[]): number {
 }
 
 function roundPrice(value: number): number {
-    return Number(value.toFixed(2));
+    const numeric = toFiniteNumber(value);
+    return numeric === null ? 0 : Number(numeric.toFixed(2));
 }
 
 function roundPct(value: number): number {
-    return Number(value.toFixed(1));
+    const numeric = toFiniteNumber(value);
+    return numeric === null ? 0 : Number(numeric.toFixed(1));
+}
+
+function toFiniteNumber(value: number | string | null | undefined): number | null {
+    if (value === null || value === undefined) {
+        return null;
+    }
+
+    const numeric = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
 }
 
 async function mapDailyBestCard(
