@@ -564,18 +564,20 @@ export { deleteTodayIdeaCandidate };
 
 export async function getSymbolPriceHistory(symbol: string): Promise<SymbolPriceHistoryResponse> {
     const normalizedSymbol = symbol.toUpperCase();
-    let priceHistory = await getRecentPriceHistoryBySymbol(normalizedSymbol).catch(() => []);
+    const tailRiskLookbackDays = 365 * 5;
+    const tailRiskHistoryLimit = 1500;
+    let priceHistory = await getRecentPriceHistoryBySymbol(normalizedSymbol, tailRiskHistoryLimit).catch(() => []);
     const latestExpectedMarketDate = latestUsTradingDate();
     const latestStoredPriceHistoryDate = priceHistory[priceHistory.length - 1]?.date ?? null;
     const shouldRefreshPriceHistory =
-        priceHistory.length < 2 ||
+        priceHistory.length < Math.min(750, tailRiskHistoryLimit) ||
         latestStoredPriceHistoryDate === null ||
         latestStoredPriceHistoryDate < latestExpectedMarketDate;
 
     if (shouldRefreshPriceHistory) {
         try {
             const fallbackFetcher = new MassiveDataFetcher();
-            const fetchedBars = await fallbackFetcher.fetchPriceHistory(normalizedSymbol);
+            const fetchedBars = await fallbackFetcher.fetchPriceHistory(normalizedSymbol, tailRiskLookbackDays);
 
             if (fetchedBars.length > 0) {
                 priceHistory = fetchedBars.map((bar) => ({
