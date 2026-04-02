@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import axios from 'axios';
 
 import { pool } from '../db/client';
+import { ensureDailyRecommendationHistoryTable, ensureRecommendationTrackerTable } from '../db/queries/ideas';
 import { getTrackerReview } from '../services/tracker-service';
 
 dotenv.config();
@@ -13,6 +14,9 @@ async function main(): Promise<void> {
     if (!botToken || !chatId) {
         throw new Error('TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required');
     }
+
+    await ensureRecommendationTrackerTable();
+    await ensureDailyRecommendationHistoryTable();
 
     const review = await getTrackerReview();
     const message = formatReviewMessage(review);

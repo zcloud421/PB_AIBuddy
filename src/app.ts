@@ -10,6 +10,7 @@ import { pool } from './db/client';
 import {
     deleteTodayIdeaCandidate,
     ensureDailyBestHistoryTable,
+    ensureDailyRecommendationHistoryTable,
     ensureEarningsCalendarColumns,
     ensureIdeaCandidatePriceColumns,
     ensureRecommendationTrackerTable,
@@ -96,6 +97,7 @@ export function createApp() {
 
 async function ensureSchemaGuards(): Promise<void> {
     await ensureDailyBestHistoryTable();
+    await ensureDailyRecommendationHistoryTable();
     await ensureIdeaCandidatePriceColumns();
     await ensureEarningsCalendarColumns();
     await ensureRiskFlagEnumValues();
