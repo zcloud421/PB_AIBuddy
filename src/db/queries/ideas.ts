@@ -182,6 +182,13 @@ export interface SaveDailyRecommendationInput {
     moneynessPct: number | null;
 }
 
+export interface DailyRecommendationHistoryRow {
+    symbol: string;
+    run_date: string;
+    slot_rank: number;
+    placement: 'HERO' | 'RECOMMENDED';
+}
+
 export interface RecommendationTrackerRow {
     id: number;
     symbol: string;
@@ -1164,6 +1171,28 @@ export async function getRecentDailyRecommendationHistory(limitDays: number): Pr
         ORDER BY run_date DESC, slot_rank ASC
         `,
         [limitDays]
+    );
+
+    return result.rows;
+}
+
+export async function getDailyRecommendationHistoryRowsInRange(
+    startDate: string,
+    endDate: string
+): Promise<DailyRecommendationHistoryRow[]> {
+    const result = await pool.query<DailyRecommendationHistoryRow>(
+        `
+        SELECT
+            symbol,
+            run_date::text,
+            slot_rank,
+            placement
+        FROM daily_recommendation_history
+        WHERE run_date >= $1::date
+          AND run_date <= $2::date
+        ORDER BY run_date ASC, slot_rank ASC
+        `,
+        [startDate, endDate]
     );
 
     return result.rows;
