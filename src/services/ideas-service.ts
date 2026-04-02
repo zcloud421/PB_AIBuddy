@@ -581,7 +581,12 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
 
     try {
         return await scoreSingleSymbol(normalizedSymbol);
-    } catch {
+    } catch (error) {
+        console.error(
+            `[ideas] fresh scoring failed for ${normalizedSymbol}: ${
+                error instanceof Error ? error.stack ?? error.message : String(error)
+            }`
+        );
         return buildUnavailableIdeaResponse(normalizedSymbol);
     }
 }
