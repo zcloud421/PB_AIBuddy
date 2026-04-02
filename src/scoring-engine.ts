@@ -10,6 +10,7 @@ export type FlagType =
     | 'BROKEN_TREND'
     | 'COMMODITY_BETA_CAUTION'
     | 'EARNINGS_PROXIMITY'
+    | 'HIGH_BETA_THEME_CAUTION'
     | 'HIGH_VOL_LOW_STRIKE'
     | 'HIGH_COUPON_OVERRIDE'
     | 'HOUSE_OVERRIDE'
@@ -153,6 +154,7 @@ const COMMODITY_BETA_STRIKE_SELECTION: StrikeSelectionConfig = {
 };
 
 const COMMODITY_BETA_SYMBOLS = new Set(['GDX', 'USO']);
+const HIGH_BETA_THEME_SYMBOLS = new Set(['PLTR', 'TSLA', 'MSTR', 'CRCL', 'COIN', 'LI', 'FUTU']);
 
 function clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
@@ -620,6 +622,7 @@ export function scoreAndGrade(candidate: {
     }
 
     const isCommodityBeta = COMMODITY_BETA_SYMBOLS.has(symbol.toUpperCase());
+    const isHighBetaTheme = HIGH_BETA_THEME_SYMBOLS.has(symbol.toUpperCase());
     const commodityBetaNeedsCaution =
         isCommodityBeta &&
         !hardAvoidTriggered &&
@@ -630,6 +633,17 @@ export function scoreAndGrade(candidate: {
             symbolData.current_price < symbolData.ma20
         );
 
+    const highBetaThemeNeedsCaution =
+        isHighBetaTheme &&
+        !hardAvoidTriggered &&
+        (
+            strikeData.iv >= 0.55 ||
+            moneynessPct > 82 ||
+            symbolData.pct_from_52w_high > -15 ||
+            refCouponPct === null ||
+            refCouponPct < 15
+        );
+
     if (commodityBetaNeedsCaution && overallGrade === 'GO') {
         compositeScore = Math.min(compositeScore, 0.62);
         overallGrade = 'CAUTION';
@@ -637,6 +651,16 @@ export function scoreAndGrade(candidate: {
             type: 'COMMODITY_BETA_CAUTION',
             severity: 'WARN',
             message: 'Commodity-linked ETF uses tighter FCN guardrails because macro, curve, and beta sensitivity can amplify drawdowns'
+        });
+    }
+
+    if (highBetaThemeNeedsCaution && overallGrade === 'GO') {
+        compositeScore = Math.min(compositeScore, 0.61);
+        overallGrade = 'CAUTION';
+        flags.push({
+            type: 'HIGH_BETA_THEME_CAUTION',
+            severity: 'WARN',
+            message: 'High-beta thematic names require tighter FCN guardrails because valuation, sentiment, and narrative shifts can amplify downside risk'
         });
     }
 
