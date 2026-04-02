@@ -5,7 +5,6 @@ import {
     getRecommendationTrackerSummaryRows,
     getShowcaseTrackerSummaryRows,
     type RecommendationTrackerRow,
-    type ShowcaseTrackerSummaryRow,
     updateRecommendationTrackerStatus
 } from '../db/queries/ideas';
 import type {
@@ -122,27 +121,18 @@ export async function getTrackerHistory(): Promise<TrackerHistoryEntry[]> {
 }
 
 export async function getTrackerReview(): Promise<TrackerReviewResponse> {
-    const [rows, showcaseRows] = await Promise.all([
-        getRecommendationTrackerSummaryRows(),
-        getShowcaseTrackerSummaryRows()
-    ]);
-
-    const maturedRows = sortByRecommendationDateDesc(
-        rows.filter((row) => row.status === 'EXPIRED_SAFE' || row.status === 'EXPIRED_BREACHED')
-    );
-    const recentExpiredRows = maturedRows.slice(0, 20);
-    const previousExpiredRows = maturedRows.slice(20, 40);
-
-    const recentExpiredKeys = new Set(recentExpiredRows.map((row) => trackerRowKey(row)));
-    const previousExpiredKeys = new Set(previousExpiredRows.map((row) => trackerRowKey(row)));
+    const rows = await getRecommendationTrackerSummaryRows();
+    const today = todayIsoDate();
+    const rolling30dRows = rows.filter((row) => daysSince(row.recommendation_date, today) <= 30);
+    const rolling90dRows = rows.filter((row) => daysSince(row.recommendation_date, today) <= 90);
+    const matured3mRows = rows.filter((row) => isThreeMonthTenor(row) && isMatured(row));
 
     return {
         generated_at: new Date().toISOString(),
         overall: summarizeReviewRows(rows),
-        hero: summarizeReviewRows(showcaseRows.filter((row) => row.placement === 'HERO')),
-        recommended: summarizeReviewRows(showcaseRows.filter((row) => row.placement === 'RECOMMENDED')),
-        recent_expired_window: buildReviewWindow('最近20笔到期', recentExpiredKeys, rows, showcaseRows),
-        previous_expired_window: buildReviewWindow('前20笔到期', previousExpiredKeys, rows, showcaseRows)
+        rolling_30d: buildReviewWindow('最近30天推荐', rolling30dRows),
+        rolling_90d: buildReviewWindow('最近90天推荐', rolling90dRows),
+        matured_3m: buildReviewWindow('已到期3个月期限', matured3mRows)
     };
 }
 
@@ -195,6 +185,8 @@ function summarizeReviewRows(rows: RecommendationTrackerRow[]): TrackerReviewBuc
     const maturitySafeCount = maturedRows.filter((row) => row.status === 'EXPIRED_SAFE').length;
     const maturityBreachedCount = maturedRows.filter((row) => row.status === 'EXPIRED_BREACHED').length;
     const everBreachedCount = rows.filter((row) => row.breached_date !== null).length;
+    const activeRows = rows.filter((row) => row.status === 'ACTIVE' || row.status === 'BREACHED');
+    const activeBelowStrikeCount = activeRows.filter((row) => row.status === 'BREACHED').length;
 
     return {
         total_recommendations: rows.length,
@@ -203,35 +195,20 @@ function summarizeReviewRows(rows: RecommendationTrackerRow[]): TrackerReviewBuc
         ever_breached_count: everBreachedCount,
         maturity_safe_count: maturitySafeCount,
         maturity_breached_count: maturityBreachedCount,
+        active_below_strike_count: activeBelowStrikeCount,
         path_breach_rate: rows.length === 0 ? '-' : `${((everBreachedCount / rows.length) * 100).toFixed(1)}%`,
         maturity_safe_rate:
-            maturedRows.length === 0 ? '-' : `${((maturitySafeCount / maturedRows.length) * 100).toFixed(1)}%`
+            maturedRows.length === 0 ? '-' : `${((maturitySafeCount / maturedRows.length) * 100).toFixed(1)}%`,
+        active_below_strike_rate:
+            activeRows.length === 0 ? '-' : `${((activeBelowStrikeCount / activeRows.length) * 100).toFixed(1)}%`
     };
 }
 
-function buildReviewWindow(
-    label: string,
-    keys: Set<string>,
-    rows: RecommendationTrackerRow[],
-    showcaseRows: ShowcaseTrackerSummaryRow[]
-): TrackerReviewWindow {
-    const overallRows = rows.filter((row) => keys.has(trackerRowKey(row)));
-    const showcaseFiltered = showcaseRows.filter((row) => keys.has(trackerRowKey(row)));
-
+function buildReviewWindow(label: string, rows: RecommendationTrackerRow[]): TrackerReviewWindow {
     return {
         label,
-        overall: summarizeReviewRows(overallRows),
-        hero: summarizeReviewRows(showcaseFiltered.filter((row) => row.placement === 'HERO')),
-        recommended: summarizeReviewRows(showcaseFiltered.filter((row) => row.placement === 'RECOMMENDED'))
+        summary: summarizeReviewRows(rows)
     };
-}
-
-function trackerRowKey(row: Pick<RecommendationTrackerRow, 'symbol' | 'recommendation_date'>): string {
-    return `${row.symbol}__${row.recommendation_date}`;
-}
-
-function sortByRecommendationDateDesc(rows: RecommendationTrackerRow[]): RecommendationTrackerRow[] {
-    return [...rows].sort((left, right) => right.recommendation_date.localeCompare(left.recommendation_date));
 }
 
 function daysBetween(fromDate: string, toDate: string): number | null {
@@ -246,6 +223,25 @@ function daysBetween(fromDate: string, toDate: string): number | null {
 
 function todayIsoDate(): string {
     return new Date().toISOString().slice(0, 10);
+}
+
+function daysSince(fromDate: string, toDate: string): number {
+    const from = Date.parse(fromDate);
+    const to = Date.parse(toDate);
+    if (Number.isNaN(from) || Number.isNaN(to)) {
+        return Number.POSITIVE_INFINITY;
+    }
+
+    return Math.max(0, Math.floor((to - from) / (24 * 60 * 60 * 1000)));
+}
+
+function isMatured(row: RecommendationTrackerRow): boolean {
+    return row.status === 'EXPIRED_SAFE' || row.status === 'EXPIRED_BREACHED';
+}
+
+function isThreeMonthTenor(row: RecommendationTrackerRow): boolean {
+    const tenor = row.recommended_tenor_days;
+    return tenor !== null && tenor >= 75 && tenor <= 100;
 }
 
 function toNullableNumber(value: number | null): number | null {

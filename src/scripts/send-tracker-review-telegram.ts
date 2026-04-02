@@ -35,24 +35,20 @@ function formatReviewMessage(review: Awaited<ReturnType<typeof getTrackerReview>
         '',
         formatBucket('整体', review.overall),
         '',
-        formatBucket('Hero', review.hero),
+        formatWindow(review.rolling_30d),
         '',
-        formatBucket('Top3', review.recommended),
+        formatWindow(review.rolling_90d),
         '',
-        formatWindow(review.recent_expired_window),
-        '',
-        formatWindow(review.previous_expired_window)
+        formatWindow(review.matured_3m)
     ];
 
     return lines.join('\n');
 }
 
-function formatWindow(window: Awaited<ReturnType<typeof getTrackerReview>>['recent_expired_window']): string {
+function formatWindow(window: Awaited<ReturnType<typeof getTrackerReview>>['rolling_30d']): string {
     return [
         `${window.label}`,
-        formatBucket('整体', window.overall),
-        formatBucket('Hero', window.hero),
-        formatBucket('Top3', window.recommended)
+        formatBucket('汇总', window.summary)
     ].join('\n');
 }
 
@@ -60,7 +56,7 @@ function formatBucket(
     label: string,
     bucket: Awaited<ReturnType<typeof getTrackerReview>>['overall']
 ): string {
-    return `${label}: total ${bucket.total_recommendations} | matured ${bucket.matured_recommendations} | path breach ${bucket.path_breach_rate} | maturity safe ${bucket.maturity_safe_rate}`;
+    return `${label}: total ${bucket.total_recommendations} | matured ${bucket.matured_recommendations} | path breach ${bucket.path_breach_rate} | active below strike ${bucket.active_below_strike_rate} | maturity safe ${bucket.maturity_safe_rate}`;
 }
 
 main()

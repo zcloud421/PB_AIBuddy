@@ -425,15 +425,15 @@ export interface TrackerReviewBucket {
     ever_breached_count: number;
     maturity_safe_count: number;
     maturity_breached_count: number;
+    active_below_strike_count: number;
     path_breach_rate: string;
     maturity_safe_rate: string;
+    active_below_strike_rate: string;
 }
 
 export interface TrackerReviewWindow {
     label: string;
-    overall: TrackerReviewBucket;
-    hero: TrackerReviewBucket;
-    recommended: TrackerReviewBucket;
+    summary: TrackerReviewBucket;
 }
 
 export interface TrackerSummaryResponse {
@@ -471,8 +471,7 @@ export interface TrackerHistoryEntry {
 export interface TrackerReviewResponse {
     generated_at: string;
     overall: TrackerReviewBucket;
-    hero: TrackerReviewBucket;
-    recommended: TrackerReviewBucket;
-    recent_expired_window: TrackerReviewWindow;
-    previous_expired_window: TrackerReviewWindow;
+    rolling_30d: TrackerReviewWindow;
+    rolling_90d: TrackerReviewWindow;
+    matured_3m: TrackerReviewWindow;
 }
