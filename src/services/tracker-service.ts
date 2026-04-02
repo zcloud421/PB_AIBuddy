@@ -3,10 +3,11 @@ import {
     getActiveRecommendationTrackers,
     getRecommendationTrackerHistoryRows,
     getRecommendationTrackerSummaryRows,
+    getShowcaseTrackerSummaryRows,
     type RecommendationTrackerRow,
     updateRecommendationTrackerStatus
 } from '../db/queries/ideas';
-import type { TrackerHistoryEntry, TrackerPosition, TrackerSummaryResponse } from '../types/api';
+import type { TrackerHistoryEntry, TrackerPosition, TrackerSummaryBucket, TrackerSummaryResponse } from '../types/api';
 
 interface MassivePreviousCloseResponse {
     results?: Array<Record<string, unknown>>;
@@ -59,31 +60,37 @@ export async function runPriceTracker(): Promise<void> {
 }
 
 export async function getTrackerSummary(): Promise<TrackerSummaryResponse> {
-    const rows = await getRecommendationTrackerSummaryRows();
-    const totalRecommendations = rows.length;
+    const [rows, showcaseRows] = await Promise.all([
+        getRecommendationTrackerSummaryRows(),
+        getShowcaseTrackerSummaryRows()
+    ]);
+    const overall = summarizeTrackerRows(rows);
     const activeRows = rows.filter((row) => row.status === 'ACTIVE');
     const breachedOpenRows = rows.filter((row) => row.status === 'BREACHED');
     const openRows = [...activeRows, ...breachedOpenRows];
     const activePositions = openRows.map(mapTrackerPosition);
-    const expiredSafe = rows.filter((row) => row.status === 'EXPIRED_SAFE').length;
-    const expiredBreached = rows.filter((row) => row.status === 'EXPIRED_BREACHED').length;
-    const safeDenominator = expiredSafe + expiredBreached;
     const avgSafetyBufferRows = openRows.filter((row) => row.pct_above_strike !== null);
     const avgSafetyBuffer =
         avgSafetyBufferRows.length > 0
             ? avgSafetyBufferRows.reduce((sum, row) => sum + Number(row.pct_above_strike ?? 0), 0) / avgSafetyBufferRows.length
             : 0;
+    const showcaseSummary = {
+        hero: summarizeTrackerRows(showcaseRows.filter((row) => row.placement === 'HERO')),
+        recommended: summarizeTrackerRows(showcaseRows.filter((row) => row.placement === 'RECOMMENDED'))
+    };
 
     return {
-        total_recommendations: totalRecommendations,
-        active: activeRows.length,
-        breached_open: breachedOpenRows.length,
-        expired_safe: expiredSafe,
-        expired_breached: expiredBreached,
-        safe_rate: safeDenominator === 0 ? '-' : `${((expiredSafe / safeDenominator) * 100).toFixed(1)}%`,
+        total_recommendations: overall.total_recommendations,
+        active: overall.active,
+        breached_open: overall.breached_open,
+        expired_safe: overall.expired_safe,
+        expired_breached: overall.expired_breached,
+        safe_rate: overall.safe_rate,
+        breach_rate: overall.breach_rate,
         avg_safety_buffer: `${avgSafetyBuffer.toFixed(1)}%`,
         positions_near_strike: openRows.filter((row) => (row.pct_above_strike ?? Number.POSITIVE_INFINITY) < 10).length,
-        active_positions: activePositions
+        active_positions: activePositions,
+        showcase_summary: showcaseSummary
     };
 }
 
@@ -128,6 +135,24 @@ function mapTrackerPosition(row: RecommendationTrackerRow): TrackerPosition {
         status: row.status,
         days_remaining:
             row.expiry_date !== null ? daysBetween(todayIsoDate(), row.expiry_date) : null
+    };
+}
+
+function summarizeTrackerRows(rows: RecommendationTrackerRow[]): TrackerSummaryBucket {
+    const active = rows.filter((row) => row.status === 'ACTIVE').length;
+    const breachedOpen = rows.filter((row) => row.status === 'BREACHED').length;
+    const expiredSafe = rows.filter((row) => row.status === 'EXPIRED_SAFE').length;
+    const expiredBreached = rows.filter((row) => row.status === 'EXPIRED_BREACHED').length;
+    const expiredTotal = expiredSafe + expiredBreached;
+
+    return {
+        total_recommendations: rows.length,
+        active,
+        breached_open: breachedOpen,
+        expired_safe: expiredSafe,
+        expired_breached: expiredBreached,
+        safe_rate: expiredTotal === 0 ? '-' : `${((expiredSafe / expiredTotal) * 100).toFixed(1)}%`,
+        breach_rate: expiredTotal === 0 ? '-' : `${((expiredBreached / expiredTotal) * 100).toFixed(1)}%`
     };
 }
 

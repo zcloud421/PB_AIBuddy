@@ -199,6 +199,10 @@ export interface RecommendationTrackerRow {
     breached_date: string | null;
 }
 
+export interface ShowcaseTrackerSummaryRow extends RecommendationTrackerRow {
+    placement: 'HERO' | 'RECOMMENDED';
+}
+
 export async function getLatestCompletedRun(): Promise<LatestCompletedRun | null> {
     const result = await pool.query<LatestCompletedRun>(
         `
@@ -1292,6 +1296,44 @@ export async function getRecommendationTrackerSummaryRows(): Promise<Recommendat
             breached_date::text
         FROM recommendation_tracker
         ORDER BY recommendation_date DESC, symbol ASC
+        `
+    );
+
+    return result.rows;
+}
+
+export async function getShowcaseTrackerSummaryRows(): Promise<ShowcaseTrackerSummaryRow[]> {
+    const result = await pool.query<ShowcaseTrackerSummaryRow>(
+        `
+        WITH latest_daily_showcase AS (
+            SELECT DISTINCT ON (run_date, slot_rank)
+                run_date,
+                symbol,
+                placement
+            FROM daily_recommendation_history
+            ORDER BY run_date DESC, slot_rank ASC, created_at DESC
+        )
+        SELECT
+            rt.id,
+            rt.symbol,
+            rt.grade,
+            rt.recommended_strike,
+            rt.recommended_tenor_days,
+            rt.moneyness_pct,
+            rt.entry_price,
+            rt.recommendation_date::text,
+            rt.expiry_date::text,
+            rt.current_price,
+            rt.pct_above_strike,
+            rt.status,
+            rt.last_checked::text,
+            rt.breached_date::text,
+            lds.placement
+        FROM latest_daily_showcase lds
+        INNER JOIN recommendation_tracker rt
+            ON rt.symbol = lds.symbol
+           AND rt.recommendation_date = lds.run_date
+        ORDER BY rt.recommendation_date DESC, lds.placement ASC, rt.symbol ASC
         `
     );
 

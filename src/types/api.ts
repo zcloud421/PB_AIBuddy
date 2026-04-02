@@ -408,6 +408,16 @@ export interface TrackerPosition {
     days_remaining: number | null;
 }
 
+export interface TrackerSummaryBucket {
+    total_recommendations: number;
+    active: number;
+    breached_open: number;
+    expired_safe: number;
+    expired_breached: number;
+    safe_rate: string;
+    breach_rate: string;
+}
+
 export interface TrackerSummaryResponse {
     total_recommendations: number;
     active: number;
@@ -415,9 +425,14 @@ export interface TrackerSummaryResponse {
     expired_safe: number;
     expired_breached: number;
     safe_rate: string;
+    breach_rate: string;
     avg_safety_buffer: string;
     positions_near_strike: number;
     active_positions: TrackerPosition[];
+    showcase_summary: {
+        hero: TrackerSummaryBucket;
+        recommended: TrackerSummaryBucket;
+    };
 }
 
 export interface TrackerHistoryEntry {
