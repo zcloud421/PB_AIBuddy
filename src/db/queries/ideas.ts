@@ -150,6 +150,16 @@ export interface SaveIdeaCandidateInput {
     reasoningText: string;
 }
 
+export interface MissingRiskRewardCandidateRow {
+    run_id: string;
+    symbol: string;
+    iv_rank_score: number;
+    skew_score: number;
+    ref_coupon_pct: number | null;
+    current_price: number | null;
+    recommended_strike: number | null;
+}
+
 export interface UpsertRecommendationTrackerInput {
     symbol: string;
     grade: 'GO' | 'CAUTION';
@@ -712,6 +722,44 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             JSON.stringify(result.newsItems ?? []),
             result.reasoningText
         ]
+    );
+}
+
+export async function getIdeaCandidatesMissingRiskReward(limit = 500): Promise<MissingRiskRewardCandidateRow[]> {
+    const result = await pool.query<MissingRiskRewardCandidateRow>(
+        `
+        SELECT
+            run_id,
+            symbol,
+            iv_rank_score,
+            skew_score,
+            ref_coupon_pct,
+            current_price,
+            recommended_strike
+        FROM idea_candidates
+        WHERE risk_reward_score IS NULL
+        ORDER BY created_at DESC
+        LIMIT $1
+        `,
+        [limit]
+    );
+
+    return result.rows;
+}
+
+export async function updateIdeaCandidateRiskRewardScore(
+    runId: string,
+    symbol: string,
+    riskRewardScore: number
+): Promise<void> {
+    await pool.query(
+        `
+        UPDATE idea_candidates
+        SET risk_reward_score = $3
+        WHERE run_id = $1
+          AND symbol = $2
+        `,
+        [runId, symbol, riskRewardScore]
     );
 }
 
