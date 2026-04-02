@@ -1595,6 +1595,8 @@ async function generateDynamicClientQuestions(
                 ? isWithinDays(item.published_at, 7)
                 : topic.slug === 'hk-market-sentiment'
                     ? isWithinDays(item.published_at, 7)
+                : topic.slug === 'gold-repricing' || topic.slug === 'usd-strength'
+                    ? isWithinDays(item.published_at, 14)
                 : topic.slug === 'middle-east-tensions'
                     ? true
                     : isWithinDays(item.published_at, 7)
