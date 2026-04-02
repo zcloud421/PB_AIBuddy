@@ -923,6 +923,7 @@ export async function ensureRiskFlagEnumValues(): Promise<void> {
         'HIGH_COUPON_OVERRIDE',
         'BEARISH_STRUCTURE',
         'LOWER_HIGH_RISK',
+        'HIGH_BETA_THEME_CAUTION',
         'LOW_COUPON',
         'LOW_LIQUIDITY',
         'NO_APPROVED_TENOR',

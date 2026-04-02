@@ -623,6 +623,8 @@ export function scoreAndGrade(candidate: {
 
     const isCommodityBeta = COMMODITY_BETA_SYMBOLS.has(symbol.toUpperCase());
     const isHighBetaTheme = HIGH_BETA_THEME_SYMBOLS.has(symbol.toUpperCase());
+    const hasBearishStructureFlag = flags.some((flag) => flag.type === 'BEARISH_STRUCTURE');
+    const hasLowerHighRiskFlag = flags.some((flag) => flag.type === 'LOWER_HIGH_RISK');
     const commodityBetaNeedsCaution =
         isCommodityBeta &&
         !hardAvoidTriggered &&
@@ -637,11 +639,13 @@ export function scoreAndGrade(candidate: {
         isHighBetaTheme &&
         !hardAvoidTriggered &&
         (
+            hasBearishStructureFlag ||
+            hasLowerHighRiskFlag ||
             strikeData.iv >= 0.55 ||
-            moneynessPct > 82 ||
+            moneynessPct > 80 ||
             symbolData.pct_from_52w_high > -15 ||
             refCouponPct === null ||
-            refCouponPct < 15
+            refCouponPct < 16
         );
 
     if (commodityBetaNeedsCaution && overallGrade === 'GO') {
@@ -655,7 +659,7 @@ export function scoreAndGrade(candidate: {
     }
 
     if (highBetaThemeNeedsCaution && overallGrade === 'GO') {
-        compositeScore = Math.min(compositeScore, 0.61);
+        compositeScore = Math.min(compositeScore, 0.6);
         overallGrade = 'CAUTION';
         flags.push({
             type: 'HIGH_BETA_THEME_CAUTION',

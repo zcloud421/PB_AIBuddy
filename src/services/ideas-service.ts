@@ -1560,8 +1560,13 @@ function applyRiskRewardOverlay(input: {
         0,
         1
     );
-    const overallGrade =
+    const blendedGrade =
         blendedComposite >= 0.65 ? 'GO' : blendedComposite >= 0.45 ? 'CAUTION' : 'AVOID';
+    const gradeRank = { GO: 0, CAUTION: 1, AVOID: 2 } as const;
+    const overallGrade =
+        gradeRank[input.scoring.overall_grade] > gradeRank[blendedGrade]
+            ? input.scoring.overall_grade
+            : blendedGrade;
 
     return {
         ...input.scoring,
