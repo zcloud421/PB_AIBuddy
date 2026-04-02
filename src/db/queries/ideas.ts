@@ -171,6 +171,17 @@ export interface UpsertRecommendationTrackerInput {
     recommendationDate: string;
 }
 
+export interface SaveDailyRecommendationInput {
+    runId: string;
+    symbol: string;
+    slotRank: number;
+    placement: 'HERO' | 'RECOMMENDED';
+    compositeScore: number | null;
+    recommendedStrike: number | null;
+    recommendedTenorDays: number | null;
+    moneynessPct: number | null;
+}
+
 export interface RecommendationTrackerRow {
     id: number;
     symbol: string;
@@ -938,6 +949,35 @@ export async function ensureDailyBestHistoryTable(): Promise<void> {
     `);
 }
 
+export async function ensureDailyRecommendationHistoryTable(): Promise<void> {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS daily_recommendation_history (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            run_id UUID NOT NULL REFERENCES idea_runs(run_id) ON DELETE CASCADE,
+            symbol TEXT NOT NULL REFERENCES underlyings(symbol) ON UPDATE CASCADE ON DELETE CASCADE,
+            run_date DATE NOT NULL,
+            slot_rank INTEGER NOT NULL CHECK (slot_rank BETWEEN 1 AND 4),
+            placement TEXT NOT NULL CHECK (placement IN ('HERO', 'RECOMMENDED')),
+            composite_score NUMERIC,
+            recommended_strike NUMERIC(18, 6),
+            recommended_tenor_days INTEGER,
+            moneyness_pct NUMERIC(10, 4),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT unique_daily_recommendation_history UNIQUE (run_id, symbol)
+        )
+    `);
+
+    await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_daily_recommendation_history_run_date
+        ON daily_recommendation_history (run_date DESC, slot_rank ASC)
+    `);
+
+    await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_daily_recommendation_history_symbol_run_date
+        ON daily_recommendation_history (symbol, run_date DESC)
+    `);
+}
+
 export async function upsertUnderlyingCompanyName(symbol: string, companyName: string | null): Promise<void> {
     if (!companyName) {
         return;
@@ -1054,6 +1094,74 @@ export async function getRecentDailyBestHistory(limit: number): Promise<Array<{ 
         `SELECT symbol FROM daily_best_history ORDER BY run_date DESC LIMIT $1`,
         [limit]
     );
+    return result.rows;
+}
+
+export async function saveDailyRecommendations(items: SaveDailyRecommendationInput[]): Promise<void> {
+    for (const item of items) {
+        await pool.query(
+            `
+            INSERT INTO daily_recommendation_history (
+                run_id,
+                symbol,
+                run_date,
+                slot_rank,
+                placement,
+                composite_score,
+                recommended_strike,
+                recommended_tenor_days,
+                moneyness_pct
+            )
+            SELECT
+                $1,
+                $2,
+                ir.run_date,
+                $3,
+                $4,
+                $5,
+                $6,
+                $7,
+                $8
+            FROM idea_runs ir
+            WHERE ir.run_id = $1
+            ON CONFLICT (run_id, symbol) DO UPDATE
+            SET slot_rank = EXCLUDED.slot_rank,
+                placement = EXCLUDED.placement,
+                composite_score = EXCLUDED.composite_score,
+                recommended_strike = EXCLUDED.recommended_strike,
+                recommended_tenor_days = EXCLUDED.recommended_tenor_days,
+                moneyness_pct = EXCLUDED.moneyness_pct
+            `,
+            [
+                item.runId,
+                item.symbol,
+                item.slotRank,
+                item.placement,
+                item.compositeScore,
+                item.recommendedStrike,
+                item.recommendedTenorDays,
+                item.moneynessPct
+            ]
+        );
+    }
+}
+
+export async function getRecentDailyRecommendationHistory(limitDays: number): Promise<Array<{ symbol: string }>> {
+    const result = await pool.query<{ symbol: string }>(
+        `
+        SELECT symbol
+        FROM daily_recommendation_history
+        WHERE run_date IN (
+            SELECT DISTINCT run_date
+            FROM daily_recommendation_history
+            ORDER BY run_date DESC
+            LIMIT $1
+        )
+        ORDER BY run_date DESC, slot_rank ASC
+        `,
+        [limitDays]
+    );
+
     return result.rows;
 }
 

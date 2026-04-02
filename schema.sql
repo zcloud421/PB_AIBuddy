@@ -260,6 +260,30 @@ CREATE INDEX idx_daily_best_history_run_date
 CREATE INDEX idx_daily_best_history_symbol_run_date
     ON daily_best_history (symbol, run_date DESC);
 
+CREATE TABLE daily_recommendation_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id UUID NOT NULL REFERENCES idea_runs(run_id) ON DELETE CASCADE,
+    symbol TEXT NOT NULL REFERENCES underlyings(symbol) ON UPDATE CASCADE ON DELETE CASCADE,
+    run_date DATE NOT NULL,
+    slot_rank INTEGER NOT NULL CHECK (slot_rank BETWEEN 1 AND 4),
+    placement TEXT NOT NULL CHECK (placement IN ('HERO', 'RECOMMENDED')),
+    composite_score NUMERIC,
+    recommended_strike NUMERIC(18, 6),
+    recommended_tenor_days INTEGER,
+    moneyness_pct NUMERIC(10, 4),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_daily_recommendation_history UNIQUE (run_id, symbol)
+);
+
+COMMENT ON TABLE daily_recommendation_history IS
+'Daily displayed FCN names on the ideas homepage, including hero card and the next three showcased names.';
+
+CREATE INDEX idx_daily_recommendation_history_run_date
+    ON daily_recommendation_history (run_date DESC, slot_rank ASC);
+
+CREATE INDEX idx_daily_recommendation_history_symbol_run_date
+    ON daily_recommendation_history (symbol, run_date DESC);
+
 CREATE OR REPLACE VIEW v_today_ideas AS
 WITH latest_completed_run AS (
     SELECT ir.run_id, ir.run_date, ir.completed_at

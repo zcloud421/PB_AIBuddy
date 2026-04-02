@@ -7,6 +7,7 @@ import { pool } from '../db/client';
 import {
     createIdeaRun,
     ensureDailyBestHistoryTable,
+    ensureDailyRecommendationHistoryTable,
     ensureEarningsCalendarColumns,
     ensureIdeaCandidatePriceColumns,
     ensureRecommendationTrackerTable,
@@ -16,6 +17,7 @@ import {
     getUnderlyingBySymbol,
     saveIdeaCandidate,
     saveDailyBest,
+    saveDailyRecommendations,
     saveRiskFlags,
     upsertRecommendationTracker,
     upsertUnderlyingCompanyName,
@@ -24,7 +26,7 @@ import {
 } from '../db/queries/ideas';
 import type { ScoringResult } from '../scoring-engine';
 import { runDailyScreener } from '../scoring-engine';
-import { selectDailyBest } from '../services/ideas-service';
+import { selectDailyBest, selectDailyRecommendationShowcase } from '../services/ideas-service';
 import { runPriceTracker } from '../services/tracker-service';
 import { generateNarrative } from '../utils/narrative-generator';
 import { sendDowngradeNotifications } from '../utils/push-notifications';
@@ -64,6 +66,7 @@ async function main(): Promise<void> {
         console.log('[screener] Rate limit mode: standard (3s between symbols)');
 
         await ensureDailyBestHistoryTable();
+        await ensureDailyRecommendationHistoryTable();
         await ensureIdeaCandidatePriceColumns();
         await ensureEarningsCalendarColumns();
         await ensureRiskFlagEnumValues();
@@ -219,6 +222,26 @@ async function main(): Promise<void> {
             await saveDailyBest(dailyBest.symbol, runId, dailyBest.theme);
             console.log(
                 `[screener] Daily best: ${dailyBest.symbol} (adjusted score: ${dailyBest.adjustedScore.toFixed(2)})`
+            );
+        }
+
+        const showcase = selectDailyRecommendationShowcase(results, dailyBest?.symbol ?? null);
+        if (runId && showcase.length > 0) {
+            const persistedRunId = runId;
+            await saveDailyRecommendations(
+                showcase.map((item) => ({
+                    runId: persistedRunId,
+                    symbol: item.symbol,
+                    slotRank: item.slotRank,
+                    placement: item.placement,
+                    compositeScore: item.compositeScore,
+                    recommendedStrike: item.recommendedStrike,
+                    recommendedTenorDays: item.recommendedTenorDays,
+                    moneynessPct: item.moneynessPct
+                }))
+            );
+            console.log(
+                `[screener] Showcase saved: ${showcase.map((item) => `${item.slotRank}:${item.symbol}`).join(', ')}`
             );
         }
 

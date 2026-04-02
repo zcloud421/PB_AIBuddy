@@ -25,6 +25,7 @@ import {
     getRecentPriceHistoryBySymbol,
     getRecentDailyBest,
     getRecentDailyBestHistory,
+    getRecentDailyRecommendationHistory,
     getRiskFlagsByRunAndSymbol,
     getRiskFlagsByRunId,
     getUnderlyingBySymbol,
@@ -347,7 +348,7 @@ export async function selectDailyBest(candidates: ScoringResult[]): Promise<{
         return null;
     }
 
-    const recentHistory = await getRecentDailyBestHistory(5);
+    const recentHistory = await getRecentDailyRecommendationHistory(5);
     let bestChoice: { symbol: string; theme: string; adjustedScore: number } | null = null;
 
     for (const candidate of goCandidates) {
@@ -367,6 +368,65 @@ export async function selectDailyBest(candidates: ScoringResult[]): Promise<{
     }
 
     return bestChoice;
+}
+
+export function selectDailyRecommendationShowcase(
+    candidates: ScoringResult[],
+    dailyBestSymbol: string | null
+): Array<{
+    symbol: string;
+    slotRank: number;
+    placement: 'HERO' | 'RECOMMENDED';
+    compositeScore: number | null;
+    recommendedStrike: number | null;
+    recommendedTenorDays: number | null;
+    moneynessPct: number | null;
+}> {
+    const rankedGo = [...candidates]
+        .filter((candidate) => candidate.overall_grade === 'GO')
+        .sort((left, right) => right.composite_score - left.composite_score);
+
+    const showcase: Array<{
+        symbol: string;
+        slotRank: number;
+        placement: 'HERO' | 'RECOMMENDED';
+        compositeScore: number | null;
+        recommendedStrike: number | null;
+        recommendedTenorDays: number | null;
+        moneynessPct: number | null;
+    }> = [];
+
+    if (dailyBestSymbol) {
+        const hero = rankedGo.find((candidate) => candidate.symbol === dailyBestSymbol);
+        if (hero) {
+            showcase.push({
+                symbol: hero.symbol,
+                slotRank: 1,
+                placement: 'HERO',
+                compositeScore: hero.composite_score,
+                recommendedStrike: hero.recommended_strike,
+                recommendedTenorDays: hero.recommended_tenor_days,
+                moneynessPct: hero.moneyness_pct
+            });
+        }
+    }
+
+    rankedGo
+        .filter((candidate) => candidate.symbol !== dailyBestSymbol)
+        .slice(0, 3)
+        .forEach((candidate, index) => {
+            showcase.push({
+                symbol: candidate.symbol,
+                slotRank: index + 2,
+                placement: 'RECOMMENDED',
+                compositeScore: candidate.composite_score,
+                recommendedStrike: candidate.recommended_strike,
+                recommendedTenorDays: candidate.recommended_tenor_days,
+                moneynessPct: candidate.moneyness_pct
+            });
+        });
+
+    return showcase;
 }
 
 export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse | AsyncScoringAcceptedResponse> {
@@ -1924,25 +1984,21 @@ function dedupeSentences(value: string): string {
 }
 
 function calculateFreshnessPenalty(symbol: string, history: Array<{ symbol: string }>): number {
-    let streak = 0;
-    for (const entry of history) {
-        if (entry.symbol === symbol) {
-            streak += 1;
-        } else {
-            break;
-        }
-    }
+    const appearances = history.filter((entry) => entry.symbol === symbol).length;
 
-    if (streak <= 1) {
+    if (appearances <= 1) {
         return 0;
     }
-    if (streak === 2) {
-        return 0.05;
+    if (appearances === 2) {
+        return 0.04;
     }
-    if (streak === 3) {
-        return 0.10;
+    if (appearances === 3) {
+        return 0.08;
     }
-    return 0.20;
+    if (appearances === 4) {
+        return 0.12;
+    }
+    return 0.16;
 }
 
 function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>) {
