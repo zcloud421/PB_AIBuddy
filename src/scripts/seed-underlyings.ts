@@ -14,7 +14,13 @@ const UNDERLYINGS: SeedUnderlying[] = [
     { symbol: 'TSM', exchange: 'NYSE', sector: 'Technology', currency: 'USD', themes: ['AI Infrastructure', 'Semiconductors'], tier: 1, active: true },
     { symbol: 'AVGO', exchange: 'NASDAQ', sector: 'Technology', currency: 'USD', themes: ['AI Infrastructure', 'Semiconductors'], tier: 2, active: true },
     { symbol: 'AMD', exchange: 'NASDAQ', sector: 'Technology', currency: 'USD', themes: ['AI Infrastructure', 'Semiconductors'], tier: 1, active: true },
+    { symbol: 'AMAT', exchange: 'NASDAQ', sector: 'Technology', currency: 'USD', themes: ['AI Infrastructure', 'Semiconductors'], tier: 2, active: true },
+    { symbol: 'ANET', exchange: 'NYSE', sector: 'Technology', currency: 'USD', themes: ['AI Infrastructure', 'Networking'], tier: 2, active: true },
     { symbol: 'ORCL', exchange: 'NYSE', sector: 'Technology', currency: 'USD', themes: ['AI Infrastructure'], tier: 2, active: true },
+    { symbol: 'QCOM', exchange: 'NASDAQ', sector: 'Technology', currency: 'USD', themes: ['Semiconductors', 'Connectivity'], tier: 2, active: true },
+    { symbol: 'TXN', exchange: 'NASDAQ', sector: 'Technology', currency: 'USD', themes: ['Semiconductors', 'Industrial Tech'], tier: 2, active: true },
+    { symbol: 'MRVL', exchange: 'NASDAQ', sector: 'Technology', currency: 'USD', themes: ['AI Infrastructure', 'Semiconductors'], tier: 2, active: true },
+    { symbol: 'LRCX', exchange: 'NASDAQ', sector: 'Technology', currency: 'USD', themes: ['AI Infrastructure', 'Semiconductors'], tier: 2, active: true },
     { symbol: 'AMZN', exchange: 'NASDAQ', sector: 'Consumer Discretionary', currency: 'USD', themes: ['Mag7'], tier: 1, active: true },
     { symbol: 'MSFT', exchange: 'NASDAQ', sector: 'Technology', currency: 'USD', themes: ['Mag7'], tier: 1, active: true },
     { symbol: 'META', exchange: 'NASDAQ', sector: 'Technology', currency: 'USD', themes: ['Mag7'], tier: 1, active: true },
@@ -25,11 +31,16 @@ const UNDERLYINGS: SeedUnderlying[] = [
     { symbol: 'NFLX', exchange: 'NASDAQ', sector: 'Communication', currency: 'USD', themes: ['Consumer Tech'], tier: 1, active: true },
     { symbol: 'LITE', exchange: 'NASDAQ', sector: 'Technology', currency: 'USD', themes: ['AI Infrastructure'], tier: 2, active: true },
     { symbol: 'VRT', exchange: 'NYSE', sector: 'Industrials', currency: 'USD', themes: ['AI Infrastructure'], tier: 2, active: true },
+    { symbol: 'GEV', exchange: 'NYSE', sector: 'Industrials', currency: 'USD', themes: ['Power Infrastructure', 'Grid'], tier: 2, active: true },
+    { symbol: 'VST', exchange: 'NYSE', sector: 'Utilities', currency: 'USD', themes: ['Power Demand', 'Energy'], tier: 2, active: true },
     { symbol: 'AXP', exchange: 'NYSE', sector: 'Financials', currency: 'USD', themes: ['Payments'], tier: 1, active: false },
     { symbol: 'HOOD', exchange: 'NASDAQ', sector: 'Financials', currency: 'USD', themes: ['High Volatility', 'Crypto'], tier: 2, active: true },
+    { symbol: 'FUTU', exchange: 'NASDAQ', sector: 'Financials', currency: 'USD', themes: ['China Brokerage', 'High Volatility'], tier: 2, active: true },
     { symbol: 'BABA', exchange: 'NYSE', sector: 'Consumer Discretionary', currency: 'USD', themes: ['China Tech'], tier: 1, active: true },
     { symbol: 'PDD', exchange: 'NASDAQ', sector: 'Consumer Discretionary', currency: 'USD', themes: ['China Tech'], tier: 2, active: true },
+    { symbol: 'JD', exchange: 'NASDAQ', sector: 'Consumer Discretionary', currency: 'USD', themes: ['China Tech', 'E-Commerce'], tier: 2, active: true },
     { symbol: 'BIDU', exchange: 'NASDAQ', sector: 'Technology', currency: 'USD', themes: ['China Tech'], tier: 2, active: true },
+    { symbol: 'NTES', exchange: 'NASDAQ', sector: 'Communication', currency: 'USD', themes: ['China Tech', 'Gaming'], tier: 2, active: true },
     { symbol: 'COIN', exchange: 'NASDAQ', sector: 'Financials', currency: 'USD', themes: ['Crypto', 'High Volatility'], tier: 1, active: true },
     { symbol: 'MSTR', exchange: 'NASDAQ', sector: 'Technology', currency: 'USD', themes: ['Crypto', 'High Volatility'], tier: 2, active: true },
     { symbol: 'CRCL', exchange: 'NYSE', sector: 'Technology', currency: 'USD', themes: ['Crypto', 'High Volatility'], tier: 2, active: true },
@@ -40,7 +51,8 @@ const UNDERLYINGS: SeedUnderlying[] = [
     { symbol: 'NEM', exchange: 'NYSE', sector: 'Materials', currency: 'USD', themes: ['Gold'], tier: 2, active: false },
     { symbol: 'CEG', exchange: 'NASDAQ', sector: 'Energy', currency: 'USD', themes: ['Nuclear', 'Energy'], tier: 2, active: false },
     { symbol: 'UNH', exchange: 'NYSE', sector: 'Healthcare', currency: 'USD', themes: ['Defensive'], tier: 1, active: true },
-    { symbol: 'INTC', exchange: 'NASDAQ', sector: 'Technology', currency: 'USD', themes: ['Semiconductors'], tier: 1, active: true }
+    { symbol: 'INTC', exchange: 'NASDAQ', sector: 'Technology', currency: 'USD', themes: ['Semiconductors'], tier: 1, active: true },
+    { symbol: 'LI', exchange: 'NASDAQ', sector: 'Consumer Discretionary', currency: 'USD', themes: ['China EV', 'High Volatility'], tier: 2, active: true }
 ];
 
 async function main(): Promise<void> {
