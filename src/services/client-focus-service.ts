@@ -4396,7 +4396,9 @@ ${newsSection}
 
 async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFocusDetailResponse> {
     const cached = focusCache.get(topic.slug);
-    if (cached && cached.expiresAt > Date.now()) {
+    const cachedHasQuestionCategories = Array.isArray(cached?.value.client_questions)
+        && cached.value.client_questions.some((item) => typeof item?.category === 'string' && item.category.trim().length > 0);
+    if (cached && cached.expiresAt > Date.now() && cachedHasQuestionCategories) {
         return cached.value;
     }
 
