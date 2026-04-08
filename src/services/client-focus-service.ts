@@ -3812,6 +3812,7 @@ function buildMarketStateSummary(
     const ndx = indices.find((item) => item.code === 'NDX');
     const hsi = indices.find((item) => item.code === 'HSI');
     const hstech = indices.find((item) => item.code === 'HSTECH');
+    const oil = indices.find((item) => item.code === 'OIL');
 
     const goldUp = (gold?.change_pct ?? 0) >= 0.5;
     const goldDown = (gold?.change_pct ?? 0) <= -0.5;
@@ -3821,6 +3822,15 @@ function buildMarketStateSummary(
     const usRiskOff = (spx?.change_pct ?? 0) <= -0.6 || (ndx?.change_pct ?? 0) <= -0.9;
     const hkWeak = (hsi?.change_pct ?? 0) <= -0.6 || (hstech?.change_pct ?? 0) <= -1;
     const hkStrong = (hsi?.change_pct ?? 0) >= 0.6 || (hstech?.change_pct ?? 0) >= 1;
+    const oilDown = (oil?.change_pct ?? 0) <= -3;
+
+    if (oilDown && (usRiskOff || hkWeak)) {
+        return '原油显著回落，能源板块承压；叠加风险资产走弱，市场情绪偏谨慎。';
+    }
+
+    if (oilDown && goldUp) {
+        return '原油回落削弱通胀预期，黄金走强更多反映避险需求而非通胀逻辑。';
+    }
 
     if (goldUp && dxyDown && (usRiskOn || hkStrong)) {
         return '风险偏好有所修复：黄金仍强，美元回落，美股与港股开始重新计入弹性。';
@@ -3903,12 +3913,14 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
         return cached.value;
     }
 
-    const [hkSnapshot, goldSnapshot, usdCnhSnapshot, dxySnapshot, usIndices] = await Promise.all([
+    const [hkSnapshot, goldSnapshot, usdCnhSnapshot, dxySnapshot, usIndices, wtiSnapshot, tnxSnapshot] = await Promise.all([
         fetchHongKongMarketSnapshot(),
         fetchYahooChartSeries('GC=F', { code: 'GOLD', name: '黄金' }),
         fetchForexSnapshot('USDCNH', '美元人民币'),
         fetchYahooChartSeries('DX-Y.NYB', { code: 'DXY', name: '美元指数' }),
-        fetchUsMarketStateIndices()
+        fetchUsMarketStateIndices(),
+        fetchYahooChartSeries('CL=F', { code: 'OIL', name: 'WTI原油' }),
+        fetchYahooChartSeries('^TNX', { code: 'TNX', name: '美债10Y' }),
     ]);
 
     const indices = [
@@ -3927,6 +3939,22 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
                 name: dxySnapshot.snapshot.name,
                 latest: dxySnapshot.snapshot.latest,
                 change_pct: dxySnapshot.snapshot.change_pct
+            }
+            : null,
+        wtiSnapshot.snapshot
+            ? {
+                code: wtiSnapshot.snapshot.code,
+                name: wtiSnapshot.snapshot.name,
+                latest: wtiSnapshot.snapshot.latest,
+                change_pct: wtiSnapshot.snapshot.change_pct
+            }
+            : null,
+        tnxSnapshot.snapshot
+            ? {
+                code: tnxSnapshot.snapshot.code,
+                name: tnxSnapshot.snapshot.name,
+                latest: tnxSnapshot.snapshot.latest,
+                change_pct: tnxSnapshot.snapshot.change_pct
             }
             : null,
         usdCnhSnapshot
