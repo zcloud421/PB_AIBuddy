@@ -310,45 +310,62 @@ function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-interface PolymarketPageMarket {
+interface PolymarketGammaMarket {
     id: string;
+    conditionId?: string;
     question: string;
     groupItemTitle: string;
-    outcomePrices: string[];
-    clobTokenIds: string[];
+    outcomePrices: string[] | string;
+    clobTokenIds: string[] | string;
 }
 
-function decodeHtmlEntities(value: string): string {
-    return value
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&#x27;/g, "'")
-        .replace(/&quot;/g, '"')
-        .replace(/&amp;/g, '&');
-}
-
-function extractPolymarketPageMarkets(html: string): PolymarketPageMarket[] {
-    const pattern = /\{"id":"(?<id>\d+)".*?"question":"(?<question>.*?)".*?"outcomes":\[(?<outcomes>.*?)\].*?"outcomePrices":\[(?<prices>.*?)\].*?"groupItemTitle":"(?<title>.*?)".*?"clobTokenIds":\[(?<tokens>.*?)\]/gs;
-    const markets: PolymarketPageMarket[] = [];
-
-    for (const match of html.matchAll(pattern)) {
-        const groups = match.groups;
-        if (!groups) {
-            continue;
-        }
-
-        const outcomePrices = Array.from(groups.prices.matchAll(/"([^"]+)"/g)).map((item) => item[1]);
-        const clobTokenIds = Array.from(groups.tokens.matchAll(/"([^"]+)"/g)).map((item) => item[1]);
-
-        markets.push({
-            id: groups.id,
-            question: decodeHtmlEntities(groups.question),
-            groupItemTitle: decodeHtmlEntities(groups.title),
-            outcomePrices,
-            clobTokenIds
-        });
+function normalizePolymarketStringArray(value: string[] | string | undefined): string[] {
+    if (Array.isArray(value)) {
+        return value.map((item) => String(item));
     }
 
-    return markets;
+    if (typeof value !== 'string' || value.trim().length === 0) {
+        return [];
+    }
+
+    try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+            return parsed.map((item) => String(item));
+        }
+    } catch {
+        return [];
+    }
+
+    return [];
+}
+
+function getPolymarketSlug(pageUrl: string): string {
+    return pageUrl.replace(/\/+$/, '').split('/').pop() ?? pageUrl;
+}
+
+async function fetchPolymarketEventMarkets(pageUrl: string): Promise<PolymarketGammaMarket[]> {
+    const slug = getPolymarketSlug(pageUrl);
+    const response = await axios.get<PolymarketGammaMarket[]>(
+        'https://gamma-api.polymarket.com/events',
+        {
+            params: { slug },
+            headers: {
+                'User-Agent': 'Josan/1.0',
+                Accept: 'application/json'
+            },
+            timeout: 15000
+        }
+    );
+
+    const event = Array.isArray(response.data) ? response.data[0] : null;
+    const rawMarkets = event && 'markets' in event ? (event as { markets?: PolymarketGammaMarket[] }).markets : null;
+
+    if (!Array.isArray(rawMarkets) || rawMarkets.length === 0) {
+        throw new Error(`No Polymarket event markets found for slug ${slug}`);
+    }
+
+    return rawMarkets;
 }
 
 async function fetchPolymarketHistoryChunk(
@@ -415,7 +432,7 @@ async function fetchPolymarketHistory(yesTokenId: string): Promise<Array<{ t: nu
 }
 
 async function fetchPolymarketOutcome(
-    pageMarkets: PolymarketPageMarket[],
+    pageMarkets: PolymarketGammaMarket[],
     outcome: { outcomeLabel: string; displayLabel: string }
 ) {
     const targetMarket = pageMarkets.find((pageMarket) => pageMarket.groupItemTitle === outcome.outcomeLabel);
@@ -423,8 +440,10 @@ async function fetchPolymarketOutcome(
         throw new Error(`Target market not found for ${outcome.outcomeLabel}`);
     }
 
-    const yesProbability = Number(targetMarket.outcomePrices[0]);
-    const yesTokenId = targetMarket.clobTokenIds[0];
+    const outcomePrices = normalizePolymarketStringArray(targetMarket.outcomePrices);
+    const clobTokenIds = normalizePolymarketStringArray(targetMarket.clobTokenIds);
+    const yesProbability = Number(outcomePrices[0]);
+    const yesTokenId = clobTokenIds[0];
     if (!Number.isFinite(yesProbability) || !yesTokenId) {
         throw new Error('Invalid Polymarket market metadata');
     }
@@ -437,7 +456,7 @@ async function fetchPolymarketOutcome(
     const latestProbability = normalizedHistory[normalizedHistory.length - 1]?.p;
 
     return {
-        condition_id: targetMarket.id,
+        condition_id: targetMarket.conditionId ?? targetMarket.id,
         display_label: outcome.displayLabel,
         probability: Number.isFinite(latestProbability) ? latestProbability : Math.round(yesProbability * 1000) / 10,
         history: normalizedHistory
@@ -447,24 +466,13 @@ async function fetchPolymarketOutcome(
 async function fetchPolymarketMarket(
     market: (typeof MIDDLE_EAST_POLYMARKET_MARKETS)[number]
 ): Promise<ClientFocusPolymarketMarket> {
-    const response = await axios.get<string>(
-        market.pageUrl,
-        {
-            headers: {
-                'User-Agent': 'Josan/1.0',
-                Accept: 'text/html,application/xhtml+xml'
-            },
-            timeout: 15000
-        }
-    );
-
-    const pageMarkets = extractPolymarketPageMarkets(response.data);
+    const pageMarkets = await fetchPolymarketEventMarkets(market.pageUrl);
     const outcomes = await Promise.all(
         market.outcomes.map((outcome) => fetchPolymarketOutcome(pageMarkets, outcome))
     );
 
     return {
-        condition_id: market.pageUrl,
+        condition_id: getPolymarketSlug(market.pageUrl),
         label: market.label,
         outcomes
     };
