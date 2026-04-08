@@ -112,6 +112,12 @@ export interface ClientFocusQuestion {
     category?: string;
 }
 
+export interface ClientFocusDailyVerdict {
+    risk_appetite: '偏谨慎' | '中性' | '偏积极';
+    fcn_impact: string;
+    key_change: string;
+}
+
 export interface ClientFocusUpdate {
     time: string;
     date?: string;
@@ -168,6 +174,7 @@ export interface ClientFocusDetailResponse {
     focus_secondary_price_snapshot?: ClientFocusPriceSnapshot | null;
     focus_secondary_price_history?: ClientFocusPriceHistoryPoint[] | null;
     gold_drivers?: ClientFocusDriverItem[] | null;
+    daily_verdict?: ClientFocusDailyVerdict | null;
     disclaimer: string;
 }
 
