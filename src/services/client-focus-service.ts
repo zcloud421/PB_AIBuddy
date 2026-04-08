@@ -1942,16 +1942,17 @@ ${newsList}
             return null;
         }
 
-        const allowedCategories = new Set(FOCUS_QUESTION_CATEGORIES[topic.slug] ?? []);
+        const categoryPool = FOCUS_QUESTION_CATEGORIES[topic.slug] ?? [];
+        const allowedCategories = new Set(categoryPool);
         const sanitized: Array<{ question: string; answer: string; category?: string }> = parsed
-            .map((item) => {
+            .map((item, index) => {
                 const question = item.question?.trim();
                 const answer = item.answer?.trim();
                 const rawCategory = item.category?.trim();
                 const category =
                     rawCategory && (allowedCategories.size === 0 || allowedCategories.has(rawCategory))
                         ? rawCategory
-                        : '全部';
+                        : categoryPool[index % Math.max(categoryPool.length, 1)] ?? '全部';
 
                 if (!question || !answer) {
                     return null;
@@ -1973,7 +1974,7 @@ ${newsList}
             return {
                 question: item.question,
                 answer: item.answer,
-                category: item.category ?? '全部'
+                category: item.category ?? categoryPool[0] ?? '全部'
             };
         });
     } catch {
