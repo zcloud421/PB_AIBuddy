@@ -1,4 +1,5 @@
 import type {
+    ClientFocusDailyVerdict,
     ClientFocusDriverItem,
     ClientFocusDetailResponse,
     ClientFocusHibor,
@@ -1744,7 +1745,7 @@ async function generateDynamicClientQuestions(
 请生成 6 到 8 个问答，覆盖以下资产类别分类，每个问题必须包含 category 字段：
 ${(FOCUS_QUESTION_CATEGORIES[topic.slug] ?? []).join('、')}
 
-每个分类至少生成 1 个问题。
+每个分类至少生成 1 个问题，最多生成 2 个问题。问题角度要尽量分散，避免同一分类内出现重复视角。
 
 返回 JSON 数组格式：
 [
@@ -1975,8 +1976,19 @@ ${newsList}
             })
             .filter((item): item is NonNullable<typeof item> => item !== null);
 
-        if (sanitized.length > 0) {
-            return sanitized;
+        const categoryCount = new Map<string, number>();
+        const capped = sanitized.filter((item) => {
+            const cat = item.category ?? '全部';
+            const count = categoryCount.get(cat) ?? 0;
+            if (count >= 2) {
+                return false;
+            }
+            categoryCount.set(cat, count + 1);
+            return true;
+        });
+
+        if (capped.length > 0) {
+            return capped;
         }
 
         return topic.clientQuestions.map((item) => {
@@ -1988,6 +2000,92 @@ ${newsList}
         });
     } catch {
         console.warn(`[focus-client-questions] ${topic.slug}: exception`);
+        return null;
+    }
+}
+
+async function generateDailyVerdict(
+    topic: FocusTopicConfig,
+    newsItems: NewsItem[]
+): Promise<ClientFocusDailyVerdict | null> {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) {
+        return null;
+    }
+
+    const contextItems = newsItems
+        .slice()
+        .sort((a, b) => new Date(b.published_at).getTime() - new Date(a.published_at).getTime())
+        .slice(0, 8);
+
+    if (contextItems.length === 0) {
+        return null;
+    }
+
+    const newsList = contextItems
+        .map((item, index) => `${index + 1}. ${formatClockTime(item.published_at)} | ${item.title}`)
+        .join('\n');
+
+    const prompt = `
+你是香港私人银行 IC，正在为 RM 准备今天的客户沟通结论。
+主题：${topic.title}
+
+今日相关新闻：
+${newsList}
+
+请生成一个今日结论，包含三个字段：
+1. risk_appetite：今日风险偏好方向，只能是以下三个值之一："偏谨慎"、"中性"、"偏积极"
+2. fcn_impact：这个话题对今日 FCN 推荐的影响，一句话，15-25字，不要给投资建议，只描述影响方向
+3. key_change：今日最重要的一个新变化，一句话，15-25字，客观描述事实
+
+返回纯 JSON，格式：
+{"risk_appetite": "...", "fcn_impact": "...", "key_change": "..."}
+`.trim();
+
+    try {
+        const response = await fetch('https://api.deepseek.com/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: 'deepseek-chat',
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.3,
+                response_format: { type: 'json_object' }
+            })
+        });
+
+        if (!response.ok) {
+            return null;
+        }
+
+        const payload = (await response.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+        };
+        const raw = payload.choices?.[0]?.message?.content;
+        if (!raw) {
+            return null;
+        }
+
+        const parsed = JSON.parse(raw) as Partial<ClientFocusDailyVerdict>;
+        const validAppetites = ['偏谨慎', '中性', '偏积极'] as const;
+        if (
+            !parsed.risk_appetite
+            || !validAppetites.includes(parsed.risk_appetite as (typeof validAppetites)[number])
+            || !parsed.fcn_impact
+            || !parsed.key_change
+        ) {
+            return null;
+        }
+
+        return {
+            risk_appetite: parsed.risk_appetite as ClientFocusDailyVerdict['risk_appetite'],
+            fcn_impact: parsed.fcn_impact.trim(),
+            key_change: parsed.key_change.trim()
+        };
+    } catch {
         return null;
     }
 }
@@ -4447,6 +4545,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
                 ? await generatePrivateCreditWhatChanged(newsItems)
                 : [];
     const dynamicClientQuestions = await generateDynamicClientQuestions(topic, newsItems);
+    const dailyVerdict = await generateDailyVerdict(topic, newsItems);
     const questionCategoryPool = FOCUS_QUESTION_CATEGORIES[topic.slug] ?? [];
     const clientQuestions =
         dynamicClientQuestions
@@ -4490,6 +4589,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         focus_secondary_price_snapshot: focusSecondaryPriceSnapshot ?? undefined,
         focus_secondary_price_history: focusSecondaryPriceHistory ?? undefined,
         gold_drivers: topic.slug === 'gold-repricing' ? buildGoldDrivers(newsItems) : undefined,
+        daily_verdict: dailyVerdict ?? null,
         disclaimer: DEFAULT_DISCLAIMER
     };
 
