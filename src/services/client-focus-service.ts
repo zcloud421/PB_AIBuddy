@@ -1926,41 +1926,43 @@ ${newsList}
         answer: string,
         fallbackCategory: string
     ): string {
-        const text = `${question} ${answer}`.toLowerCase();
+        const questionText = question.toLowerCase();
+        const fullText = `${question} ${answer}`.toLowerCase();
 
         if (slug === 'middle-east-tensions') {
+            // Match debt/rate keywords on question only to avoid false positives from answer context
             if (
-                text.includes('fed')
-                || text.includes('降息')
-                || text.includes('加息')
-                || text.includes('点阵图')
-                || text.includes('债券')
-                || text.includes('收益率')
-                || text.includes('利率')
-                || text.includes('通胀预期')
+                questionText.includes('降息')
+                || questionText.includes('加息')
+                || questionText.includes('债券')
+                || questionText.includes('收益率')
+                || questionText.includes('利率')
+                || questionText.includes('fed')
+                || questionText.includes('美联储')
+                || questionText.includes('通胀')
             ) {
                 return '债券';
             }
             if (
-                text.includes('原油')
-                || text.includes('油价')
-                || text.includes('wti')
-                || text.includes('能源')
-                || text.includes('航运')
-                || text.includes('霍尔木兹')
+                fullText.includes('原油')
+                || fullText.includes('油价')
+                || fullText.includes('wti')
+                || fullText.includes('能源')
+                || fullText.includes('航运')
+                || fullText.includes('霍尔木兹')
             ) {
                 return '原油';
             }
-            if (text.includes('黄金') || text.includes('金价')) {
+            if (fullText.includes('黄金') || fullText.includes('金价')) {
                 return '黄金';
             }
             if (
-                text.includes('股票')
-                || text.includes('fcn')
-                || text.includes('港股')
-                || text.includes('风险资产')
-                || text.includes('估值')
-                || text.includes('企业成本')
+                fullText.includes('股票')
+                || fullText.includes('fcn')
+                || fullText.includes('港股')
+                || fullText.includes('风险资产')
+                || fullText.includes('估值')
+                || fullText.includes('企业成本')
             ) {
                 return '股票/FCN';
             }
