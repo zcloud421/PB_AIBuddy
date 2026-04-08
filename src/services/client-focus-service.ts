@@ -275,8 +275,8 @@ interface EastMoneySouthboundRow {
 
 const MIDDLE_EAST_POLYMARKET_MARKETS = [
     {
-        pageUrl: 'https://polymarket.com/event/us-x-iran-ceasefire-by',
-        label: '美伊4月底前直接谈判',
+        pageUrl: 'https://polymarket.com/event/strait-of-hormuz-traffic-returns-to-normal-by-april-30',
+        label: '霍尔木兹海峡何时恢复通行',
         outcomes: [
             { outcomeLabel: 'April 30', displayLabel: '4月底' },
             { outcomeLabel: 'May 31', displayLabel: '5月底' },
@@ -284,11 +284,12 @@ const MIDDLE_EAST_POLYMARKET_MARKETS = [
         ]
     },
     {
-        pageUrl: 'https://polymarket.com/event/us-forces-enter-iran-by',
-        label: '美军何时进入伊朗',
+        pageUrl: 'https://polymarket.com/event/trump-announces-end-of-military-operations-against-iran-by',
+        label: '特朗普何时宣布结束军事行动',
         outcomes: [
             { outcomeLabel: 'April 30', displayLabel: '4月底' },
-            { outcomeLabel: 'December 31', displayLabel: '年底' }
+            { outcomeLabel: 'May 31', displayLabel: '5月底' },
+            { outcomeLabel: 'June 30', displayLabel: '6月底' }
         ]
     },
     {
