@@ -275,11 +275,11 @@ interface EastMoneySouthboundRow {
 
 const MIDDLE_EAST_POLYMARKET_MARKETS = [
     {
-        pageUrl: 'https://polymarket.com/event/strait-of-hormuz-traffic-returns-to-normal-by-april-30',
-        label: '霍尔木兹海峡何时恢复通行',
+        pageUrl: 'https://polymarket.com/event/iran-x-israelus-conflict-ends-by',
+        label: '伊朗与以色列/美国冲突何时结束',
         outcomes: [
             { outcomeLabel: 'April 30', displayLabel: '4月底' },
-            { outcomeLabel: 'May 31', displayLabel: '5月底' },
+            { outcomeLabel: 'May 15', displayLabel: '5月中' },
             { outcomeLabel: 'June 30', displayLabel: '6月底' }
         ]
     },
