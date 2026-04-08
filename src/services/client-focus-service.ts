@@ -1920,6 +1920,55 @@ ${newsList}
 
     const userPrompt = `${rawUserPrompt}\n\n${categoryInstructions}`;
 
+    function inferQuestionCategory(
+        slug: string,
+        question: string,
+        answer: string,
+        fallbackCategory: string
+    ): string {
+        const text = `${question} ${answer}`.toLowerCase();
+
+        if (slug === 'middle-east-tensions') {
+            if (
+                text.includes('fed')
+                || text.includes('降息')
+                || text.includes('加息')
+                || text.includes('点阵图')
+                || text.includes('债券')
+                || text.includes('收益率')
+                || text.includes('利率')
+                || text.includes('通胀预期')
+            ) {
+                return '债券';
+            }
+            if (
+                text.includes('原油')
+                || text.includes('油价')
+                || text.includes('wti')
+                || text.includes('能源')
+                || text.includes('航运')
+                || text.includes('霍尔木兹')
+            ) {
+                return '原油';
+            }
+            if (text.includes('黄金') || text.includes('金价')) {
+                return '黄金';
+            }
+            if (
+                text.includes('股票')
+                || text.includes('fcn')
+                || text.includes('港股')
+                || text.includes('风险资产')
+                || text.includes('估值')
+                || text.includes('企业成本')
+            ) {
+                return '股票/FCN';
+            }
+        }
+
+        return fallbackCategory;
+    }
+
     try {
         const response = await fetch(`${process.env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL}/chat/completions`, {
             method: 'POST',
@@ -1959,7 +2008,7 @@ ${newsList}
                 const question = item.question?.trim();
                 const answer = item.answer?.trim();
                 const rawCategory = item.category?.trim();
-                const category =
+                const baseCategory =
                     rawCategory && (allowedCategories.size === 0 || allowedCategories.has(rawCategory))
                         ? rawCategory
                         : categoryPool[index % Math.max(categoryPool.length, 1)] ?? '全部';
@@ -1967,6 +2016,8 @@ ${newsList}
                 if (!question || !answer) {
                     return null;
                 }
+
+                const category = inferQuestionCategory(topic.slug, question, answer, baseCategory);
 
                 return {
                     question,
@@ -1992,10 +2043,11 @@ ${newsList}
         }
 
         return topic.clientQuestions.map((item) => {
+            const fallbackCategory = item.category ?? categoryPool[0] ?? '全部';
             return {
                 question: item.question,
                 answer: item.answer,
-                category: item.category ?? categoryPool[0] ?? '全部'
+                category: inferQuestionCategory(topic.slug, item.question, item.answer, fallbackCategory)
             };
         });
     } catch {
