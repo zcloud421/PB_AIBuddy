@@ -424,7 +424,7 @@ export function approveStrikes(
     return tenorData.strikes
         .filter((strike) => Math.abs(strike.delta) >= config.minAbsDelta && Math.abs(strike.delta) <= config.maxAbsDelta)
         .filter((strike) => (strike.strike / symbolData.current_price) * 100 <= config.maxMoneynessPct)
-        .filter((strike) => strike.open_interest >= 100)
+        .filter((strike) => strike.open_interest >= 10)
         .sort((a, b) => {
             const refCouponPctA = calculateRefCouponPct(a, tenorData.tenor_days);
             const refCouponPctB = calculateRefCouponPct(b, tenorData.tenor_days);
@@ -597,7 +597,7 @@ export function scoreAndGrade(candidate: {
             refCouponPct !== null &&
             refCouponPct >= 20 &&
             moneynessThresholdMet &&
-            strikeData.open_interest >= 100 &&
+        strikeData.open_interest >= 10 &&
             daysToEarnings !== null &&
             daysToEarnings > 3 &&
             (candidate.sentimentProxy ?? 0) >= 0.35;
@@ -721,7 +721,7 @@ function shouldAvoidResult(input: {
         return true;
     }
 
-    if (input.strikeData.open_interest < 100) {
+    if (input.strikeData.open_interest < 10) {
         return true;
     }
 
