@@ -36,6 +36,13 @@ const POLYMARKET_HISTORY_WINDOW_DAYS = 30;
 const POLYMARKET_HISTORY_CHUNK_DAYS = 14;
 const WHAT_CHANGED_WINDOW_HOURS = 72;
 const PRIVATE_CREDIT_WHAT_CHANGED_WINDOW_DAYS = 7;
+const FOCUS_QUESTION_CATEGORIES: Record<string, string[]> = {
+    'middle-east-tensions': ['股票/FCN', '黄金', '原油', '债券'],
+    'gold-repricing': ['黄金', '美元', '股票/FCN'],
+    'hk-market-sentiment': ['港股', '科技股', '南向资金'],
+    'usd-strength': ['美元', '债券', '新兴市场'],
+    'private-credit-stress': ['债券/信贷', '股票/FCN', '房地产'],
+};
 
 interface FocusTopicConfig {
     slug: string;
@@ -1575,7 +1582,7 @@ ${newsList}
 async function generateDynamicClientQuestions(
     topic: FocusTopicConfig,
     newsItems: NewsItem[]
-): Promise<Array<{ question: string; answer: string }> | null> {
+): Promise<Array<{ question: string; answer: string; category?: string }> | null> {
     if (
         topic.slug !== 'middle-east-tensions'
         && topic.slug !== 'private-credit-stress'
@@ -1724,10 +1731,22 @@ async function generateDynamicClientQuestions(
 - 不要使用“市场承压”“风险升温”等空泛表述
 - 不要直接给投资建议
 `.trim();
-    const userPrompt = topic.slug === 'middle-east-tensions'
+    const categoryInstructions = `
+请生成 6 到 8 个问答，覆盖以下资产类别分类，每个问题必须包含 category 字段：
+${(FOCUS_QUESTION_CATEGORIES[topic.slug] ?? []).join('、')}
+
+每个分类至少生成 1 个问题。
+
+返回 JSON 数组格式：
+[
+  { "question": "...", "answer": "...", "category": "黄金" }
+]
+`.trim();
+
+    const rawUserPrompt = topic.slug === 'middle-east-tensions'
         ? `
 以下是过去48小时的中东冲突相关新闻。请基于这些最新信息，
-为以下3个固定问题重写回答，供香港私人银行 RM/IC 与客户沟通时使用。
+为以下固定问题与市场框架延伸出 6 到 8 个客户常问问答，供香港私人银行 RM/IC 与客户沟通时使用。
 
 ${questionsList}
 
@@ -1752,15 +1771,12 @@ ${newsList}
 - 不要使用“局势升级”“引发不确定性”等空泛表述
 - 不要给具体投资建议
 
-输出格式（JSON数组）：
-[{"question":"原问题文字","answer":"重写后的答案"}]
-
 只输出JSON，不要解释。
 `.trim()
         : topic.slug === 'private-credit-stress'
             ? `
 以下是过去7天的私募信贷相关新闻。请基于这些最新信息，
-为以下固定问题重写回答，供香港私人银行 RM/IC 与客户沟通时使用。
+为以下固定问题与市场框架延伸出 6 到 8 个客户常问问答，供香港私人银行 RM/IC 与客户沟通时使用。
 
 ${questionsList}
 
@@ -1792,15 +1808,12 @@ ${newsList}
 - 不要写成长段分析，不要出现“这意味着需要持续关注”这类套话
 - 不要给具体投资建议
 
-输出格式（JSON数组）：
-[{"question":"原问题文字","answer":"重写后的答案"}]
-
 只输出JSON，不要解释。
 `.trim()
             : topic.slug === 'gold-repricing'
                 ? `
 以下是过去7天与黄金、实际利率、美元、央行购金和金矿股相关的新闻。请基于这些最新信息，
-为以下固定问题重写回答，供香港私人银行 RM/IC 与客户沟通时使用。
+为以下固定问题与市场框架延伸出 6 到 8 个客户常问问答，供香港私人银行 RM/IC 与客户沟通时使用。
 
 ${questionsList}
 
@@ -1829,15 +1842,12 @@ ${newsList}
 - 不要写成长段分析，不要堆太多数字
 - 不要给具体投资建议
 
-输出格式（JSON数组）：
-[{"question":"原问题文字","answer":"重写后的答案"}]
-
 只输出JSON，不要解释。
 `.trim()
                 : topic.slug === 'hk-market-sentiment'
                     ? `
 以下是过去7天与港股、恒生指数、恒生科技和南下资金情绪相关的新闻。请基于这些最新信息，
-为以下固定问题重写回答，供香港私人银行 RM/IC 与客户沟通时使用。
+为以下固定问题与市场框架延伸出 6 到 8 个客户常问问答，供香港私人银行 RM/IC 与客户沟通时使用。
 
 ${questionsList}
 
@@ -1864,14 +1874,11 @@ ${newsList}
 - 不要写成长段分析，不要堆太多数字
 - 不要给具体投资建议
 
-输出格式（JSON数组）：
-[{"question":"原问题文字","answer":"重写后的答案"}]
-
 只输出JSON，不要解释。
 `.trim()
                 : `
 以下是过去7天与美元、人民币、港股和利率路径相关的新闻。请基于这些最新信息，
-为以下固定问题重写回答，供香港私人银行 RM/IC 与客户沟通时使用。
+为以下固定问题与市场框架延伸出 6 到 8 个客户常问问答，供香港私人银行 RM/IC 与客户沟通时使用。
 
 ${questionsList}
 
@@ -1898,11 +1905,10 @@ ${newsList}
 - 不要写成长段分析，不要堆太多数字
 - 不要给具体投资建议
 
-输出格式（JSON数组）：
-[{"question":"原问题文字","answer":"重写后的答案"}]
-
 只输出JSON，不要解释。
 `.trim();
+
+    const userPrompt = `${rawUserPrompt}\n\n${categoryInstructions}`;
 
     try {
         const response = await fetch(`${process.env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL}/chat/completions`, {
@@ -1929,19 +1935,45 @@ ${newsList}
             choices?: Array<{ message?: { content?: string } }>;
         };
         const content = payload.choices?.[0]?.message?.content?.trim() ?? '';
-        const parsed = safeParseJson(content) as Array<{ question?: string; answer?: string }> | null;
+        const parsed = safeParseJson(content) as Array<{ question?: string; answer?: string; category?: string }> | null;
 
         if (!Array.isArray(parsed)) {
             console.warn(`[focus-client-questions] ${topic.slug}: json_parse_failed`);
             return null;
         }
 
+        const allowedCategories = new Set(FOCUS_QUESTION_CATEGORIES[topic.slug] ?? []);
+        const sanitized: Array<{ question: string; answer: string; category?: string }> = parsed
+            .map((item) => {
+                const question = item.question?.trim();
+                const answer = item.answer?.trim();
+                const rawCategory = item.category?.trim();
+                const category =
+                    rawCategory && (allowedCategories.size === 0 || allowedCategories.has(rawCategory))
+                        ? rawCategory
+                        : '全部';
+
+                if (!question || !answer) {
+                    return null;
+                }
+
+                return {
+                    question,
+                    answer,
+                    category
+                };
+            })
+            .filter((item): item is NonNullable<typeof item> => item !== null);
+
+        if (sanitized.length > 0) {
+            return sanitized;
+        }
+
         return topic.clientQuestions.map((item) => {
-            const matched = parsed.find((entry) => entry.question?.trim() === item.question);
-            const answer = matched?.answer?.trim();
             return {
                 question: item.question,
-                answer: answer ? answer : item.answer
+                answer: item.answer,
+                category: item.category ?? '全部'
             };
         });
     } catch {

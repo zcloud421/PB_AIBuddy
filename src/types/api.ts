@@ -109,6 +109,7 @@ export interface TodayIdeasResponse {
 export interface ClientFocusQuestion {
     question: string;
     answer: string;
+    category?: string;
 }
 
 export interface ClientFocusUpdate {
