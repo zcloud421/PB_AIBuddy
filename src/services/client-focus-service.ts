@@ -1924,8 +1924,14 @@ ${newsList}
         slug: string,
         question: string,
         answer: string,
-        fallbackCategory: string
+        fallbackCategory: string,
+        isLLMAssigned: boolean
     ): string {
+        // If LLM already assigned a valid category, trust it.
+        if (isLLMAssigned) {
+            return fallbackCategory;
+        }
+
         const questionText = question.toLowerCase();
         const fullText = `${question} ${answer}`.toLowerCase();
 
@@ -2010,6 +2016,7 @@ ${newsList}
                 const question = item.question?.trim();
                 const answer = item.answer?.trim();
                 const rawCategory = item.category?.trim();
+                const isLLMAssigned = !!(rawCategory && allowedCategories.has(rawCategory));
                 const baseCategory =
                     rawCategory && (allowedCategories.size === 0 || allowedCategories.has(rawCategory))
                         ? rawCategory
@@ -2019,7 +2026,7 @@ ${newsList}
                     return null;
                 }
 
-                const category = inferQuestionCategory(topic.slug, question, answer, baseCategory);
+                const category = inferQuestionCategory(topic.slug, question, answer, baseCategory, isLLMAssigned);
 
                 return {
                     question,
@@ -2049,7 +2056,7 @@ ${newsList}
             return {
                 question: item.question,
                 answer: item.answer,
-                category: inferQuestionCategory(topic.slug, item.question, item.answer, fallbackCategory)
+                category: inferQuestionCategory(topic.slug, item.question, item.answer, fallbackCategory, false)
             };
         });
     } catch {
@@ -4556,6 +4563,9 @@ ${newsSection}
 }
 
 async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFocusDetailResponse> {
+    if (topic.slug === 'middle-east-tensions') {
+        focusCache.delete('middle-east-tensions');
+    }
     const cached = focusCache.get(topic.slug);
     const cachedHasQuestionCategories = Array.isArray(cached?.value.client_questions)
         && cached.value.client_questions.some((item) => typeof item?.category === 'string' && item.category.trim().length > 0);
