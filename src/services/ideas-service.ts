@@ -42,6 +42,7 @@ import { buildThemeNarrative } from './theme-narrative';
 import {
     getClientFocusDetail as getClientFocusDetailPayload,
     getClientFocusList as getClientFocusListPayload,
+    getClientFocusMarketState as getClientFocusMarketStatePayload,
     getMiddleEastPolymarket as getMiddleEastPolymarketPayload
 } from './client-focus-service';
 import { generateNarrative, sanitizeNarrativeOutput } from '../utils/narrative-generator';
@@ -50,6 +51,7 @@ import type {
     AsyncScoringStatusResponse,
     ClientFocusDetailResponse,
     ClientFocusListItem,
+    ClientFocusMarketStateResponse,
     DailyBestCard,
     Flag,
     NarrativeOutput,
@@ -81,6 +83,31 @@ const KNOWN_CONFERENCE_END_DATES: Partial<Record<string, string>> = {
 };
 
 const COMMODITY_BETA_SYMBOLS = new Set(['GDX', 'USO']);
+const MACRO_SENSITIVITY_MAP: Array<{
+    focusSlug: string;
+    activeStatuses: string[];
+    sensitiveThemes: string[];
+    eventRiskPenalty: number;
+}> = [
+    {
+        focusSlug: 'middle-east-tensions',
+        activeStatuses: ['持续发酵', '关注升温', '压力上升'],
+        sensitiveThemes: ['Energy', 'Oil', 'Gold'],
+        eventRiskPenalty: 0.15
+    },
+    {
+        focusSlug: 'usd-strength',
+        activeStatuses: ['持续发酵', '关注升温'],
+        sensitiveThemes: ['China Tech', 'Hong Kong'],
+        eventRiskPenalty: 0.1
+    },
+    {
+        focusSlug: 'private-credit-stress',
+        activeStatuses: ['持续发酵', '压力上升'],
+        sensitiveThemes: ['Financials', 'BDC'],
+        eventRiskPenalty: 0.12
+    }
+];
 
 function clampScore(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
@@ -298,6 +325,10 @@ export async function getClientFocusList(): Promise<ClientFocusListItem[]> {
     return getClientFocusListPayload();
 }
 
+export async function getClientFocusMarketState(): Promise<ClientFocusMarketStateResponse> {
+    return getClientFocusMarketStatePayload();
+}
+
 export async function getClientFocusDetail(slug: string): Promise<ClientFocusDetailResponse | null> {
     return getClientFocusDetailPayload(slug);
 }
@@ -349,6 +380,7 @@ export async function selectDailyBest(candidates: ScoringResult[]): Promise<{
     }
 
     const recentHistory = await getRecentDailyRecommendationHistory(5);
+    const activeFocusStatuses = await getActiveMacroFocusStatuses();
     let bestChoice: { symbol: string; theme: string; adjustedScore: number } | null = null;
 
     for (const candidate of goCandidates) {
@@ -356,7 +388,8 @@ export async function selectDailyBest(candidates: ScoringResult[]): Promise<{
         const theme = underlying?.themes?.[0] ?? 'General';
         const tierBonus = underlying?.tier === 1 ? 0.05 : 0;
         const freshnessPenalty = calculateFreshnessPenalty(candidate.symbol, recentHistory);
-        const adjustedScore = candidate.composite_score + tierBonus - freshnessPenalty;
+        const macroPenalty = applyMacroSensitivityPenalty(candidate, underlying, activeFocusStatuses);
+        const adjustedScore = candidate.composite_score + tierBonus - freshnessPenalty - macroPenalty;
 
         if (!bestChoice || adjustedScore > bestChoice.adjustedScore) {
             bestChoice = {
@@ -383,13 +416,21 @@ export async function selectDailyRecommendationShowcase(
     moneynessPct: number | null;
 }>> {
     const recentHistory = await getRecentDailyRecommendationHistory(5);
-    const rankedGo = [...candidates]
-        .filter((candidate) => candidate.overall_grade === 'GO')
-        .sort(
-            (left, right) =>
-                adjustedShowcaseScore(right, recentHistory, dailyBestSymbol) -
-                adjustedShowcaseScore(left, recentHistory, dailyBestSymbol)
-        );
+    const activeFocusStatuses = await getActiveMacroFocusStatuses();
+    const goCandidates = candidates.filter((candidate) => candidate.overall_grade === 'GO');
+    const underlyingEntries = await Promise.all(
+        goCandidates.map(async (candidate) => [candidate.symbol, await getUnderlyingBySymbol(candidate.symbol)] as const)
+    );
+    const underlyingMap = new Map(underlyingEntries);
+    const rankedGo = [...goCandidates].sort((left, right) => {
+        const leftScore =
+            adjustedShowcaseScore(left, recentHistory, dailyBestSymbol) -
+            applyMacroSensitivityPenalty(left, underlyingMap.get(left.symbol) ?? null, activeFocusStatuses);
+        const rightScore =
+            adjustedShowcaseScore(right, recentHistory, dailyBestSymbol) -
+            applyMacroSensitivityPenalty(right, underlyingMap.get(right.symbol) ?? null, activeFocusStatuses);
+        return rightScore - leftScore;
+    });
 
     const showcase: Array<{
         symbol: string;
@@ -520,6 +561,13 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             return await scoreSingleSymbol(normalizedSymbol);
         }
 
+        const underlying = await getUnderlyingBySymbol(normalizedSymbol).catch(() => null);
+        const activeFocusStatuses = await getActiveMacroFocusStatuses();
+        const macroSensitivityFlag = buildMacroSensitivityFlag(underlying, activeFocusStatuses);
+        const effectiveFlags = macroSensitivityFlag
+            ? mergeUniqueFlags(cachedFlags, [macroSensitivityFlag])
+            : cachedFlags;
+
         let narrative =
             cachedRow.why_now
                 ? sanitizeNarrativeOutput({
@@ -538,7 +586,6 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
         }
 
         if (!narrative || shouldRefreshNarrativeForEvents) {
-            const underlying = await getUnderlyingBySymbol(normalizedSymbol);
             const generatedNarrative = await buildNarrative({
                 symbol: normalizedSymbol,
                 companyName: cachedRow.company_name ?? getCompanyName(normalizedSymbol),
@@ -552,7 +599,7 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
                 ma50: effectiveMa50,
                 ma200: effectiveMa200,
                 impliedVolatility: effectiveIv,
-                flags: cachedFlags,
+                flags: effectiveFlags,
                 tenorDays: cachedRow.recommended_tenor_days,
                 newsItems: newsContext?.narrativeItems ?? [],
                 daysToEarnings: priceContext?.days_to_earnings ?? cachedRow.days_to_earnings,
@@ -592,7 +639,7 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             composite_score: toNullableNumber(cachedRow.composite_score) ?? 0,
             risk_reward_score: toNullableNumber(cachedRow.risk_reward_score) ?? riskRewardScore,
             verdict_headline: gradeToHeadline(cachedRow.overall_grade),
-            verdict_sub: generateVerdictSub(cachedRow.overall_grade, cachedFlags),
+            verdict_sub: generateVerdictSub(cachedRow.overall_grade, effectiveFlags),
             data_as_of_date: effectiveDataAsOfDate,
             recommended_strike: toNullableNumber(cachedRow.recommended_strike),
             recommended_tenor_days: cachedRow.recommended_tenor_days,
@@ -603,7 +650,7 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             reasoning_text: cachedRow.reasoning_text,
             narrative,
             news_items: newsItems,
-            flags: cachedFlags,
+            flags: effectiveFlags,
             sentiment_score: narrative?.sentiment_score ?? toNullableNumber(cachedRow.sentiment_score),
             price_history: [],
             signals: buildSignalsFromCachedRow({
@@ -757,6 +804,11 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
         const analysis = await runFreshSymbolScoring(symbol);
         const { exchange, scoring, symbolData } = analysis;
         const extendedPriceHistory = await loadExtendedPriceHistory(symbol, symbolData.price_history);
+        const activeFocusStatuses = await getActiveMacroFocusStatuses();
+        const macroSensitivityFlag = buildMacroSensitivityFlag(underlying, activeFocusStatuses);
+        const effectiveFlags = macroSensitivityFlag
+            ? mergeUniqueFlags(scoring.flags, [macroSensitivityFlag])
+            : scoring.flags;
         const newsContext = await fetchStockNewsContext(
             symbol,
             underlying?.company_name ?? getCompanyName(symbol)
@@ -775,7 +827,7 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
             ma50: symbolData.ma50,
             ma200: symbolData.ma200,
             impliedVolatility: scoring.selected_implied_volatility,
-            flags: scoring.flags,
+            flags: effectiveFlags,
             tenorDays: scoring.recommended_tenor_days,
             newsItems: newsContext.narrativeItems,
             daysToEarnings: symbolData.days_to_earnings ?? null,
@@ -815,8 +867,8 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
                     reasoningText: scoring.reasoning_text
                 });
 
-                if (scoring.flags.length > 0) {
-                    await saveRiskFlags(runId, symbol, scoring.flags);
+                if (effectiveFlags.length > 0) {
+                    await saveRiskFlags(runId, symbol, effectiveFlags);
                 }
 
                 if (narrative) {
@@ -842,7 +894,8 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
             exchange,
             underlying?.company_name ?? null,
             narrative,
-            newsItems
+            newsItems,
+            effectiveFlags
         );
     } catch (error) {
         if (runId && shouldPersist) {
@@ -1213,7 +1266,8 @@ function mapScoringResultToSymbolIdea(
     exchange: string,
     companyName: string | null,
     narrative: NarrativeOutput | null,
-    newsItems: NewsItem[]
+    newsItems: NewsItem[],
+    flags: Flag[] = scoring.flags
 ): SymbolIdeaResponse {
     return {
         symbol,
@@ -1225,7 +1279,7 @@ function mapScoringResultToSymbolIdea(
         composite_score: scoring.composite_score,
         risk_reward_score: scoring.risk_reward_score,
         verdict_headline: gradeToHeadline(scoring.overall_grade),
-        verdict_sub: generateVerdictSub(scoring.overall_grade, scoring.flags),
+        verdict_sub: generateVerdictSub(scoring.overall_grade, flags),
         data_as_of_date: symbolData.price_history[symbolData.price_history.length - 1]?.date ?? todayIsoDate(),
         recommended_strike: scoring.recommended_strike,
         recommended_tenor_days: scoring.recommended_tenor_days,
@@ -1236,7 +1290,7 @@ function mapScoringResultToSymbolIdea(
         reasoning_text: scoring.reasoning_text,
         narrative,
         news_items: newsItems,
-        flags: scoring.flags,
+        flags,
         sentiment_score: narrative?.sentiment_score ?? null,
         price_history: symbolData.price_history.map((point) => ({
             date: point.date,
@@ -2012,6 +2066,90 @@ function calculateFreshnessPenalty(
         return 0.12;
     }
     return 0.16;
+}
+
+async function getActiveMacroFocusStatuses(): Promise<Array<{ slug: string; status: string; title: string }>> {
+    try {
+        const focusItems = await getClientFocusListPayload();
+        return focusItems
+            .filter(
+                (item): item is typeof item & { status: string } =>
+                    typeof item.status === 'string' && item.status.length > 0
+            )
+            .map((item) => ({
+                slug: item.slug,
+                status: item.status,
+                title: item.title
+            }));
+    } catch {
+        return [];
+    }
+}
+
+function getMacroSensitivityMatches(
+    underlying: { themes?: string[] } | null,
+    activeFocusStatuses: Array<{ slug: string; status: string; title: string }>
+): Array<{ slug: string; status: string; title: string; eventRiskPenalty: number }> {
+    if (!underlying?.themes?.length) {
+        return [];
+    }
+
+    const normalizedThemes = underlying.themes.map((theme) => theme.toLowerCase());
+
+    return MACRO_SENSITIVITY_MAP.flatMap((rule) => {
+        const focus = activeFocusStatuses.find((item) => item.slug === rule.focusSlug);
+        if (!focus || !rule.activeStatuses.includes(focus.status)) {
+            return [];
+        }
+
+        const isExposed = normalizedThemes.some((theme) =>
+            rule.sensitiveThemes.some((sensitiveTheme) => theme.includes(sensitiveTheme.toLowerCase()))
+        );
+
+        if (!isExposed) {
+            return [];
+        }
+
+        return [
+            {
+                slug: focus.slug,
+                status: focus.status,
+                title: focus.title,
+                eventRiskPenalty: rule.eventRiskPenalty
+            }
+        ];
+    });
+}
+
+function applyMacroSensitivityPenalty(
+    candidate: ScoringResult,
+    underlying: { themes?: string[] } | null,
+    activeFocusStatuses: Array<{ slug: string; status: string; title: string }>
+): number {
+    void candidate;
+    const matches = getMacroSensitivityMatches(underlying, activeFocusStatuses);
+    if (matches.length === 0) {
+        return 0;
+    }
+
+    return Math.min(matches.reduce((sum, match) => sum + match.eventRiskPenalty, 0), 0.25);
+}
+
+function buildMacroSensitivityFlag(
+    underlying: { themes?: string[] } | null,
+    activeFocusStatuses: Array<{ slug: string; status: string; title: string }>
+): Flag | null {
+    const matches = getMacroSensitivityMatches(underlying, activeFocusStatuses);
+    if (matches.length === 0) {
+        return null;
+    }
+
+    const focusSummary = matches.map((match) => `${match.title}${match.status}`).join('；');
+    return {
+        type: 'MACRO_SENSITIVITY',
+        severity: 'WARN',
+        message: `当前宏观焦点事件（${focusSummary}）对该板块有定向影响，建议结合市场背景判断时机。`
+    };
 }
 
 function adjustedShowcaseScore(

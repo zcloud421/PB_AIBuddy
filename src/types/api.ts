@@ -9,6 +9,7 @@ export type FlagType =
     | 'HIGH_VOL_LOW_STRIKE'
     | 'HIGH_COUPON_OVERRIDE'
     | 'HOUSE_OVERRIDE'
+    | 'MACRO_SENSITIVITY'
     | 'MATERIAL_NEWS_SHOCK'
     | 'MATERIAL_NEWS_OVERHANG'
     | 'BEARISH_STRUCTURE'
@@ -181,6 +182,8 @@ export interface ClientFocusMarketSnapshot {
     summary: string;
     indices: ClientFocusMarketSnapshotItem[];
 }
+
+export type ClientFocusMarketStateResponse = ClientFocusMarketSnapshot;
 
 export interface ClientFocusMarketChartPoint {
     date: string;

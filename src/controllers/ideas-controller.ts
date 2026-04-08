@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import {
     getClientFocusDetail,
     getClientFocusList,
+    getClientFocusMarketState,
     getMiddleEastPolymarket,
     getSymbolIdea,
     getSymbolPriceHistory,
@@ -29,6 +30,12 @@ export async function getClientFocusDetailController(req: Request, res: Response
         throw new HttpError(404, 'NOT_FOUND', 'Client focus topic not found.');
     }
 
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.status(200).json(payload);
+}
+
+export async function getClientFocusMarketStateController(_req: Request, res: Response): Promise<void> {
+    const payload = await getClientFocusMarketState();
     res.setHeader('Cache-Control', 'private, max-age=300');
     res.status(200).json(payload);
 }

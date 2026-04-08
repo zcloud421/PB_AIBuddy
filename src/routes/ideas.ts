@@ -4,6 +4,7 @@ import { asyncHandler } from '../lib/async-handler';
 import {
     getClientFocusDetailController,
     getClientFocusListController,
+    getClientFocusMarketStateController,
     getMiddleEastPolymarketController,
     getSymbolIdeaController,
     getSymbolPriceHistoryController,
@@ -15,6 +16,7 @@ export const ideasRouter = Router();
 
 ideasRouter.get('/today', asyncHandler(getTodayIdeasController));
 ideasRouter.get('/focus', asyncHandler(getClientFocusListController));
+ideasRouter.get('/focus/market-state', asyncHandler(getClientFocusMarketStateController));
 ideasRouter.get('/focus/middle-east-polymarket', asyncHandler(getMiddleEastPolymarketController));
 ideasRouter.get('/focus/:slug', asyncHandler(getClientFocusDetailController));
 ideasRouter.get('/:symbol/price-history', asyncHandler(getSymbolPriceHistoryController));

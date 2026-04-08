@@ -3,6 +3,7 @@ import type {
     ClientFocusDetailResponse,
     ClientFocusHibor,
     ClientFocusListItem,
+    ClientFocusMarketStateResponse,
     ClientFocusMarketChart,
     ClientFocusMarketSnapshot,
     ClientFocusPolymarketMarket,
@@ -17,6 +18,7 @@ import type {
     WhatChangedGroup
 } from '../types/api';
 import { fetchNewsItemsByQuery, fetchNewsItemsFromNewsData } from '../data/news-fetcher';
+import { MassiveDataFetcher } from '../data/massive-fetcher';
 import axios from 'axios';
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
@@ -29,6 +31,7 @@ const KNOWN_HK_INDEX_SECIDS: Record<string, string> = {
     HSI: '100.HSI',
     HSTECH: '100.HSTECH',
 };
+const MARKET_STATE_CACHE_KEY = 'focus-market-state';
 const POLYMARKET_HISTORY_WINDOW_DAYS = 30;
 const POLYMARKET_HISTORY_CHUNK_DAYS = 14;
 const WHAT_CHANGED_WINDOW_HOURS = 72;
@@ -256,6 +259,7 @@ const focusCache = new Map<string, { expiresAt: number; value: ClientFocusDetail
 const focusChainCache = new Map<string, { expiresAt: number; value: ClientFocusTransmissionItem[] }>();
 const focusMarketChartCache = new Map<string, { expiresAt: number; value: ClientFocusMarketChart | null }>();
 const polymarketCache = new Map<string, { expiresAt: number; value: ClientFocusPolymarketResponse }>();
+const focusMarketStateCache = new Map<string, { expiresAt: number; value: ClientFocusMarketStateResponse }>();
 
 interface EastMoneySouthboundRow {
     TRADE_DATE?: string;
@@ -3464,7 +3468,8 @@ async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientF
 }
 
 async function fetchYahooChartSeries(
-    symbol: string
+    symbol: string,
+    snapshotMeta: { code: string; name: string } = { code: 'GC=F', name: 'COMEX黄金期货' }
 ): Promise<{ snapshot: ClientFocusPriceSnapshot | null; history: ClientFocusPriceHistoryPoint[] | null }> {
     try {
         const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`);
@@ -3533,8 +3538,8 @@ async function fetchYahooChartSeries(
 
         return {
             snapshot: {
-                code: 'GC=F',
-                name: 'COMEX黄金期货',
+                code: snapshotMeta.code,
+                name: snapshotMeta.name,
                 latest: Number.isFinite(effectiveLatest) ? effectiveLatest : null,
                 change_pct: Number.isFinite(changePct) ? changePct : null,
                 as_of: latestPoint.date
@@ -3558,13 +3563,12 @@ async function fetchFocusPriceSnapshot(slug: string): Promise<ClientFocusPriceSn
 
 async function fetchFocusSecondaryPriceSnapshot(slug: string): Promise<ClientFocusPriceSnapshot | null> {
     if (slug === 'usd-strength') {
-        const result = await fetchYahooChartSeries('DX-Y.NYB');
+        const result = await fetchYahooChartSeries('DX-Y.NYB', {
+            code: 'DXY',
+            name: '美元指数'
+        });
         return result.snapshot
-            ? {
-                ...result.snapshot,
-                code: 'DXY',
-                name: '美元指数'
-            }
+            ? result.snapshot
             : null;
     }
     return null;
@@ -3747,6 +3751,100 @@ async function fetchHongKongSpotIndices() {
     return enriched;
 }
 
+async function fetchUsMarketStateIndices() {
+    const snapshots = await Promise.all([
+        fetchMassiveIndexSnapshot('I:SPX', { code: 'SPX', name: '标普500' }),
+        fetchMassiveIndexSnapshot('I:NDX', { code: 'NDX', name: '纳斯达克' })
+    ]);
+
+    return snapshots
+        .filter((item): item is NonNullable<typeof item> => item !== null)
+        .map((item) => ({
+            code: item.code,
+            name: item.name,
+            latest: item.latest,
+            change_pct: item.change_pct
+        }));
+}
+
+async function fetchMassiveIndexSnapshot(
+    massiveSymbol: string,
+    fallbackMeta: { code: string; name: string }
+): Promise<ClientFocusPriceSnapshot | null> {
+    try {
+        const fetcher = new MassiveDataFetcher();
+        const history = await fetcher.fetchPriceHistory(massiveSymbol, 30);
+        if (history.length >= 2) {
+            const latest = history[history.length - 1];
+            const previous = history[history.length - 2];
+            const changePct =
+                previous.close !== 0 ? ((latest.close - previous.close) / previous.close) * 100 : null;
+
+            return {
+                code: fallbackMeta.code,
+                name: fallbackMeta.name,
+                latest: latest.close,
+                change_pct: changePct,
+                as_of: latest.date
+            };
+        }
+    } catch {
+        // fall through to Yahoo fallback
+    }
+
+    const yahooSymbol = fallbackMeta.code === 'SPX' ? '^GSPC' : '^IXIC';
+    const fallback = await fetchYahooChartSeries(yahooSymbol, fallbackMeta);
+    return fallback.snapshot;
+}
+
+function buildMarketStateSummary(
+    indices: Array<{
+        code: string;
+        name: string;
+        latest: number | null;
+        change_pct: number | null;
+        change_5d_pct?: number | null;
+    }>
+) {
+    const gold = indices.find((item) => item.code === 'GOLD');
+    const dxy = indices.find((item) => item.code === 'DXY');
+    const spx = indices.find((item) => item.code === 'SPX');
+    const ndx = indices.find((item) => item.code === 'NDX');
+    const hsi = indices.find((item) => item.code === 'HSI');
+    const hstech = indices.find((item) => item.code === 'HSTECH');
+
+    const goldUp = (gold?.change_pct ?? 0) >= 0.5;
+    const goldDown = (gold?.change_pct ?? 0) <= -0.5;
+    const dxyUp = (dxy?.change_pct ?? 0) >= 0.2;
+    const dxyDown = (dxy?.change_pct ?? 0) <= -0.2;
+    const usRiskOn = (spx?.change_pct ?? 0) >= 0.6 || (ndx?.change_pct ?? 0) >= 0.9;
+    const usRiskOff = (spx?.change_pct ?? 0) <= -0.6 || (ndx?.change_pct ?? 0) <= -0.9;
+    const hkWeak = (hsi?.change_pct ?? 0) <= -0.6 || (hstech?.change_pct ?? 0) <= -1;
+    const hkStrong = (hsi?.change_pct ?? 0) >= 0.6 || (hstech?.change_pct ?? 0) >= 1;
+
+    if (goldUp && dxyDown && (usRiskOn || hkStrong)) {
+        return '风险偏好有所修复：黄金仍强，美元回落，美股与港股开始重新计入弹性。';
+    }
+
+    if (goldUp && dxyUp && (usRiskOff || hkWeak)) {
+        return '市场正在交易避险：黄金与美元同步偏强，风险资产表现仍受压制。';
+    }
+
+    if (usRiskOn && hkStrong) {
+        return '风险资产整体回暖：美股与港股同步偏强，市场开始重新评估增长与估值弹性。';
+    }
+
+    if (hkWeak && dxyUp) {
+        return '美元偏强叠加港股承压，客户更可能追问中国资产与非美风险偏好的持续性。';
+    }
+
+    if (goldDown && usRiskOn) {
+        return '市场更偏向风险资产修复：黄金回落，美股走强，叙事重心回到增长与政策路径。';
+    }
+
+    return '跨资产信号仍有分化，建议结合黄金、美元、美股与港股的相对表现理解今天的客户焦点。';
+}
+
 function buildHongKongSnapshotSummary(
     indices: Array<{
         code: string;
@@ -3797,6 +3895,66 @@ function buildHongKongSnapshotSummary(
     })();
 
     return `${leadSentence}，${flowSentence}。`;
+}
+
+async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketStateResponse | null> {
+    const cached = focusMarketStateCache.get(MARKET_STATE_CACHE_KEY);
+    if (cached && cached.expiresAt > Date.now()) {
+        return cached.value;
+    }
+
+    const [hkSnapshot, goldSnapshot, usdCnhSnapshot, dxySnapshot, usIndices] = await Promise.all([
+        fetchHongKongMarketSnapshot(),
+        fetchYahooChartSeries('GC=F', { code: 'GOLD', name: '黄金' }),
+        fetchForexSnapshot('USDCNH', '美元人民币'),
+        fetchYahooChartSeries('DX-Y.NYB', { code: 'DXY', name: '美元指数' }),
+        fetchUsMarketStateIndices()
+    ]);
+
+    const indices = [
+        ...usIndices,
+        goldSnapshot.snapshot
+            ? {
+                code: goldSnapshot.snapshot.code,
+                name: goldSnapshot.snapshot.name,
+                latest: goldSnapshot.snapshot.latest,
+                change_pct: goldSnapshot.snapshot.change_pct
+            }
+            : null,
+        dxySnapshot.snapshot
+            ? {
+                code: dxySnapshot.snapshot.code,
+                name: dxySnapshot.snapshot.name,
+                latest: dxySnapshot.snapshot.latest,
+                change_pct: dxySnapshot.snapshot.change_pct
+            }
+            : null,
+        usdCnhSnapshot
+            ? {
+                code: usdCnhSnapshot.code,
+                name: usdCnhSnapshot.name,
+                latest: usdCnhSnapshot.latest,
+                change_pct: usdCnhSnapshot.change_pct
+            }
+            : null,
+        ...(hkSnapshot?.indices ?? [])
+    ].filter((item): item is NonNullable<typeof item> => item !== null);
+
+    if (indices.length === 0) {
+        return null;
+    }
+
+    const payload: ClientFocusMarketStateResponse = {
+        summary: buildMarketStateSummary(indices),
+        indices
+    };
+
+    focusMarketStateCache.set(MARKET_STATE_CACHE_KEY, {
+        expiresAt: Date.now() + FOCUS_LIVE_MARKET_CACHE_TTL_MS,
+        value: payload
+    });
+
+    return payload;
 }
 
 async function fetchHongKongIndex5dChange(code: string, fallbackChangePct: number | null) {
@@ -4282,6 +4440,14 @@ export async function getClientFocusList(): Promise<ClientFocusListItem[]> {
             fallbackSummary: item.summary
         })
     }));
+}
+
+export async function getClientFocusMarketState(): Promise<ClientFocusMarketStateResponse> {
+    const snapshot = await fetchClientFocusMarketStateSnapshot();
+    return snapshot ?? {
+        summary: '跨资产信号仍有分化，建议结合黄金、美元、美股与港股的相对表现理解今天的客户焦点。',
+        indices: []
+    };
 }
 
 export async function getClientFocusDetail(slug: string): Promise<ClientFocusDetailResponse | null> {
