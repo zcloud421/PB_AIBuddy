@@ -4446,6 +4446,14 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
                 ? await generatePrivateCreditWhatChanged(newsItems)
                 : [];
     const dynamicClientQuestions = await generateDynamicClientQuestions(topic, newsItems);
+    const questionCategoryPool = FOCUS_QUESTION_CATEGORIES[topic.slug] ?? [];
+    const clientQuestions =
+        dynamicClientQuestions
+        ?? topic.clientQuestions.map((item, index) => ({
+            question: item.question,
+            answer: item.answer,
+            category: item.category ?? questionCategoryPool[index % Math.max(questionCategoryPool.length, 1)] ?? '全部'
+        }));
 
     const detail: ClientFocusDetailResponse = {
         slug: topic.slug,
@@ -4469,7 +4477,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
                         ? []
                         : sanitizeWeeklyProgress(weeklyProgress?.items, newsItems),
         what_changed: whatChanged.length > 0 ? whatChanged : undefined,
-        client_questions: dynamicClientQuestions ?? topic.clientQuestions,
+        client_questions: clientQuestions,
         transmission_chain: transmissionChain ?? buildFallbackTransmission(topic),
         related_assets: topic.relatedAssets,
         market_snapshot: marketSnapshot,
