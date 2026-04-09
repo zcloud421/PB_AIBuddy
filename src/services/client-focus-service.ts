@@ -4584,6 +4584,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
     }
 
     const newsItems = await fetchFocusNewsItems(topic);
+    console.log(`[focus-news] ${topic.slug}: fetched ${newsItems.length} items`);
     const modelOutput = await generateFocusContent(topic, newsItems);
     const skipWeeklyProgress =
         topic.slug === 'middle-east-tensions'
