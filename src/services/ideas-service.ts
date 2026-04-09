@@ -614,21 +614,6 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             }
         }
 
-        const extendedPriceHistory = await loadExtendedPriceHistory(normalizedSymbol);
-        const tailRisk = buildTailRiskStats(extendedPriceHistory);
-        const strikeRisk = buildStrikeRiskSummary(
-            extendedPriceHistory,
-            effectiveCurrentPrice,
-            toNullableNumber(cachedRow.recommended_strike)
-        );
-        const riskRewardScore = calculateRiskRewardScore({
-            premiumScore: parseRefCouponPctToPremiumScore(cachedRow.ref_coupon_pct),
-            ivScore: deriveImpliedVolatilityScore(effectiveIv),
-            skewScore: deriveCachedSkewScore(effectiveCurrentPrice, effectiveMa200, effectivePctFrom52wHigh),
-            tailRisk,
-            strikeRisk
-        });
-
         return {
             symbol: cachedRow.symbol,
             exchange: cachedRow.exchange,
@@ -637,7 +622,7 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             cached: true,
             grade: cachedRow.overall_grade,
             composite_score: toNullableNumber(cachedRow.composite_score) ?? 0,
-            risk_reward_score: toNullableNumber(cachedRow.risk_reward_score) ?? riskRewardScore,
+            risk_reward_score: toNullableNumber(cachedRow.risk_reward_score),
             verdict_headline: gradeToHeadline(cachedRow.overall_grade),
             verdict_sub: generateVerdictSub(cachedRow.overall_grade, effectiveFlags),
             data_as_of_date: effectiveDataAsOfDate,
