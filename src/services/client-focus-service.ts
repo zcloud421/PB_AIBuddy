@@ -265,19 +265,25 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
         slug: 'usd-strength',
         title: '美元走势重估',
         accent: '#C9A45C',
-        query: 'US dollar strength USDCNH Hong Kong stocks China assets rates latest',
+        query: 'US dollar USDCNH DXY ceasefire oil yields Hong Kong stocks latest',
+        newsQueries: [
+            'US dollar DXY USDCNH latest',
+            'US dollar weakness CNH rebound latest',
+            'ceasefire oil dollar safe haven latest',
+            'Fed yields dollar Hong Kong stocks latest'
+        ],
         clientQuestions: [
             {
-                question: '为什么美元最近出现了反弹？',
-                answer: '美元近期阶段性反弹，主要由两个因素驱动：一是地缘冲突触发避险需求，美元成为主要避险目的地；二是油价上涨推高通胀预期，联储降息时间被推迟，美元利率优势得以延续。离岸人民币相比其他亚洲货币更具政策韧性，但若避险情绪缓和，资金存在快速逆转风险。'
+                question: '停火后美元为何重新走弱？',
+                answer: '美元回落通常意味着避险溢价开始消退，而不是联储立场突然转向。若油价同步回落、10年期美债收益率不再上冲，资金会先撤出防守型美元仓位。客户应观察DXY和USDCNH能否同时延续回落。'
             },
             {
-                question: '中国央行对人民币汇率的最新表态是什么？',
-                answer: '央行明确表示无意通过汇率贬值获取贸易竞争优势，立场是允许双向浮动，但会在必要时使用宏观审慎工具干预过度波动。市场对央行政策信号的解读是：维持人民币相对稳定，同时避免过快升值。'
+                question: '美元回落后，USDCNH重新走低说明什么？',
+                answer: 'USDCNH回落通常反映美元避险需求降温与人民币阶段性修复同步发生。若中间价继续偏稳、港股与中国资产止跌，说明汇率压力更多来自美元端而非人民币基本面恶化。'
             },
             {
-                question: '强美元对港股意味着什么？',
-                answer: '强美元通常压制非美资产风险偏好，对港股有双重影响：一是外资流出压力加大，二是联系汇率机制下 HKMA 被迫收紧本地流动性，进一步压制港股估值。历史上美元强势周期往往对应港股和中国资产承压，但若强美元更多来自短期避险而非利差驱动，持续性会相对有限。'
+                question: '美元方向变化对港股意味着什么？',
+                answer: '美元不再单边走强时，港股面临的外资和流动性压力会先边际缓和。若联系汇率下港元流动性不再持续收紧，估值压制也会减轻。客户更该关注南向资金能否把这一步修复接住。'
             }
         ],
         relatedAssets: ['USDCNH', '港股', '中国资产', '美元资产'],
@@ -1977,7 +1983,7 @@ ${newsList}
 只输出JSON，不要解释。
 `.trim()
                 : `
-以下是过去7天与美元、人民币、港股和利率路径相关的新闻。请基于这些最新信息，
+以下是过去7天与美元、人民币、港股、油价和利率路径相关的新闻。请先判断当前美元情景，再基于这些最新信息，
 为以下固定问题与市场框架延伸出 6 到 8 个客户常问问答，供香港私人银行 RM/IC 与客户沟通时使用。
 
 ${questionsList}
@@ -1988,17 +1994,25 @@ ${baselineAnswers}
 新闻列表：
 ${newsList}
 
+情景判断规则：
+- 若新闻以“停火/ceasefire/deal/谈判/油价回落/避险消退”为主，且美元与USDCNH同步回落 → 情景：美元走弱
+- 若新闻以“空袭/escalation/油价上行/避险需求/降息推迟”为主，且美元与USDCNH同步走高 → 情景：美元走强
+- 若美元、利率与风险资产信号互相冲突 → 情景：区间震荡
+
 写作要求：
 - 每条答案 90-110 字
 - 必须采用“先判断 → 再补事实 → 再讲传导 → 最后给风险边界”的结构
 - 第一两句必须能单独成立，像直接回复客户
 - 必须至少包含 1 个具体变量或事实，例如 DXY、USDCNH、联储表态、人民币中间价、港元流动性、10Y美债收益率
+- 问题必须与判断出的当前情景一致，不能继续沿用过时的“美元反弹”或“强美元承压”假设
+- 第一条问题优先抓当前最新变化，例如“美元为何重新走弱”或“USDCNH为何快速回落”
 - 重点解释避险需求、利率路径、油价通胀渠道，以及美元与港股流动性的关系
+- 覆盖三个维度：美元驱动、汇率传导、相关资产；每个维度至少 1 题
 - 尽量用“当前更像…”“本周新增变化是…”“整体来看…”这类客户沟通句式
 - 回答要有 1-2 周可用性，不要写成单条新闻复述
-- 若问题是“美元为何反弹”，重点回答避险需求与利率路径
-- 若问题是“央行如何表态”，重点回答政策态度与波动容忍度
-- 若问题是“强美元对港股意味着什么”，重点回答外资、流动性与估值
+- 若问题是“美元为何走弱/走强”，重点回答避险需求、油价和利率路径谁在主导
+- 若问题是“人民币或CNH如何反应”，重点回答美元端变化与中间价/政策韧性如何共同作用
+- 若问题是“美元方向变化对港股或中国资产意味着什么”，重点回答外资、流动性与估值传导
 
 禁止：
 - 不要以“过去一周...”开头
@@ -5055,6 +5069,8 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         expiresAt: Date.now() + (
             topic.slug === 'hk-market-sentiment'
                 ? FOCUS_LIVE_MARKET_CACHE_TTL_MS
+                : topic.slug === 'usd-strength'
+                    ? FOCUS_LIVE_MARKET_CACHE_TTL_MS
                 : topic.slug === 'private-credit-stress'
                     ? FOCUS_LONG_CACHE_TTL_MS
                     : FOCUS_CACHE_TTL_MS
