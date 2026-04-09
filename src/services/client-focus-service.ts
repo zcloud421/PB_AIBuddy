@@ -761,6 +761,30 @@ function buildFocusSummaryFallback(topic: FocusTopicConfig): string {
     return topic.fallbackSummary;
 }
 
+function buildMiddleEastSummaryOverride(newsItems: NewsItem[]): string | null {
+    const titles = newsItems
+        .slice(0, 8)
+        .map((item) => item.title ?? '')
+        .join(' ')
+        .toLowerCase();
+
+    const ceasefireSignals = ['停火', 'ceasefire', 'truce', 'deal', '谈判', 'negotiation'];
+    const escalationSignals = ['空袭', '导弹', 'strike', 'missile', 'escalation', '封锁', '关闭霍尔木兹'];
+
+    const hasCeasefireSignal = ceasefireSignals.some((signal) => titles.includes(signal.toLowerCase()));
+    const hasEscalationSignal = escalationSignals.some((signal) => titles.includes(signal.toLowerCase()));
+
+    if (hasCeasefireSignal && !hasEscalationSignal) {
+        return '美伊停火信号落地后，客户更关注油价、黄金与降息路径会否重新定价。';
+    }
+
+    if (hasCeasefireSignal) {
+        return '美伊停火初步落地但局势仍脆弱，客户集中追问油价、黄金与利率路径如何重估。';
+    }
+
+    return null;
+}
+
 function sanitizeLatestUpdates(
     topic: FocusTopicConfig,
     value: unknown,
@@ -4702,6 +4726,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
                 : sanitizeFocusStatus(modelOutput?.status?.trim(), topic.fallbackStatus ?? '持续发酵'),
         updated_at: formatRelativeTime(newsItems[0]?.published_at),
         summary:
+            (topic.slug === 'middle-east-tensions' ? buildMiddleEastSummaryOverride(newsItems) : null) ||
             sanitizeFocusSummary(weeklyProgress?.editor_note?.trim(), topic) ||
             sanitizeFocusSummary(modelOutput?.summary?.trim(), topic) ||
             buildFocusSummaryFallback(topic),
