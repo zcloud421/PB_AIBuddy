@@ -3995,10 +3995,12 @@ async function fetchYahooChartSeries(
         const effectiveLatest = Number.isFinite(latest) ? latest : latestPoint.close;
         const previousHistoryClose = history.length >= 2 ? history[history.length - 2].close : null;
         const resolvedPreviousHistoryClose = Number.isFinite(previousHistoryClose) ? previousHistoryClose : null;
-        const changePct = resolvedPreviousHistoryClose !== null && resolvedPreviousHistoryClose !== 0
-            ? ((latestPoint.close - resolvedPreviousHistoryClose) / resolvedPreviousHistoryClose) * 100
-            : Number.isFinite(previousClose) && previousClose !== 0
-                ? ((effectiveLatest - previousClose) / previousClose) * 100
+        // Prefer regularMarketPrice vs previousClose (real-time, intraday-aware)
+        // Fall back to history[-1] vs history[-2] only if meta fields are missing
+        const changePct = Number.isFinite(previousClose) && previousClose !== 0
+            ? ((effectiveLatest - previousClose) / previousClose) * 100
+            : resolvedPreviousHistoryClose !== null && resolvedPreviousHistoryClose !== 0
+                ? ((latestPoint.close - resolvedPreviousHistoryClose) / resolvedPreviousHistoryClose) * 100
                 : null;
 
         return {
