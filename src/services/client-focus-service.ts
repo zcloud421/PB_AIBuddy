@@ -4235,13 +4235,27 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
         return cached.value;
     }
 
-    const [hkSnapshot, goldSnapshot, usdCnhSnapshot, dxySnapshot, usIndices, wtiSnapshot, tnxSnapshot] = await Promise.all([
+    const [
+        hkSnapshot,
+        goldSnapshot,
+        silverSnapshot,
+        usdCnhSnapshot,
+        dxySnapshot,
+        usIndices,
+        wtiSnapshot,
+        brentSnapshot,
+        naturalGasSnapshot,
+        tnxSnapshot
+    ] = await Promise.all([
         fetchHongKongMarketSnapshot(),
         fetchYahooChartSeries('GC=F', { code: 'GOLD', name: '黄金' }),
+        fetchYahooChartSeries('SI=F', { code: 'SILVER', name: '白银' }),
         fetchForexSnapshot('USDCNH', '美元人民币'),
         fetchYahooChartSeries('DX-Y.NYB', { code: 'DXY', name: '美元指数' }),
         fetchUsMarketStateIndices(),
         fetchYahooChartSeries('CL=F', { code: 'OIL', name: 'WTI原油' }),
+        fetchYahooChartSeries('BZ=F', { code: 'BRENT', name: 'Brent原油' }),
+        fetchYahooChartSeries('NG=F', { code: 'NATGAS', name: '天然气' }),
         fetchYahooChartSeries('^TNX', { code: 'TNX', name: '美债10Y' }),
     ]);
 
@@ -4253,6 +4267,14 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
                 name: goldSnapshot.snapshot.name,
                 latest: goldSnapshot.snapshot.latest,
                 change_pct: goldSnapshot.snapshot.change_pct
+            }
+            : null,
+        silverSnapshot.snapshot
+            ? {
+                code: silverSnapshot.snapshot.code,
+                name: silverSnapshot.snapshot.name,
+                latest: silverSnapshot.snapshot.latest,
+                change_pct: silverSnapshot.snapshot.change_pct
             }
             : null,
         dxySnapshot.snapshot
@@ -4269,6 +4291,22 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
                 name: wtiSnapshot.snapshot.name,
                 latest: wtiSnapshot.snapshot.latest,
                 change_pct: wtiSnapshot.snapshot.change_pct
+            }
+            : null,
+        brentSnapshot.snapshot
+            ? {
+                code: brentSnapshot.snapshot.code,
+                name: brentSnapshot.snapshot.name,
+                latest: brentSnapshot.snapshot.latest,
+                change_pct: brentSnapshot.snapshot.change_pct
+            }
+            : null,
+        naturalGasSnapshot.snapshot
+            ? {
+                code: naturalGasSnapshot.snapshot.code,
+                name: naturalGasSnapshot.snapshot.name,
+                latest: naturalGasSnapshot.snapshot.latest,
+                change_pct: naturalGasSnapshot.snapshot.change_pct
             }
             : null,
         tnxSnapshot.snapshot
