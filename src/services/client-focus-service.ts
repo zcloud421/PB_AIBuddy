@@ -25,6 +25,7 @@ import axios from 'axios';
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
 const DEFAULT_DISCLAIMER = '本页内容仅供市场讨论准备，客户沟通请结合所属机构的策略观点与合规要求。';
 const FOCUS_CACHE_TTL_MS = 60 * 60 * 1000;
+const FOCUS_LONG_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 const FOCUS_LIVE_MARKET_CACHE_TTL_MS = 5 * 60 * 1000;
 const FOCUS_CHAIN_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const POLYMARKET_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -4575,9 +4576,6 @@ ${newsSection}
 }
 
 async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFocusDetailResponse> {
-    if (topic.slug === 'middle-east-tensions') {
-        focusCache.delete('middle-east-tensions');
-    }
     const cached = focusCache.get(topic.slug);
     const cachedHasQuestionCategories = Array.isArray(cached?.value.client_questions)
         && cached.value.client_questions.some((item) => typeof item?.category === 'string' && item.category.trim().length > 0);
@@ -4670,7 +4668,13 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
     };
 
     focusCache.set(topic.slug, {
-        expiresAt: Date.now() + (topic.slug === 'hk-market-sentiment' ? FOCUS_LIVE_MARKET_CACHE_TTL_MS : FOCUS_CACHE_TTL_MS),
+        expiresAt: Date.now() + (
+            topic.slug === 'hk-market-sentiment'
+                ? FOCUS_LIVE_MARKET_CACHE_TTL_MS
+                : (topic.slug === 'middle-east-tensions' || topic.slug === 'private-credit-stress')
+                    ? FOCUS_LONG_CACHE_TTL_MS
+                    : FOCUS_CACHE_TTL_MS
+        ),
         value: detail
     });
 
