@@ -39,7 +39,7 @@ const POLYMARKET_HISTORY_CHUNK_DAYS = 14;
 const WHAT_CHANGED_WINDOW_HOURS = 72;
 const PRIVATE_CREDIT_WHAT_CHANGED_WINDOW_DAYS = 7;
 const FOCUS_QUESTION_CATEGORIES: Record<string, string[]> = {
-    'middle-east-tensions': ['股票/FCN', '黄金', '原油', '债券'],
+    'middle-east-tensions': ['原油', '股票/FCN', '黄金', '债券', '汇率'],
     'gold-repricing': ['黄金', '美元', '股票/FCN'],
     'hk-market-sentiment': ['港股', '科技股', '南向资金'],
     'usd-strength': ['美元', '债券', '新兴市场'],
@@ -1648,19 +1648,17 @@ async function generateDynamicClientQuestions(
 
     const systemPrompt = topic.slug === 'middle-east-tensions'
         ? `
-你是香港私人银行的市场沟通助手，面向 RM/IC 生成“客户常问”的标准回答。
+你是私人银行投资顾问助手，根据最新中东局势，为香港私行RM/IC生成大类资产影响分析问答。
 
-回答目标不是复述新闻，而是帮助 RM 向客户解释：
-1. 当前市场机制是什么
-2. 最新新闻改变了什么
-3. 对大类资产意味着什么
+核心约束：
+1. 只梳理传导链条和解释机制，不输出任何定性方向判断（禁止使用"看好/看空/利好/利空/受益/承压"等词）
+2. 涉及具体市场数据（如降息概率）引导用户查阅公开来源（如CME FedWatch），不硬编码具体数字
+3. 若分析涉及配置方向，统一收尾："具体方向结合机构house view判断"
+4. 每条回答控制在80-120字，简洁直白，符合私行RM/IC专业口吻
+5. 禁止使用"局势升级""引发不确定性""市场承压""风险升温"等空泛表述
 
-语气要求：
-- 专业、克制、像私行客户沟通口径
-- 先讲机制，再讲最新变化，再讲资产含义
-- 不要写成快讯，不要像事件播报
-- 不要使用“局势升级”“引发不确定性”等空泛表述
-- 不要直接给投资建议
+回答结构（每条）：
+[地缘/市场变化] → [传导机制] → [受影响资产的路径描述] → [如涉及配置，提示结合house view]
 `.trim()
         : topic.slug === 'private-credit-stress'
             ? `
@@ -1756,31 +1754,36 @@ ${(FOCUS_QUESTION_CATEGORIES[topic.slug] ?? []).join('、')}
 
     const rawUserPrompt = topic.slug === 'middle-east-tensions'
         ? `
-以下是过去48小时的中东冲突相关新闻。请基于这些最新信息，
-为以下固定问题与市场框架延伸出 6 到 8 个客户常问问答，供香港私人银行 RM/IC 与客户沟通时使用。
+以下是过去48小时的中东局势相关新闻。请先判断当前情景标签，再生成问答。
 
-${questionsList}
-
-每个问题的当前基准回答如下：
-${baselineAnswers}
+情景判断规则：
+- 若新闻以"停火/ceasefire/谈判/negotiations/deal"为主 → 情景：脆弱停火
+- 若新闻以"空袭/导弹/封锁/escalation"为主 → 情景：冲突升级
+- 若新闻以"和平协议/permanent/协议达成"为主 → 情景：和平协议
 
 新闻列表：
 ${newsList}
 
-写作要求：
-- 每条答案 70-110 字
-- 必须采用“市场机制 → 最新变化 → 资产含义”的结构
-- 必须至少包含 1 个具体最新事实、数字或市场变量
-- 重点解释对油价、黄金、美元、利率路径或风险偏好的影响
-- 回答要有 3-7 天可用性，不要写成只对应某一条新闻的快讯
-- 如果最新新闻没有改变原有市场框架，应明确说明“市场逻辑未变，只是新增了什么变量”
-- 在保留基准回答逻辑框架的基础上，用最新新闻更新答案
+生成要求：
+- 问题必须与判断出的情景一致，不能使用过时情景的假设
+- 优先捕捉情景切换带来的新传导逻辑（如从"美元走强"切换到"避险溢价消退"）
+- 覆盖以下维度，每个维度至少1个问题：
+  * 汇率（含CNH/USD）
+  * 利率/央行路径（美联储降息预期）
+  * 大宗商品（油价、黄金）
+  * 股票（板块分化机制）
+  * 债券/固收
+  * 结构性长期变化（如有，例如petroyuan、结算体系）
+- 问题语气具体、有观察点，对标私行客户口吻
+  ✓ "停火后CNH从6.9升至6.83，传导链条是什么？"
+  ✗ "汇率有什么变化？"
+- 每条回答严格遵循系统提示的传导链条结构，不输出方向判断
 
 禁止：
-- 不要以“过去48小时内...”开头
-- 不要整段围绕某个 headline 复述
-- 不要使用“局势升级”“引发不确定性”等空泛表述
-- 不要给具体投资建议
+- 不要以"过去48小时内..."开头
+- 不要整段围绕某个headline复述
+- 不要使用"局势升级""引发不确定性"等空泛表述
+- 不要给具体投资建议或方向性判断
 
 只输出JSON，不要解释。
 `.trim()
@@ -1937,6 +1940,15 @@ ${newsList}
         const fullText = `${question} ${answer}`.toLowerCase();
 
         if (slug === 'middle-east-tensions') {
+            if (
+                (questionText.includes('美元') && (questionText.includes('人民币') || questionText.includes('cnh') || questionText.includes('汇率') || questionText.includes('港元')))
+                || questionText.includes('cnh')
+                || questionText.includes('汇率')
+                || questionText.includes('petroyuan')
+                || questionText.includes('结算')
+            ) {
+                return '汇率';
+            }
             // Match debt/rate keywords on question only to avoid false positives from answer context
             if (
                 questionText.includes('降息')
