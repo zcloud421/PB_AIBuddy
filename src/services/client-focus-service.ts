@@ -3719,7 +3719,7 @@ async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientF
     const upperSymbol = symbol.toUpperCase();
     const yahooFallbackTicker =
         upperSymbol === 'USDCNH'
-            ? 'USDCNH=X'
+            ? 'CNH=X'
             : upperSymbol === 'USDJPY'
                 ? 'JPY=X'
                 : upperSymbol === 'USDCHF'
@@ -3866,10 +3866,12 @@ async function fetchYahooChartSeries(
         const previousClose = Number(result?.meta?.previousClose);
         const latest = Number(result?.meta?.regularMarketPrice);
         const effectiveLatest = Number.isFinite(latest) ? latest : latestPoint.close;
-        const changePct = Number.isFinite(previousClose) && previousClose !== 0
-            ? ((effectiveLatest - previousClose) / previousClose) * 100
-            : history.length >= 2
-                ? ((latestPoint.close - history[history.length - 2].close) / history[history.length - 2].close) * 100
+        const previousHistoryClose = history.length >= 2 ? history[history.length - 2].close : null;
+        const resolvedPreviousHistoryClose = Number.isFinite(previousHistoryClose) ? previousHistoryClose : null;
+        const changePct = resolvedPreviousHistoryClose !== null && resolvedPreviousHistoryClose !== 0
+            ? ((latestPoint.close - resolvedPreviousHistoryClose) / resolvedPreviousHistoryClose) * 100
+            : Number.isFinite(previousClose) && previousClose !== 0
+                ? ((effectiveLatest - previousClose) / previousClose) * 100
                 : null;
 
         return {
