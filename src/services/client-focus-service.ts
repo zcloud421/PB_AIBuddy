@@ -4411,8 +4411,13 @@ async function generateMarketStateSummaryLLM(
     const priceLines = indices
         .filter((i) => i.change_pct !== null)
         .map((i) => {
-            const sign = (i.change_pct ?? 0) >= 0 ? '+' : '';
-            return `${i.name}（${i.code}）: ${sign}${(i.change_pct ?? 0).toFixed(2)}%`;
+            const change = i.change_pct ?? 0;
+            const sign = change >= 0 ? '+' : '';
+            // TNX change_pct is stored in bps, not percent
+            const formatted = i.code === 'TNX'
+                ? `${sign}${change.toFixed(1)}bps`
+                : `${sign}${change.toFixed(2)}%`;
+            return `${i.name}（${i.code}）: ${formatted}`;
         })
         .join('\n');
 
@@ -4432,9 +4437,11 @@ ${newsSection}
 
 要求：
 - 直接点出最显著的跨资产信号（哪两个资产走势最重要）
-- 如果有具体地缘事件驱动（如霍尔木兹、停火、空袭），必须点名
+- 如果有具体地缘事件（如霍尔木兹封闭、停火协议、空袭），必须点名，不要用"地缘风险"代替
+- 如果没有具体地缘事件信息，直接用价格信号描述原因（例如"美伊停战带动风险资产大涨"、"原油反弹推升通胀预期"），禁止用"地缘风险推升"等空泛归因
+- 美债收益率变化用bps描述：收益率下行（bps为负）= 避险/降息预期升温，不是"大跌"；收益率上行（bps为正）= 通胀预期/再通胀交易
 - 结尾说明客户最可能追问哪个方向（一句）
-- 禁止使用"市场承压""风险升温""不确定性"等空泛表述
+- 禁止使用"市场承压""风险升温""不确定性""地缘局势"等空泛表述
 - 只输出摘要文字，不要任何解释或标点以外的内容
 `.trim();
 
