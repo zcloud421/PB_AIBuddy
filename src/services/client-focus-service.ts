@@ -43,7 +43,7 @@ const FOCUS_QUESTION_CATEGORIES: Record<string, string[]> = {
     'middle-east-tensions': ['原油', '股票/FCN', '黄金', '债券', '汇率'],
     'gold-repricing': ['黄金', '美元', '股票/FCN'],
     'hk-market-sentiment': ['市场节奏', '科技板块', '南向资金'],
-    'usd-strength': ['汇率传导', '利率与债券', '新兴市场资产'],
+    'usd-strength': ['美元驱动', '汇率传导', '相关资产'],
     'private-credit-stress': ['信贷与债券', '股票影响', '房地产风险'],
 };
 
