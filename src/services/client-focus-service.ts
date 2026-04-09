@@ -42,7 +42,7 @@ const PRIVATE_CREDIT_WHAT_CHANGED_WINDOW_DAYS = 7;
 const FOCUS_QUESTION_CATEGORIES: Record<string, string[]> = {
     'middle-east-tensions': ['原油', '股票/FCN', '黄金', '债券', '汇率'],
     'gold-repricing': ['黄金', '美元', '股票/FCN'],
-    'hk-market-sentiment': ['港股', '科技股', '南向资金'],
+    'hk-market-sentiment': ['市场节奏', '科技板块', '南向资金'],
     'usd-strength': ['美元', '债券', '新兴市场'],
     'private-credit-stress': ['债券/信贷', '股票/FCN', '房地产'],
 };
