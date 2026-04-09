@@ -3768,9 +3768,35 @@ async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientF
         const rows = Array.isArray(payload.data?.diff) ? payload.data?.diff ?? [] : [];
         const match = rows.find((item) => String(item.f12 ?? '').toUpperCase() === symbol.toUpperCase());
         if (!match) {
-            return symbol.toUpperCase() === 'USDCNH'
-                ? fetchYahooForexFallback('CNH=X')
-                : null;
+            if (upperSymbol === 'USDCNH') {
+                const history = await fetchForexHistory('USDCNH');
+                const latestHistory = history.length >= 1 ? history[history.length - 1] : null;
+                const previousHistory = history.length >= 2 ? history[history.length - 2] : null;
+                const historyChangePct =
+                    latestHistory && previousHistory && previousHistory.close !== 0
+                        ? ((latestHistory.close - previousHistory.close) / previousHistory.close) * 100
+                        : null;
+
+                if (yahooPrimary?.latest !== null || latestHistory) {
+                    return {
+                        code: symbol,
+                        name,
+                        latest: yahooPrimary?.latest ?? latestHistory?.close ?? null,
+                        change_pct: Number.isFinite(yahooPrimary?.change_pct)
+                            ? yahooPrimary?.change_pct ?? null
+                            : Number.isFinite(historyChangePct)
+                                ? historyChangePct
+                                : null,
+                        as_of: yahooPrimary?.as_of ?? latestHistory?.date ?? null
+                    };
+                }
+
+                return yahooFallbackTicker
+                    ? fetchYahooForexFallback(yahooFallbackTicker)
+                    : null;
+            }
+
+            return null;
         }
 
         const latest = Number(match.f2);
