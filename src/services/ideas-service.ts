@@ -504,7 +504,7 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
         const normalizedRunDate = normalizeUsTradingDate(cachedRow.run_date);
         const shouldCheckForMissingKeyEvents = (cachedRow.key_events ?? []).length === 0;
         const shouldRefreshStaleConferenceEvent = hasStaleConferenceKeyEvent(cachedRow.key_events ?? []);
-        const needsNewsContext = !cachedRow.why_now || shouldCheckForMissingKeyEvents || shouldRefreshStaleConferenceEvent;
+        const needsNewsContext = !cachedRow.why_now || shouldRefreshStaleConferenceEvent;
         const newsContext = needsNewsContext
             ? await fetchStockNewsContext(
                   normalizedSymbol,
@@ -513,7 +513,7 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             : null;
         const shouldRefreshNarrativeForEvents =
             shouldRefreshStaleConferenceEvent ||
-            (shouldCheckForMissingKeyEvents && headlinesContainMaterialEvent(newsContext?.narrativeItems ?? []));
+            (!cachedRow.why_now && shouldCheckForMissingKeyEvents && headlinesContainMaterialEvent(newsContext?.narrativeItems ?? []));
         const needsFreshNarrative = !cachedRow.why_now || shouldRefreshNarrativeForEvents;
         const newsItems = filterRelevantNewsItems(
             cachedRow.news_items ?? newsContext?.displayItems ?? [],
