@@ -4066,11 +4066,7 @@ async function fetchGoldHistory(): Promise<ClientFocusPriceHistoryPoint[]> {
 
 async function fetchFocusPriceHistory(slug: string): Promise<ClientFocusPriceHistoryPoint[] | null> {
     if (slug === 'usd-strength') {
-        const result = await fetchYahooChartSeries('CNH=X', {
-            code: 'USDCNH',
-            name: '美元人民币'
-        });
-        const history = result.history ?? [];
+        const history = await fetchForexHistory('USDCNH');
         return history.length > 1 ? history : null;
     }
     if (slug === 'gold-repricing') {
@@ -4979,7 +4975,13 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
     const cached = focusCache.get(topic.slug);
     const cachedHasQuestionCategories = Array.isArray(cached?.value.client_questions)
         && cached.value.client_questions.some((item) => typeof item?.category === 'string' && item.category.trim().length > 0);
-    if (cached && cached.expiresAt > Date.now() && cachedHasQuestionCategories) {
+    const cachedHasRequiredPriceHistory =
+        topic.slug !== 'usd-strength'
+        || (
+            Array.isArray(cached?.value.focus_price_history)
+            && cached.value.focus_price_history.length > 1
+        );
+    if (cached && cached.expiresAt > Date.now() && cachedHasQuestionCategories && cachedHasRequiredPriceHistory) {
         return cached.value;
     }
 
