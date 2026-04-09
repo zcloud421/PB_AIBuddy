@@ -4315,6 +4315,17 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
         fetchYahooChartSeries('^TNX', { code: 'TNX', name: '美债10Y' }),
     ]);
 
+    const tnxLatestClose = tnxSnapshot.history && tnxSnapshot.history.length >= 1
+        ? tnxSnapshot.history[tnxSnapshot.history.length - 1].close
+        : null;
+    const tnxPreviousClose = tnxSnapshot.history && tnxSnapshot.history.length >= 2
+        ? tnxSnapshot.history[tnxSnapshot.history.length - 2].close
+        : null;
+    const tnxBpsChange =
+        tnxLatestClose !== null && tnxPreviousClose !== null
+            ? (tnxLatestClose - tnxPreviousClose) * 100
+            : null;
+
     const indices = [
         ...usIndices,
         goldSnapshot.snapshot
@@ -4370,7 +4381,7 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
                 code: tnxSnapshot.snapshot.code,
                 name: tnxSnapshot.snapshot.name,
                 latest: tnxSnapshot.snapshot.latest,
-                change_pct: tnxSnapshot.snapshot.change_pct
+                change_pct: Number.isFinite(tnxBpsChange) ? tnxBpsChange : tnxSnapshot.snapshot.change_pct
             }
             : null,
         usdCnhSnapshot
