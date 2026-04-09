@@ -3619,6 +3619,14 @@ async function fetchSectorRotation(): Promise<ClientFocusSectorRotation | null> 
 }
 
 async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientFocusPriceSnapshot | null> {
+    async function fetchYahooForexFallback(ticker: string): Promise<ClientFocusPriceSnapshot | null> {
+        const { snapshot } = await fetchYahooChartSeries(ticker, {
+            code: symbol,
+            name
+        });
+        return snapshot ?? null;
+    }
+
     try {
         const url = new URL('https://push2.eastmoney.com/api/qt/clist/get');
         url.searchParams.set('pn', '1');
@@ -3650,7 +3658,9 @@ async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientF
         const rows = Array.isArray(payload.data?.diff) ? payload.data?.diff ?? [] : [];
         const match = rows.find((item) => String(item.f12 ?? '').toUpperCase() === symbol.toUpperCase());
         if (!match) {
-            return null;
+            return symbol.toUpperCase() === 'USDCNH'
+                ? fetchYahooForexFallback('CNH=X')
+                : null;
         }
 
         const latest = Number(match.f2);
@@ -3664,7 +3674,9 @@ async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientF
             as_of: Number.isFinite(ts) ? new Date(ts * 1000).toISOString().slice(0, 10) : null
         };
     } catch {
-        return null;
+        return symbol.toUpperCase() === 'USDCNH'
+            ? fetchYahooForexFallback('CNH=X')
+            : null;
     }
 }
 
