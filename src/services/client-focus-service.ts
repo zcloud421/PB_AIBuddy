@@ -4735,7 +4735,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         expiresAt: Date.now() + (
             topic.slug === 'hk-market-sentiment'
                 ? FOCUS_LIVE_MARKET_CACHE_TTL_MS
-                : (topic.slug === 'middle-east-tensions' || topic.slug === 'private-credit-stress')
+                : topic.slug === 'private-credit-stress'
                     ? FOCUS_LONG_CACHE_TTL_MS
                     : FOCUS_CACHE_TTL_MS
         ),
