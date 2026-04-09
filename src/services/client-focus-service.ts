@@ -2003,10 +2003,10 @@ ${newsList}
             choices?: Array<{ message?: { content?: string } }>;
         };
         const content = payload.choices?.[0]?.message?.content?.trim() ?? '';
-        const parsed = safeParseJson(content) as Array<{ question?: string; answer?: string; category?: string }> | null;
-        console.log(`[focus-client-questions] ${topic.slug}: parsed ${Array.isArray(parsed) ? parsed.length : 'null'} items, categories=${Array.isArray(parsed) ? [...new Set(parsed.map((i: any) => i?.category).filter(Boolean))].join(',') : 'n/a'}`);
+        const parsed = safeParseJsonArray(content) as Array<{ question?: string; answer?: string; category?: string }> | null;
+        console.log(`[focus-client-questions] ${topic.slug}: parsed ${parsed ? parsed.length : 'null'} items, categories=${parsed ? [...new Set(parsed.map((i: any) => i?.category).filter(Boolean))].join(',') : 'n/a'}`);
 
-        if (!Array.isArray(parsed)) {
+        if (!parsed) {
             console.warn(`[focus-client-questions] ${topic.slug}: json_parse_failed`);
             return null;
         }
@@ -3194,6 +3194,41 @@ function safeParseJson(content: string): FocusTopicModelOutput | null {
         }
         try {
             return JSON.parse(trimmed.slice(start, end + 1)) as FocusTopicModelOutput;
+        } catch {
+            return null;
+        }
+    }
+}
+
+function safeParseJsonArray(content: string): unknown[] | null {
+    const trimmed = content.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    const stripped = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+
+    try {
+        const parsed = JSON.parse(stripped);
+        if (Array.isArray(parsed)) {
+            return parsed;
+        }
+        if (parsed && typeof parsed === 'object') {
+            const firstArray = Object.values(parsed).find(Array.isArray);
+            if (firstArray) {
+                return firstArray as unknown[];
+            }
+        }
+        return null;
+    } catch {
+        const start = stripped.indexOf('[');
+        const end = stripped.lastIndexOf(']');
+        if (start === -1 || end === -1 || end <= start) {
+            return null;
+        }
+        try {
+            const parsed = JSON.parse(stripped.slice(start, end + 1));
+            return Array.isArray(parsed) ? parsed : null;
         } catch {
             return null;
         }
