@@ -3716,6 +3716,8 @@ async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientF
         return snapshot ?? null;
     }
 
+    const yahooFallbackTicker = symbol.toUpperCase() === 'USDCNH' ? 'CNH=X' : null;
+
     try {
         const url = new URL('https://push2.eastmoney.com/api/qt/clist/get');
         url.searchParams.set('pn', '1');
@@ -3755,16 +3757,21 @@ async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientF
         const latest = Number(match.f2);
         const changePct = Number(match.f3);
         const ts = Number(match.f124);
+        const yahooFallback =
+            yahooFallbackTicker && (!Number.isFinite(changePct) || !Number.isFinite(latest))
+                ? await fetchYahooForexFallback(yahooFallbackTicker)
+                : null;
+
         return {
             code: symbol,
             name,
-            latest: Number.isFinite(latest) ? latest : null,
-            change_pct: Number.isFinite(changePct) ? changePct : null,
+            latest: Number.isFinite(latest) ? latest : (yahooFallback?.latest ?? null),
+            change_pct: Number.isFinite(changePct) ? changePct : (yahooFallback?.change_pct ?? null),
             as_of: Number.isFinite(ts) ? new Date(ts * 1000).toISOString().slice(0, 10) : null
         };
     } catch {
-        return symbol.toUpperCase() === 'USDCNH'
-            ? fetchYahooForexFallback('CNH=X')
+        return yahooFallbackTicker
+            ? fetchYahooForexFallback(yahooFallbackTicker)
             : null;
     }
 }
