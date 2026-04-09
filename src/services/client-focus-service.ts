@@ -3726,11 +3726,15 @@ async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientF
                     ? 'CHF=X'
                     : null;
 
-    if (yahooFallbackTicker) {
-        const yahooPrimary = await fetchYahooForexFallback(yahooFallbackTicker);
-        if (yahooPrimary?.latest !== null) {
-            return yahooPrimary;
-        }
+    const yahooPrimary = yahooFallbackTicker
+        ? await fetchYahooForexFallback(yahooFallbackTicker)
+        : null;
+
+    if (
+        yahooPrimary?.latest !== null
+        && (Number.isFinite(yahooPrimary?.change_pct) || upperSymbol !== 'USDCNH')
+    ) {
+        return yahooPrimary;
     }
 
     try {
@@ -3773,9 +3777,12 @@ async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientF
         const changePct = Number(match.f3);
         const ts = Number(match.f124);
         const yahooFallback =
-            yahooFallbackTicker && (!Number.isFinite(changePct) || !Number.isFinite(latest))
-                ? await fetchYahooForexFallback(yahooFallbackTicker)
-                : null;
+            yahooPrimary
+            ?? (
+                yahooFallbackTicker && (!Number.isFinite(changePct) || !Number.isFinite(latest))
+                    ? await fetchYahooForexFallback(yahooFallbackTicker)
+                    : null
+            );
 
         let effectiveChangePct = Number.isFinite(changePct) ? changePct : (yahooFallback?.change_pct ?? null);
         if (!Number.isFinite(effectiveChangePct) && upperSymbol === 'USDCNH') {
