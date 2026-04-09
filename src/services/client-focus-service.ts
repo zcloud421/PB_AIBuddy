@@ -2004,6 +2004,7 @@ ${newsList}
         };
         const content = payload.choices?.[0]?.message?.content?.trim() ?? '';
         const parsed = safeParseJson(content) as Array<{ question?: string; answer?: string; category?: string }> | null;
+        console.log(`[focus-client-questions] ${topic.slug}: parsed ${Array.isArray(parsed) ? parsed.length : 'null'} items, categories=${Array.isArray(parsed) ? [...new Set(parsed.map((i: any) => i?.category).filter(Boolean))].join(',') : 'n/a'}`);
 
         if (!Array.isArray(parsed)) {
             console.warn(`[focus-client-questions] ${topic.slug}: json_parse_failed`);
