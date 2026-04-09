@@ -20,6 +20,7 @@ import type {
 } from '../types/api';
 import { fetchNewsItemsByQuery, fetchNewsItemsFromNewsData } from '../data/news-fetcher';
 import { MassiveDataFetcher } from '../data/massive-fetcher';
+import { MassiveClient } from '../data/massive-client';
 import axios from 'axios';
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
@@ -4074,12 +4075,21 @@ async function fetchMassiveIndexSnapshot(
 ): Promise<ClientFocusPriceSnapshot | null> {
     try {
         const fetcher = new MassiveDataFetcher();
+        const massiveClient = new MassiveClient();
         const history = await fetcher.fetchPriceHistory(massiveSymbol, 30);
         if (history.length >= 2) {
             const latest = history[history.length - 1];
-            const previous = history[history.length - 2];
-            const changePct =
-                previous.close !== 0 ? ((latest.close - previous.close) / previous.close) * 100 : null;
+            const previousCloseResponse = await massiveClient.get<{ results?: Array<{ c?: number }> }>(
+                `/v2/aggs/ticker/${massiveSymbol}/prev`,
+                { adjusted: true }
+            );
+            const previousClose = Number(previousCloseResponse.results?.[0]?.c);
+            const changePct = Number.isFinite(previousClose) && previousClose !== 0
+                ? ((latest.close - previousClose) / previousClose) * 100
+                : (() => {
+                    const previous = history[history.length - 2];
+                    return previous.close !== 0 ? ((latest.close - previous.close) / previous.close) * 100 : null;
+                })();
 
             return {
                 code: fallbackMeta.code,
