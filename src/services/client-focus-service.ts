@@ -4066,7 +4066,11 @@ async function fetchGoldHistory(): Promise<ClientFocusPriceHistoryPoint[]> {
 
 async function fetchFocusPriceHistory(slug: string): Promise<ClientFocusPriceHistoryPoint[] | null> {
     if (slug === 'usd-strength') {
-        const history = await fetchForexHistory('USDCNH');
+        const result = await fetchYahooChartSeries('CNH=X', {
+            code: 'USDCNH',
+            name: '美元人民币'
+        });
+        const history = result.history ?? [];
         return history.length > 1 ? history : null;
     }
     if (slug === 'gold-repricing') {
