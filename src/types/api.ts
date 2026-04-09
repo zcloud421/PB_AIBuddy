@@ -348,6 +348,11 @@ export interface SymbolIdeaResponse {
     sentiment_score: number | null;
 }
 
+export interface SymbolNarrativeResponse {
+    ready: boolean;
+    narrative: NarrativeOutput | null;
+}
+
 export interface AsyncScoringAcceptedResponse {
     symbol: string;
     run_date: string;

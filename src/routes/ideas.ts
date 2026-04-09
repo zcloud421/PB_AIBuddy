@@ -7,6 +7,7 @@ import {
     getClientFocusMarketStateController,
     getMiddleEastPolymarketController,
     getSymbolIdeaController,
+    getSymbolNarrativeController,
     getSymbolPriceHistoryController,
     getSymbolIdeaStatusController,
     getTodayIdeasController
@@ -20,5 +21,6 @@ ideasRouter.get('/focus/market-state', asyncHandler(getClientFocusMarketStateCon
 ideasRouter.get('/focus/middle-east-polymarket', asyncHandler(getMiddleEastPolymarketController));
 ideasRouter.get('/focus/:slug', asyncHandler(getClientFocusDetailController));
 ideasRouter.get('/:symbol/price-history', asyncHandler(getSymbolPriceHistoryController));
+ideasRouter.get('/:symbol/narrative', asyncHandler(getSymbolNarrativeController));
 ideasRouter.get('/:symbol', asyncHandler(getSymbolIdeaController));
 ideasRouter.get('/:symbol/status/:job_id', asyncHandler(getSymbolIdeaStatusController));

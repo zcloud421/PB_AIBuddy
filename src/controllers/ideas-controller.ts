@@ -6,6 +6,7 @@ import {
     getClientFocusMarketState,
     getMiddleEastPolymarket,
     getSymbolIdea,
+    getSymbolNarrative,
     getSymbolPriceHistory,
     getSymbolIdeaStatus,
     getTodayIdeas
@@ -58,6 +59,12 @@ export async function getSymbolIdeaController(req: Request, res: Response): Prom
 
     res.setHeader('Cache-Control', payload.cached ? 'private, max-age=300' : 'private, no-cache');
     res.setHeader('X-Cache', payload.cached ? 'HIT' : 'MISS');
+    res.status(200).json(payload);
+}
+
+export async function getSymbolNarrativeController(req: Request, res: Response): Promise<void> {
+    const payload = await getSymbolNarrative(req.params.symbol);
+    res.setHeader('Cache-Control', 'private, max-age=60');
     res.status(200).json(payload);
 }
 

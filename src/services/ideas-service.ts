@@ -59,6 +59,7 @@ import type {
     SignalColor,
     SignalRow,
     SymbolIdeaResponse,
+    SymbolNarrativeResponse,
     SymbolPriceHistoryResponse,
     TodayIdeasResponse
 } from '../types/api';
@@ -502,21 +503,9 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
 
     if (cachedRow) {
         const normalizedRunDate = normalizeUsTradingDate(cachedRow.run_date);
-        const shouldCheckForMissingKeyEvents = (cachedRow.key_events ?? []).length === 0;
         const shouldRefreshStaleConferenceEvent = hasStaleConferenceKeyEvent(cachedRow.key_events ?? []);
-        const needsNewsContext = !cachedRow.why_now || shouldRefreshStaleConferenceEvent;
-        const newsContext = needsNewsContext
-            ? await fetchStockNewsContext(
-                  normalizedSymbol,
-                  cachedRow.company_name ?? getCompanyName(normalizedSymbol)
-              )
-            : null;
-        const shouldRefreshNarrativeForEvents =
-            shouldRefreshStaleConferenceEvent ||
-            (!cachedRow.why_now && shouldCheckForMissingKeyEvents && headlinesContainMaterialEvent(newsContext?.narrativeItems ?? []));
-        const needsFreshNarrative = !cachedRow.why_now || shouldRefreshNarrativeForEvents;
         const newsItems = filterRelevantNewsItems(
-            cachedRow.news_items ?? newsContext?.displayItems ?? [],
+            cachedRow.news_items ?? [],
             normalizedSymbol,
             cachedRow.company_name ?? getCompanyName(normalizedSymbol)
         );
@@ -585,33 +574,9 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             void updateIdeaCandidateNarrative(cachedRow.run_id, normalizedSymbol, narrative);
         }
 
-        if (!narrative || shouldRefreshNarrativeForEvents) {
-            const generatedNarrative = await buildNarrative({
-                symbol: normalizedSymbol,
-                companyName: cachedRow.company_name ?? getCompanyName(normalizedSymbol),
-                theme: underlying?.themes?.[0] ?? 'Featured',
-                grade: cachedRow.overall_grade,
-                recommendedStrike: toNullableNumber(cachedRow.recommended_strike),
-                estimatedCouponRange: formatEstimatedCouponRange(cachedRow.ref_coupon_pct),
-                currentPrice: effectiveCurrentPrice,
-                pctFrom52wHigh: effectivePctFrom52wHigh,
-                ma20: effectiveMa20,
-                ma50: effectiveMa50,
-                ma200: effectiveMa200,
-                impliedVolatility: effectiveIv,
-                flags: effectiveFlags,
-                tenorDays: cachedRow.recommended_tenor_days,
-                newsItems: newsContext?.narrativeItems ?? [],
-                daysToEarnings: priceContext?.days_to_earnings ?? cachedRow.days_to_earnings,
-                hasRecentEarnings: newsContext?.hasRecentEarnings ?? false,
-                earningsWeight: newsContext?.earningsWeight ?? 0,
-                daysSinceEarnings: newsContext?.daysSinceEarnings ?? null
-            });
-
-            if (generatedNarrative) {
-                narrative = generatedNarrative;
-                void updateIdeaCandidateNarrative(cachedRow.run_id, normalizedSymbol, generatedNarrative);
-            }
+        const needsNarrativeRefresh = !cachedRow.why_now || shouldRefreshStaleConferenceEvent;
+        if (needsNarrativeRefresh) {
+            void refreshNarrativeInBackground(normalizedSymbol, cachedRow, priceContext, effectiveFlags).catch(() => {});
         }
 
         return {
@@ -750,6 +715,41 @@ export async function getSymbolIdeaStatus(symbol: string, jobId: string): Promis
     }
 
     return job;
+}
+
+export async function getSymbolNarrative(symbol: string): Promise<SymbolNarrativeResponse> {
+    const normalizedSymbol = symbol.toUpperCase();
+    const activeRun = await getActiveCompletedRun();
+    let cachedRow = activeRun
+        ? await getIdeaBySymbolAndRunId(normalizedSymbol, activeRun.run_id)
+        : await getIdeaBySymbolAndDate(normalizedSymbol, todayIsoDate());
+
+    if (!cachedRow) {
+        cachedRow = await getIdeaBySymbolAndDate(normalizedSymbol, todayIsoDate());
+    }
+
+    if (!cachedRow?.why_now) {
+        return {
+            ready: false,
+            narrative: null
+        };
+    }
+
+    const newsItems = filterRelevantNewsItems(
+        cachedRow.news_items ?? [],
+        normalizedSymbol,
+        cachedRow.company_name ?? getCompanyName(normalizedSymbol)
+    );
+
+    return {
+        ready: true,
+        narrative: sanitizeNarrativeOutput({
+            why_now: cachedRow.why_now,
+            risk_note: cachedRow.risk_note ?? '',
+            sentiment_score: toNullableNumber(cachedRow.sentiment_score) ?? 0.5,
+            key_events: cachedRow.key_events ?? []
+        }, newsItems, normalizedSymbol, cachedRow.company_name ?? getCompanyName(normalizedSymbol))
+    };
 }
 
 async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
@@ -1847,12 +1847,11 @@ function toNullableNumber(value: number | string | null | undefined): number | n
     return Number.isFinite(numericValue) ? numericValue : null;
 }
 
-async function backfillCachedNarrative(
+async function refreshNarrativeInBackground(
     symbol: string,
     cachedRow: NonNullable<Awaited<ReturnType<typeof getIdeaBySymbolAndDate>>>,
-    cachedFlags: Flag[],
     priceContext: Awaited<ReturnType<typeof getPriceContextBySymbol>>,
-    newsItems: NewsItem[]
+    cachedFlags: Flag[]
 ): Promise<void> {
     if (
         cachedRow.recommended_strike === null ||
@@ -1864,6 +1863,13 @@ async function backfillCachedNarrative(
 
     const underlying = await getUnderlyingBySymbol(symbol);
     const newsContext = await fetchStockNewsContext(symbol, underlying?.company_name ?? undefined);
+    const newsItems = newsContext.narrativeItems.length > 0
+        ? newsContext.narrativeItems
+        : filterRelevantNewsItems(
+            cachedRow.news_items ?? [],
+            symbol,
+            underlying?.company_name ?? getCompanyName(symbol)
+        );
     const narrative = await buildNarrative({
         symbol,
         companyName: underlying?.company_name ?? getCompanyName(symbol),
@@ -1950,11 +1956,11 @@ async function buildNarrative(input: {
         days_since_earnings: input.daysSinceEarnings
     });
 
-    const marketCap = await fetchTickerMarketCap(input.symbol).catch(() => null);
+    void fetchTickerMarketCap(input.symbol).catch(() => null);
 
     return applyNarrativeGuardrails(narrative, {
         ...input,
-        marketCap
+        marketCap: null
     });
 }
 
