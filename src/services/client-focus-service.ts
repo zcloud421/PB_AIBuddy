@@ -47,6 +47,26 @@ const FOCUS_QUESTION_CATEGORIES: Record<string, string[]> = {
     'private-credit-stress': ['债券/信贷', '股票/FCN', '房地产'],
 };
 
+function getMarketLocalParts(timeZone: string) {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        weekday: 'short',
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: false,
+    });
+    const parts = formatter.formatToParts(new Date());
+    const lookup = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    const weekday = lookup.weekday ?? '';
+    const hour = Number(lookup.hour ?? '0');
+    const minute = Number(lookup.minute ?? '0');
+
+    return {
+        weekday,
+        minutes: hour * 60 + minute,
+    };
+}
+
 interface FocusTopicConfig {
     slug: string;
     title: string;
@@ -4180,6 +4200,8 @@ function buildMarketStateSummary(
         change_5d_pct?: number | null;
     }>
 ) {
+    const hkLocal = getMarketLocalParts('Asia/Hong_Kong');
+    const isHongKongAfternoon = hkLocal.minutes >= 12 * 60;
     const gold = indices.find((item) => item.code === 'GOLD');
     const dxy = indices.find((item) => item.code === 'DXY');
     const spx = indices.find((item) => item.code === 'SPX');
@@ -4187,6 +4209,7 @@ function buildMarketStateSummary(
     const hsi = indices.find((item) => item.code === 'HSI');
     const hstech = indices.find((item) => item.code === 'HSTECH');
     const oil = indices.find((item) => item.code === 'OIL');
+    const tnx = indices.find((item) => item.code === 'TNX');
 
     const goldUp = (gold?.change_pct ?? 0) >= 0.5;
     const goldDown = (gold?.change_pct ?? 0) <= -0.5;
@@ -4197,36 +4220,47 @@ function buildMarketStateSummary(
     const hkWeak = (hsi?.change_pct ?? 0) <= -0.6 || (hstech?.change_pct ?? 0) <= -1;
     const hkStrong = (hsi?.change_pct ?? 0) >= 0.6 || (hstech?.change_pct ?? 0) >= 1;
     const oilDown = (oil?.change_pct ?? 0) <= -3;
+    const oilUp = (oil?.change_pct ?? 0) >= 3;
+    const tnxDown = (tnx?.change_pct ?? 0) <= -5;
+    const tnxUp = (tnx?.change_pct ?? 0) >= 5;
 
-    if (oilDown && (usRiskOff || hkWeak)) {
-        return '原油显著回落，能源板块承压；叠加风险资产走弱，市场情绪偏谨慎。';
+    let overnightSummary = '隔夜美股、黄金、原油与美债收益率走势分化，客户会更关注地缘局势之后由谁主导重新定价。';
+
+    if (oilDown && usRiskOn && (goldUp || tnxDown)) {
+        overnightSummary = '隔夜中东局势缓和信号带动美股反弹，原油明显回落，黄金与美债收益率的变化也在重定价降息路径。';
+    } else if (oilUp && usRiskOff && (goldUp || dxyUp)) {
+        overnightSummary = '隔夜中东局势再度主导市场，原油冲高、黄金偏强，美股回落，客户更可能追问通胀与避险资产如何重新定价。';
+    } else if (usRiskOn && dxyDown && (goldDown || !goldUp)) {
+        overnightSummary = '隔夜美股风险偏好修复，美元回落，市场开始把焦点从避险交易重新切回增长与政策路径。';
+    } else if (usRiskOff && (goldUp || dxyUp)) {
+        overnightSummary = '隔夜避险交易重新升温，美股回落，黄金或美元偏强，客户会更关注地缘与政策变量谁在主导市场。';
+    } else if (goldUp && tnxDown) {
+        overnightSummary = '隔夜黄金走强、美债收益率回落，市场更关注避险需求与降息预期是否重新占上风。';
+    } else if (tnxUp && dxyUp) {
+        overnightSummary = '隔夜美元与美债收益率同步走高，市场开始重新评估通胀路径与降息节奏。';
     }
 
-    if (oilDown && goldUp) {
-        return '原油回落削弱通胀预期，黄金走强更多反映避险需求而非通胀逻辑。';
+    if (!isHongKongAfternoon) {
+        return overnightSummary;
     }
 
-    if (goldUp && dxyDown && (usRiskOn || hkStrong)) {
-        return '风险偏好有所修复：黄金仍强，美元回落，美股与港股开始重新计入弹性。';
+    if (hkStrong && hstech && (hstech.change_pct ?? 0) >= 1) {
+        return `${overnightSummary} 上午港股跟随修复，科技板块弹性更强，客户会继续追问这波风险偏好能否延续到亚洲时段。`;
     }
 
-    if (goldUp && dxyUp && (usRiskOff || hkWeak)) {
-        return '市场正在交易避险：黄金与美元同步偏强，风险资产表现仍受压制。';
+    if (hkWeak && hstech && (hstech.change_pct ?? 0) <= -1) {
+        return `${overnightSummary} 上午港股未能完全承接隔夜情绪，科技板块回吐更明显，客户会更关注中国资产是否仍受压。`;
     }
 
-    if (usRiskOn && hkStrong) {
-        return '风险资产整体回暖：美股与港股同步偏强，市场开始重新评估增长与估值弹性。';
+    if (hkStrong) {
+        return `${overnightSummary} 上午港股同步偏强，说明亚洲时段也在跟进隔夜风险偏好修复。`;
     }
 
-    if (hkWeak && dxyUp) {
-        return '美元偏强叠加港股承压，客户更可能追问中国资产与非美风险偏好的持续性。';
+    if (hkWeak) {
+        return `${overnightSummary} 上午港股表现偏弱，说明亚洲时段对隔夜叙事的接力仍然有限。`;
     }
 
-    if (goldDown && usRiskOn) {
-        return '市场更偏向风险资产修复：黄金回落，美股走强，叙事重心回到增长与政策路径。';
-    }
-
-    return '跨资产信号仍有分化，建议结合黄金、美元、美股与港股的相对表现理解今天的客户焦点。';
+    return `${overnightSummary} 上午港股延续震荡，客户会更关注亚洲时段是否给出更明确的接力信号。`;
 }
 
 function buildHongKongSnapshotSummary(
