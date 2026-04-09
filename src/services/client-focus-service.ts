@@ -3716,7 +3716,14 @@ async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientF
         return snapshot ?? null;
     }
 
-    const yahooFallbackTicker = symbol.toUpperCase() === 'USDCNH' ? 'CNH=X' : null;
+    const yahooFallbackTicker = symbol.toUpperCase() === 'USDCNH' ? 'USDCNH=X' : null;
+
+    if (symbol.toUpperCase() === 'USDCNH') {
+        const yahooPrimary = await fetchYahooForexFallback('USDCNH=X');
+        if (yahooPrimary?.latest !== null) {
+            return yahooPrimary;
+        }
+    }
 
     try {
         const url = new URL('https://push2.eastmoney.com/api/qt/clist/get');
@@ -4092,15 +4099,19 @@ async function fetchMassiveIndexSnapshot(
     massiveSymbol: string,
     fallbackMeta: { code: string; name: string }
 ): Promise<ClientFocusPriceSnapshot | null> {
+    const yahooSymbol = fallbackMeta.code === 'SPX' ? '^GSPC' : '^IXIC';
+    const yahooFallback = await fetchYahooChartSeries(yahooSymbol, fallbackMeta);
+
     try {
         const fetcher = new MassiveDataFetcher();
         const history = await fetcher.fetchPriceHistory(massiveSymbol, 30);
         if (history.length >= 2) {
             const latest = history[history.length - 1];
             const previous = history[history.length - 2];
-            const changePct = previous.close !== 0
+            const massiveChangePct = previous.close !== 0
                 ? ((latest.close - previous.close) / previous.close) * 100
                 : null;
+            const changePct = yahooFallback.snapshot?.change_pct ?? massiveChangePct;
 
             return {
                 code: fallbackMeta.code,
@@ -4114,9 +4125,7 @@ async function fetchMassiveIndexSnapshot(
         // fall through to Yahoo fallback
     }
 
-    const yahooSymbol = fallbackMeta.code === 'SPX' ? '^GSPC' : '^IXIC';
-    const fallback = await fetchYahooChartSeries(yahooSymbol, fallbackMeta);
-    return fallback.snapshot;
+    return yahooFallback.snapshot;
 }
 
 function buildMarketStateSummary(
