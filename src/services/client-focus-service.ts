@@ -3762,11 +3762,23 @@ async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientF
                 ? await fetchYahooForexFallback(yahooFallbackTicker)
                 : null;
 
+        let effectiveChangePct = Number.isFinite(changePct) ? changePct : (yahooFallback?.change_pct ?? null);
+        if (!Number.isFinite(effectiveChangePct) && symbol.toUpperCase() === 'USDCNH') {
+            const history = await fetchForexHistory('USDCNH');
+            if (history.length >= 2) {
+                const latestHistory = history[history.length - 1];
+                const previousHistory = history[history.length - 2];
+                if (previousHistory.close !== 0) {
+                    effectiveChangePct = ((latestHistory.close - previousHistory.close) / previousHistory.close) * 100;
+                }
+            }
+        }
+
         return {
             code: symbol,
             name,
             latest: Number.isFinite(latest) ? latest : (yahooFallback?.latest ?? null),
-            change_pct: Number.isFinite(changePct) ? changePct : (yahooFallback?.change_pct ?? null),
+            change_pct: Number.isFinite(effectiveChangePct) ? effectiveChangePct : null,
             as_of: Number.isFinite(ts) ? new Date(ts * 1000).toISOString().slice(0, 10) : null
         };
     } catch {
@@ -4082,21 +4094,13 @@ async function fetchMassiveIndexSnapshot(
 ): Promise<ClientFocusPriceSnapshot | null> {
     try {
         const fetcher = new MassiveDataFetcher();
-        const massiveClient = new MassiveClient();
         const history = await fetcher.fetchPriceHistory(massiveSymbol, 30);
         if (history.length >= 2) {
             const latest = history[history.length - 1];
-            const previousCloseResponse = await massiveClient.get<{ results?: Array<{ c?: number }> }>(
-                `/v2/aggs/ticker/${massiveSymbol}/prev`,
-                { adjusted: true }
-            );
-            const previousClose = Number(previousCloseResponse.results?.[0]?.c);
-            const changePct = Number.isFinite(previousClose) && previousClose !== 0
-                ? ((latest.close - previousClose) / previousClose) * 100
-                : (() => {
-                    const previous = history[history.length - 2];
-                    return previous.close !== 0 ? ((latest.close - previous.close) / previous.close) * 100 : null;
-                })();
+            const previous = history[history.length - 2];
+            const changePct = previous.close !== 0
+                ? ((latest.close - previous.close) / previous.close) * 100
+                : null;
 
             return {
                 code: fallbackMeta.code,
