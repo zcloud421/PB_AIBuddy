@@ -3716,10 +3716,18 @@ async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientF
         return snapshot ?? null;
     }
 
-    const yahooFallbackTicker = symbol.toUpperCase() === 'USDCNH' ? 'USDCNH=X' : null;
+    const upperSymbol = symbol.toUpperCase();
+    const yahooFallbackTicker =
+        upperSymbol === 'USDCNH'
+            ? 'USDCNH=X'
+            : upperSymbol === 'USDJPY'
+                ? 'JPY=X'
+                : upperSymbol === 'USDCHF'
+                    ? 'CHF=X'
+                    : null;
 
-    if (symbol.toUpperCase() === 'USDCNH') {
-        const yahooPrimary = await fetchYahooForexFallback('USDCNH=X');
+    if (yahooFallbackTicker) {
+        const yahooPrimary = await fetchYahooForexFallback(yahooFallbackTicker);
         if (yahooPrimary?.latest !== null) {
             return yahooPrimary;
         }
@@ -3770,7 +3778,7 @@ async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientF
                 : null;
 
         let effectiveChangePct = Number.isFinite(changePct) ? changePct : (yahooFallback?.change_pct ?? null);
-        if (!Number.isFinite(effectiveChangePct) && symbol.toUpperCase() === 'USDCNH') {
+        if (!Number.isFinite(effectiveChangePct) && upperSymbol === 'USDCNH') {
             const history = await fetchForexHistory('USDCNH');
             if (history.length >= 2) {
                 const latestHistory = history[history.length - 1];
@@ -4249,6 +4257,8 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
         goldSnapshot,
         silverSnapshot,
         usdCnhSnapshot,
+        usdJpySnapshot,
+        usdChfSnapshot,
         dxySnapshot,
         usIndices,
         wtiSnapshot,
@@ -4260,6 +4270,8 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
         fetchYahooChartSeries('GC=F', { code: 'GOLD', name: '黄金' }),
         fetchYahooChartSeries('SI=F', { code: 'SILVER', name: '白银' }),
         fetchForexSnapshot('USDCNH', '美元人民币'),
+        fetchForexSnapshot('USDJPY', '美元兑日元'),
+        fetchForexSnapshot('USDCHF', '美元兑瑞郎'),
         fetchYahooChartSeries('DX-Y.NYB', { code: 'DXY', name: '美元指数' }),
         fetchUsMarketStateIndices(),
         fetchYahooChartSeries('CL=F', { code: 'OIL', name: 'WTI原油' }),
@@ -4332,6 +4344,22 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
                 name: usdCnhSnapshot.name,
                 latest: usdCnhSnapshot.latest,
                 change_pct: usdCnhSnapshot.change_pct
+            }
+            : null,
+        usdJpySnapshot
+            ? {
+                code: usdJpySnapshot.code,
+                name: usdJpySnapshot.name,
+                latest: usdJpySnapshot.latest,
+                change_pct: usdJpySnapshot.change_pct
+            }
+            : null,
+        usdChfSnapshot
+            ? {
+                code: usdChfSnapshot.code,
+                name: usdChfSnapshot.name,
+                latest: usdChfSnapshot.latest,
+                change_pct: usdChfSnapshot.change_pct
             }
             : null,
         ...(hkSnapshot?.indices ?? [])
