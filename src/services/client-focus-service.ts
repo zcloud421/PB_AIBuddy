@@ -4392,6 +4392,76 @@ function buildHongKongSnapshotSummary(
     return `${leadSentence}，${flowSentence}。`;
 }
 
+async function generateMarketStateSummaryLLM(
+    indices: Array<{ code: string; name: string; latest: number | null; change_pct: number | null }>,
+    newsHeadlines: string[]
+): Promise<string | null> {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) return null;
+
+    const hkLocal = getMarketLocalParts('Asia/Hong_Kong');
+    const hkHour = Math.floor(hkLocal.minutes / 60);
+    const timeContext =
+        hkHour < 12
+            ? '现在是港股早盘，RM正在准备开市前的客户沟通。'
+            : hkHour < 16
+              ? '现在是港股午后交易时段，RM正在跟进盘中走势。'
+              : '现在是港股收盘后，RM正在准备下午的客户沟通。';
+
+    const priceLines = indices
+        .filter((i) => i.change_pct !== null)
+        .map((i) => {
+            const sign = (i.change_pct ?? 0) >= 0 ? '+' : '';
+            return `${i.name}（${i.code}）: ${sign}${(i.change_pct ?? 0).toFixed(2)}%`;
+        })
+        .join('\n');
+
+    const newsSection =
+        newsHeadlines.length > 0
+            ? `\n最新地缘/市场事件：\n${newsHeadlines.map((h) => `- ${h}`).join('\n')}`
+            : '';
+
+    const userPrompt = `
+${timeContext}
+
+当前大类资产涨跌幅：
+${priceLines}
+${newsSection}
+
+请用一句话（35-50字）写出"今日市场状态"摘要，供香港私行RM/IC在与客户沟通前快速理解今天的市场主线。
+
+要求：
+- 直接点出最显著的跨资产信号（哪两个资产走势最重要）
+- 如果有具体地缘事件驱动（如霍尔木兹、停火、空袭），必须点名
+- 结尾说明客户最可能追问哪个方向（一句）
+- 禁止使用"市场承压""风险升温""不确定性"等空泛表述
+- 只输出摘要文字，不要任何解释或标点以外的内容
+`.trim();
+
+    try {
+        const response = await fetch(`${process.env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({
+                model: 'deepseek-chat',
+                messages: [
+                    { role: 'system', content: '你是香港私人银行市场助手，用简洁专业的中文为RM/IC生成每日市场状态摘要。' },
+                    { role: 'user', content: userPrompt }
+                ],
+                max_tokens: 120,
+                temperature: 0.3
+            })
+        });
+        if (!response.ok) return null;
+        const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+        const text = data.choices?.[0]?.message?.content?.trim() ?? null;
+        if (!text || text.length < 10) return null;
+        return text;
+    } catch {
+        return null;
+    }
+}
+
 async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketStateResponse | null> {
     const cached = focusMarketStateCache.get(MARKET_STATE_CACHE_KEY);
     if (cached && cached.expiresAt > Date.now()) {
@@ -4526,8 +4596,17 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
         return null;
     }
 
+    // Try to get recent news from middle-east focus cache for geopolitical context
+    const cachedMiddleEast = focusCache.get('middle-east-tensions');
+    const recentNewsHeadlines = cachedMiddleEast?.value?.latest_updates
+        ?.slice(0, 3)
+        .map((u) => u.title)
+        .filter(Boolean) ?? [];
+
+    const llmSummary = await generateMarketStateSummaryLLM(indices, recentNewsHeadlines);
+
     const payload: ClientFocusMarketStateResponse = {
-        summary: buildMarketStateSummary(indices),
+        summary: llmSummary ?? buildMarketStateSummary(indices),
         indices
     };
 
