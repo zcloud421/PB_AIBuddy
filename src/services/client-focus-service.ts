@@ -662,6 +662,80 @@ function getPreviewQuestions(topic: FocusTopicConfig): Array<Pick<ClientFocusQue
     return topic.clientQuestions.map((entry) => ({ question: entry.question }));
 }
 
+function normalizePreviewQuestion(question: string): string {
+    let text = question.trim().replace(/[？?。！!]+$/u, '');
+
+    text = text
+        .replace(/^停火背景下[，,]\s*/u, '停火后')
+        .replace(/^在[^，,]{0,12}背景下[，,]\s*/u, '')
+        .replace(/传导路径/u, '')
+        .replace(/会有什么变化$/u, '会怎么变化')
+        .replace(/还有避险价值吗$/u, '是否仍有价值')
+        .replace(/预期的会怎么变化/u, '预期会怎么变化')
+        .replace(/路径会怎么变化/u, '会怎么变化');
+
+    const impactMatch = text.match(/^(.+?)[，,]这对(.+?)意味着什么$/u);
+    if (impactMatch) {
+        const left = impactMatch[1].trim();
+        const right = impactMatch[2]
+            .replace(/^原油的/u, '原油')
+            .replace(/供应中断风险定价/u, '原油定价')
+            .replace(/风险定价/u, '定价')
+            .trim();
+        text = `${left}会如何影响${right}`;
+    }
+
+    return text.endsWith('？') ? text : `${text}？`;
+}
+
+function buildClientFocusPreviewQuestions(
+    topic: FocusTopicConfig,
+    summary: string,
+    clientQuestions: ClientFocusQuestion[]
+): Array<Pick<ClientFocusQuestion, 'question'>> {
+    const pushUnique = (buffer: string[], question: string | null | undefined) => {
+        if (!question) {
+            return;
+        }
+        const normalized = question.trim();
+        if (!normalized || buffer.includes(normalized)) {
+            return;
+        }
+        buffer.push(normalized);
+    };
+
+    if (topic.slug === 'middle-east-tensions') {
+        const previews: string[] = [];
+        const summaryText = summary.toLowerCase();
+        const normalizedQuestions = clientQuestions.map((item) => normalizePreviewQuestion(item.question));
+        const questionByMatcher = (pattern: RegExp) => normalizedQuestions.find((question) => pattern.test(question));
+
+        if (/停火|ceasefire|谈判|协议/.test(summaryText)) {
+            pushUnique(previews, '美伊停火后哪些资产会先被重定价？');
+        } else if (/霍尔木兹|航运|油轮|海峡/.test(summaryText)) {
+            pushUnique(previews, '霍尔木兹航运变化会如何影响原油定价？');
+        }
+
+        pushUnique(previews, questionByMatcher(/降息|美联储|fed|收益率|利率/u));
+        pushUnique(previews, questionByMatcher(/油价|原油|黄金|股票|美元|人民币|汇率/u));
+
+        for (const question of normalizedQuestions) {
+            pushUnique(previews, question);
+            if (previews.length >= 2) {
+                break;
+            }
+        }
+
+        return previews.slice(0, 2).map((question) => ({ question }));
+    }
+
+    const previewSource = clientQuestions.length > 0
+        ? clientQuestions.map((item) => normalizePreviewQuestion(item.question))
+        : getPreviewQuestions(topic).map((item) => normalizePreviewQuestion(item.question));
+
+    return previewSource.slice(0, 2).map((question) => ({ question }));
+}
+
 function formatRelativeTime(publishedAt: string | undefined): string {
     if (!publishedAt) {
         return '近期';
@@ -4958,6 +5032,19 @@ export async function getClientFocusList(): Promise<ClientFocusListItem[]> {
         updated_at: item.updated_at,
         summary: item.summary,
         accent: item.accent,
+        preview_questions: buildClientFocusPreviewQuestions(
+            getFocusTopic(item.slug) ?? {
+                slug: item.slug,
+                title: item.title,
+                accent: item.accent,
+                query: '',
+                clientQuestions: item.client_questions,
+                relatedAssets: [],
+                fallbackSummary: item.summary
+            },
+            item.summary,
+            item.client_questions
+        ),
         client_questions: item.client_questions.length > 0
             ? item.client_questions.map((entry) => ({ question: entry.question }))
             : getPreviewQuestions(getFocusTopic(item.slug) ?? {

@@ -150,6 +150,7 @@ export interface ClientFocusListItem {
     updated_at: string;
     summary: string;
     accent: string;
+    preview_questions?: Array<Pick<ClientFocusQuestion, 'question'>>;
     client_questions: Array<Pick<ClientFocusQuestion, 'question'>>;
 }
 
