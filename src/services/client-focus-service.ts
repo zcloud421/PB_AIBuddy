@@ -4201,7 +4201,8 @@ function buildMarketStateSummary(
     }>
 ) {
     const hkLocal = getMarketLocalParts('Asia/Hong_Kong');
-    const isHongKongAfternoon = hkLocal.minutes >= 12 * 60;
+    const isHongKongMidday = hkLocal.minutes >= 12 * 60 && hkLocal.minutes < 16 * 60;
+    const isHongKongAfterClose = hkLocal.minutes >= 16 * 60;
     const gold = indices.find((item) => item.code === 'GOLD');
     const dxy = indices.find((item) => item.code === 'DXY');
     const spx = indices.find((item) => item.code === 'SPX');
@@ -4240,27 +4241,29 @@ function buildMarketStateSummary(
         overnightSummary = '隔夜美元与美债收益率同步走高，市场开始重新评估通胀路径与降息节奏。';
     }
 
-    if (!isHongKongAfternoon) {
+    if (!isHongKongMidday && !isHongKongAfterClose) {
         return overnightSummary;
     }
 
+    const hkPhaseLabel = isHongKongAfterClose ? '今日港股收盘后' : '上午港股';
+
     if (hkStrong && hstech && (hstech.change_pct ?? 0) >= 1) {
-        return `${overnightSummary} 上午港股跟随修复，科技板块弹性更强，客户会继续追问这波风险偏好能否延续到亚洲时段。`;
+        return `${overnightSummary} ${hkPhaseLabel}跟随修复，科技板块弹性更强，客户会继续追问这波风险偏好能否延续到亚洲时段。`;
     }
 
     if (hkWeak && hstech && (hstech.change_pct ?? 0) <= -1) {
-        return `${overnightSummary} 上午港股未能完全承接隔夜情绪，科技板块回吐更明显，客户会更关注中国资产是否仍受压。`;
+        return `${overnightSummary} ${hkPhaseLabel}未能完全承接隔夜情绪，科技板块回吐更明显，客户会更关注中国资产是否仍受压。`;
     }
 
     if (hkStrong) {
-        return `${overnightSummary} 上午港股同步偏强，说明亚洲时段也在跟进隔夜风险偏好修复。`;
+        return `${overnightSummary} ${hkPhaseLabel}同步偏强，说明亚洲时段也在跟进隔夜风险偏好修复。`;
     }
 
     if (hkWeak) {
-        return `${overnightSummary} 上午港股表现偏弱，说明亚洲时段对隔夜叙事的接力仍然有限。`;
+        return `${overnightSummary} ${hkPhaseLabel}表现偏弱，说明亚洲时段对隔夜叙事的接力仍然有限。`;
     }
 
-    return `${overnightSummary} 上午港股延续震荡，客户会更关注亚洲时段是否给出更明确的接力信号。`;
+    return `${overnightSummary} ${hkPhaseLabel}延续震荡，客户会更关注亚洲时段是否给出更明确的接力信号。`;
 }
 
 function buildHongKongSnapshotSummary(
