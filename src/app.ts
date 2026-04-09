@@ -22,6 +22,7 @@ import { deviceRouter } from './routes/device';
 import { trackerRouter } from './routes/tracker';
 import { pairAnalysisRouter } from './routes/pair-analysis';
 import { ensureDeviceTables } from './db/queries/devices';
+import { getClientFocusList } from './services/client-focus-service';
 
 dotenv.config();
 
@@ -115,6 +116,12 @@ if (require.main === module) {
             app.listen(PORT, '0.0.0.0', () => {
                 // eslint-disable-next-line no-console
                 console.log(`FCN API listening on port ${PORT}`);
+                // Pre-warm focus cache in background — non-blocking
+                setTimeout(() => {
+                    getClientFocusList()
+                        .then(() => console.log('[focus-prewarm] cache warmed successfully'))
+                        .catch((err) => console.warn('[focus-prewarm] failed:', err instanceof Error ? err.message : String(err)));
+                }, 5000);
             });
         })
         .catch((error) => {
