@@ -4958,15 +4958,17 @@ export async function getClientFocusList(): Promise<ClientFocusListItem[]> {
         updated_at: item.updated_at,
         summary: item.summary,
         accent: item.accent,
-        client_questions: getPreviewQuestions(getFocusTopic(item.slug) ?? {
-            slug: item.slug,
-            title: item.title,
-            accent: item.accent,
-            query: '',
-            clientQuestions: item.client_questions,
-            relatedAssets: [],
-            fallbackSummary: item.summary
-        })
+        client_questions: item.client_questions.length > 0
+            ? item.client_questions.map((entry) => ({ question: entry.question }))
+            : getPreviewQuestions(getFocusTopic(item.slug) ?? {
+                slug: item.slug,
+                title: item.title,
+                accent: item.accent,
+                query: '',
+                clientQuestions: item.client_questions,
+                relatedAssets: [],
+                fallbackSummary: item.summary
+            })
     }));
 }
 
