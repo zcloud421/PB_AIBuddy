@@ -1,4 +1,5 @@
 import { pool } from '../db/client';
+import { MassiveClient } from './massive-client';
 
 export interface NewsItem {
     title: string;
@@ -155,6 +156,25 @@ interface FinnhubNewsItem {
     url: string;
 }
 
+interface MassiveNewsItem {
+    article_url?: string;
+    description?: string;
+    id?: string;
+    image_url?: string;
+    published_utc?: string;
+    publisher?: {
+        homepage_url?: string;
+        logo_url?: string;
+        name?: string;
+        favicon_url?: string;
+    };
+    title?: string;
+}
+
+interface MassiveNewsResponse {
+    results?: MassiveNewsItem[];
+}
+
 interface NewsDataLatestItem {
     title?: string;
     link?: string;
@@ -212,6 +232,32 @@ async function fetchNewsFromFinnhub(symbol: string): Promise<NewsItem[]> {
     }
 }
 
+async function fetchNewsFromMassive(symbol: string): Promise<NewsItem[]> {
+    try {
+        const client = new MassiveClient();
+        const response = await client.get<MassiveNewsResponse>('/v2/reference/news', {
+            ticker: symbol,
+            limit: 20,
+            order: 'desc',
+            sort: 'published_utc'
+        });
+
+        const items = Array.isArray(response.results) ? response.results : [];
+        return items
+            .filter((item) => typeof item.title === 'string' && typeof item.article_url === 'string' && typeof item.published_utc === 'string')
+            .map((item) => ({
+                title: item.title as string,
+                source: item.publisher?.name?.trim() || 'Massive',
+                url: item.article_url as string,
+                published_at: new Date(item.published_utc as string).toISOString()
+            }));
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[news-fetcher] Massive news fetch failed for ${symbol} (${message})`);
+        return [];
+    }
+}
+
 export async function fetchStockNewsContext(
     symbol: string,
     companyName?: string
@@ -220,8 +266,15 @@ export async function fetchStockNewsContext(
         const normalizedSymbol = symbol.toUpperCase();
         const earningsStatus = await getRecentEarningsStatus(normalizedSymbol);
 
-        const rawItems = await fetchNewsFromFinnhub(normalizedSymbol);
-        console.log(`[news-fetcher] ${normalizedSymbol} hasRecentEarnings=${earningsStatus.hasRecentEarnings}, fetched ${rawItems.length} items from Finnhub`);
+        let rawItems = await fetchNewsFromMassive(normalizedSymbol);
+        let source = 'Massive';
+        if (rawItems.length === 0) {
+            rawItems = await fetchNewsFromFinnhub(normalizedSymbol);
+            source = 'Finnhub';
+        }
+        console.log(
+            `[news-fetcher] ${normalizedSymbol} hasRecentEarnings=${earningsStatus.hasRecentEarnings}, fetched ${rawItems.length} items from ${source}`
+        );
 
         const newsIndicatesRecentEarnings = rawItems.some((item) => isEarningsHeadline(item.title));
         const hasRecentEarnings = earningsStatus.hasRecentEarnings || newsIndicatesRecentEarnings;
