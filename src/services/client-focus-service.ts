@@ -1955,9 +1955,25 @@ ${(FOCUS_QUESTION_CATEGORIES[topic.slug] ?? []).join('、')}
 
 每个分类至少生成 1 个问题，最多生成 2 个问题。问题角度要尽量分散，避免同一分类内出现重复视角。
 
+logic 写作要求：
+- 15-20字，帮 RM 建立解释框架
+- 格式：先区分 A 还是 B，再判断 C
+- 例："先区分避险需求还是实际利率驱动，再看美元是否同步确认。"
+
+observation 写作要求：
+- 15-20字，今天这个情景下该看的具体变量
+- 必须结合当前新闻情景，不能写成通用模板
+- 例："布伦特与WTI的价差走向，以及霍尔木兹保险成本是否继续抬升。"
+
 返回 JSON 数组格式：
 [
-  { "question": "...", "answer": "...", "category": "黄金" }
+  {
+    "question": "...",
+    "answer": "...",
+    "category": "黄金",
+    "logic": "...",
+    "observation": "..."
+  }
 ]
 `.trim();
 
@@ -2245,7 +2261,13 @@ ${newsList}
             choices?: Array<{ message?: { content?: string } }>;
         };
         const content = payload.choices?.[0]?.message?.content?.trim() ?? '';
-        const parsed = safeParseJsonArray(content) as Array<{ question?: string; answer?: string; category?: string }> | null;
+        const parsed = safeParseJsonArray(content) as Array<{
+            question?: string;
+            answer?: string;
+            category?: string;
+            logic?: string;
+            observation?: string;
+        }> | null;
         console.log(`[focus-client-questions] ${topic.slug}: parsed ${parsed ? parsed.length : 'null'} items, categories=${parsed ? [...new Set(parsed.map((i: any) => i?.category).filter(Boolean))].join(',') : 'n/a'}`);
 
         if (!parsed) {
@@ -2255,11 +2277,19 @@ ${newsList}
 
         const categoryPool = FOCUS_QUESTION_CATEGORIES[topic.slug] ?? [];
         const allowedCategories = new Set(categoryPool);
-        const sanitized: Array<{ question: string; answer: string; category?: string }> = parsed
+        const sanitized: Array<{
+            question: string;
+            answer: string;
+            category?: string;
+            logic?: string;
+            observation?: string;
+        }> = parsed
             .map((item, index) => {
                 const question = item.question?.trim();
                 const answer = item.answer?.trim();
                 const rawCategory = item.category?.trim();
+                const logic = item.logic?.trim();
+                const observation = item.observation?.trim();
                 const isLLMAssigned = !!(rawCategory && allowedCategories.has(rawCategory));
                 const baseCategory =
                     rawCategory && (allowedCategories.size === 0 || allowedCategories.has(rawCategory))
@@ -2275,7 +2305,9 @@ ${newsList}
                 return {
                     question,
                     answer,
-                    category
+                    category,
+                    logic: logic || undefined,
+                    observation: observation || undefined
                 };
             })
             .filter((item): item is NonNullable<typeof item> => item !== null);
@@ -2300,7 +2332,9 @@ ${newsList}
             return {
                 question: item.question,
                 answer: item.answer,
-                category: inferQuestionCategory(topic.slug, item.question, item.answer, fallbackCategory, false)
+                category: inferQuestionCategory(topic.slug, item.question, item.answer, fallbackCategory, false),
+                logic: item.logic?.trim() || undefined,
+                observation: item.observation?.trim() || undefined
             };
         });
     } catch {

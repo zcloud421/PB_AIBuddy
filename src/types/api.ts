@@ -110,6 +110,8 @@ export interface ClientFocusQuestion {
     question: string;
     answer: string;
     category?: string;
+    logic?: string;
+    observation?: string;
 }
 
 export interface ClientFocusDailyVerdict {
