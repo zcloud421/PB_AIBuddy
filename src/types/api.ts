@@ -116,6 +116,7 @@ export interface ClientFocusDailyVerdict {
     risk_appetite: '偏谨慎' | '中性' | '偏积极';
     fcn_impact: string;
     key_change: string;
+    primary_event?: string;
 }
 
 export interface ClientFocusUpdate {

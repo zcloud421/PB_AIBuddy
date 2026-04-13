@@ -117,7 +117,7 @@ interface FocusTransmissionModelOutput {
     };
 }
 
-const ALLOWED_FOCUS_STATUS = ['关注升温', '持续发酵', '压力上升'] as const;
+const ALLOWED_FOCUS_STATUS = ['关注升温', '持续发酵', '压力上升', '风险溢价抬升', '供应扰动交易中', '风险溢价回吐中', '避险扩散确认中'] as const;
 const ALLOWED_UPDATE_IMPACTS = ['风险抬升', '信用事件', '政策变化', '持续发酵'] as const;
 const PREFERRED_WEEKLY_SOURCES = ['Bloomberg', 'Reuters', 'FT', 'CNBC', 'WSJ', 'Financial Times'] as const;
 const BLOCKED_WEEKLY_SOURCE_PATTERNS = [
@@ -884,6 +884,133 @@ function buildMiddleEastSummaryOverride(newsItems: NewsItem[]): string | null {
     }
 
     return null;
+}
+
+function buildMiddleEastPrimaryEvent(newsItems: NewsItem[]): string | null {
+    const recentTitles = newsItems
+        .slice()
+        .sort((a, b) => new Date(b.published_at).getTime() - new Date(a.published_at).getTime())
+        .slice(0, 10)
+        .map((item) => item.title?.trim())
+        .filter((title): title is string => Boolean(title));
+
+    if (recentTitles.length === 0) {
+        return null;
+    }
+
+    const joined = recentTitles.join(' ').toLowerCase();
+
+    const hasBlockadeExecution = recentTitles.some((title) => /封锁|关闭霍尔木兹|生效|实施|execute|effective|blockade|seal/i.test(title));
+    if (hasBlockadeExecution) {
+        return '霍尔木兹海峡封锁进入执行阶段';
+    }
+
+    const hasTalkBreakdown = recentTitles.some((title) => /谈判破裂|会谈未达成|未达成协议|breakdown|talks fail|talks failed/i.test(title));
+    if (hasTalkBreakdown) {
+        return '美伊谈判破裂，市场重估冲突持续时间';
+    }
+
+    const hasCeasefireSignal = /停火|ceasefire|truce|deal|协议达成|和平协议/.test(joined);
+    const hasEscalationSignal = /空袭|导弹|封锁|blockade|strike|missile|escalation/.test(joined);
+    if (hasCeasefireSignal && !hasEscalationSignal) {
+        return '停火信号落地，地缘风险溢价开始回吐';
+    }
+
+    const hasShippingDisruption = recentTitles.some((title) => /油轮|船只|航运|运费|保险|shipping|tanker|freight|insurance/i.test(title));
+    if (hasShippingDisruption) {
+        return '霍尔木兹通航受阻，原油运输风险重新定价';
+    }
+
+    const hasOilMove = recentTitles.some((title) => /油价|原油|wti|brent/i.test(title));
+    if (hasOilMove) {
+        return '油价波动扩大，能源风险溢价重新进入定价';
+    }
+
+    const hasCrossAssetMove = recentTitles.some((title) => /黄金|美债|收益率|美元|gold|treasury|yield|dollar/i.test(title));
+    if (hasCrossAssetMove) {
+        return '避险资产与利率路径开始同步反应';
+    }
+
+    return null;
+}
+
+function buildMiddleEastCommunicationFocus(newsItems: NewsItem[]): string | null {
+    const recentTitles = newsItems
+        .slice()
+        .sort((a, b) => new Date(b.published_at).getTime() - new Date(a.published_at).getTime())
+        .slice(0, 10)
+        .map((item) => item.title?.trim())
+        .filter((title): title is string => Boolean(title));
+
+    if (recentTitles.length === 0) {
+        return null;
+    }
+
+    const joined = recentTitles.join(' ').toLowerCase();
+
+    if (recentTitles.some((title) => /封锁|关闭霍尔木兹|生效|实施|execute|effective|blockade|seal/i.test(title))) {
+        return '市场开始交易霍尔木兹相关供应与航运风险，是否扩散到更广泛资产重定价仍取决于执行强度与持续时间。';
+    }
+
+    if (recentTitles.some((title) => /谈判破裂|会谈未达成|未达成协议|breakdown|talks fail|talks failed/i.test(title))) {
+        return '市场重新交易冲突持续时间与油价风险溢价，是否进一步扩散到利率与风险资产仍需观察。';
+    }
+
+    const hasCeasefireSignal = /停火|ceasefire|truce|deal|协议达成|和平协议/.test(joined);
+    const hasEscalationSignal = /空袭|导弹|封锁|blockade|strike|missile|escalation/.test(joined);
+    if (hasCeasefireSignal && !hasEscalationSignal) {
+        return '市场正从避险回到持续性判断，关键在于停火能否稳定以及油价与避险溢价是否继续回吐。';
+    }
+
+    if (recentTitles.some((title) => /油轮|船只|航运|运费|保险|shipping|tanker|freight|insurance/i.test(title))) {
+        return '运输与保险成本已经开始被重新定价，后续要观察这是否演变为更实质的供应扰动。';
+    }
+
+    if (recentTitles.some((title) => /油价|原油|wti|brent/i.test(title))) {
+        return '市场正在把原油波动传导到通胀与利率路径预期，持续性仍需更多跨资产验证。';
+    }
+
+    if (recentTitles.some((title) => /黄金|美债|美元|收益率|gold|treasury|yield|dollar/i.test(title))) {
+        return '避险资产与利率路径开始同步反应，关键在于这是否升级为更广泛的资产重定价。';
+    }
+
+    return null;
+}
+
+function buildMiddleEastStatus(newsItems: NewsItem[]): string {
+    const recentTitles = newsItems
+        .slice()
+        .sort((a, b) => new Date(b.published_at).getTime() - new Date(a.published_at).getTime())
+        .slice(0, 10)
+        .map((item) => item.title?.trim())
+        .filter((title): title is string => Boolean(title));
+
+    const joined = recentTitles.join(' ').toLowerCase();
+
+    const hasCeasefireSignal = /停火|ceasefire|truce|deal|协议达成|和平协议/.test(joined);
+    const hasEscalationSignal = /空袭|导弹|封锁|blockade|strike|missile|escalation/.test(joined);
+
+    if (recentTitles.some((title) => /封锁|关闭霍尔木兹|生效|实施|execute|effective|blockade|seal/i.test(title))) {
+        return '供应扰动交易中';
+    }
+
+    if (recentTitles.some((title) => /油轮|船只|航运|运费|保险|shipping|tanker|freight|insurance/i.test(title))) {
+        return '供应扰动交易中';
+    }
+
+    if (hasCeasefireSignal && !hasEscalationSignal) {
+        return '风险溢价回吐中';
+    }
+
+    if (recentTitles.some((title) => /黄金|美债|美元|收益率|gold|treasury|yield|dollar/i.test(title))) {
+        return '避险扩散确认中';
+    }
+
+    if (hasEscalationSignal || recentTitles.some((title) => /谈判破裂|会谈未达成|未达成协议|breakdown|talks fail|talks failed/i.test(title))) {
+        return '风险溢价抬升';
+    }
+
+    return '持续发酵';
 }
 
 function sanitizeLatestUpdates(
@@ -5023,6 +5150,22 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
                 : [];
     const dynamicClientQuestions = await generateDynamicClientQuestions(topic, newsItems);
     const dailyVerdict = await generateDailyVerdict(topic, newsItems);
+    const middleEastPrimaryEvent =
+        topic.slug === 'middle-east-tensions'
+            ? buildMiddleEastPrimaryEvent(newsItems)
+            : null;
+    const middleEastCommunicationFocus =
+        topic.slug === 'middle-east-tensions'
+            ? buildMiddleEastCommunicationFocus(newsItems)
+            : null;
+    const effectiveDailyVerdict =
+        dailyVerdict && (middleEastPrimaryEvent || middleEastCommunicationFocus)
+            ? {
+                ...dailyVerdict,
+                primary_event: middleEastPrimaryEvent ?? dailyVerdict.primary_event,
+                key_change: middleEastCommunicationFocus ?? dailyVerdict.key_change
+            }
+            : dailyVerdict;
     const questionCategoryPool = FOCUS_QUESTION_CATEGORIES[topic.slug] ?? [];
     const clientQuestions =
         dynamicClientQuestions
@@ -5037,7 +5180,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         title: topic.title,
         status:
             topic.slug === 'middle-east-tensions'
-                ? '持续发酵'
+                ? buildMiddleEastStatus(newsItems)
                 : sanitizeFocusStatus(modelOutput?.status?.trim(), topic.fallbackStatus ?? '持续发酵'),
         updated_at: formatRelativeTime(newsItems[0]?.published_at),
         summary:
@@ -5067,7 +5210,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         focus_secondary_price_snapshot: focusSecondaryPriceSnapshot ?? undefined,
         focus_secondary_price_history: focusSecondaryPriceHistory ?? undefined,
         gold_drivers: topic.slug === 'gold-repricing' ? buildGoldDrivers(newsItems) : undefined,
-        daily_verdict: dailyVerdict ?? null,
+        daily_verdict: effectiveDailyVerdict ?? null,
         disclaimer: DEFAULT_DISCLAIMER
     };
 
