@@ -119,6 +119,23 @@ export interface ClientFocusDailyVerdict {
     primary_event?: string;
 }
 
+export interface ThemeBasketItem {
+    id: string;
+    label: string;
+    labelEn: string;
+    war_perf: number;
+    ceasefire_perf: number;
+    ytd_perf: number;
+    driver: string;
+}
+
+export interface ThemeWinnersLosersResult {
+    scenario_label: string;
+    updated_at: string;
+    winners: ThemeBasketItem[];
+    losers: ThemeBasketItem[];
+}
+
 export interface ClientFocusUpdate {
     time: string;
     date?: string;
@@ -176,6 +193,7 @@ export interface ClientFocusDetailResponse {
     focus_secondary_price_snapshot?: ClientFocusPriceSnapshot | null;
     focus_secondary_price_history?: ClientFocusPriceHistoryPoint[] | null;
     gold_drivers?: ClientFocusDriverItem[] | null;
+    theme_winners_losers?: ThemeWinnersLosersResult | null;
     daily_verdict?: ClientFocusDailyVerdict | null;
     disclaimer: string;
 }

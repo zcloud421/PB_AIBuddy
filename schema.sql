@@ -18,6 +18,7 @@ CREATE TYPE risk_flag_type AS ENUM (
     'EVENT_RISK',
     'LIQUIDITY',
     'LOW_LIQUIDITY',
+    'MACRO_SENSITIVITY',
     'NO_APPROVED_TENOR',
     'NO_APPROVED_STRIKE',
     'HOUSE_OVERRIDE'
@@ -400,5 +401,13 @@ CREATE INDEX idx_recommendation_tracker_status_expiry
 
 CREATE INDEX idx_recommendation_tracker_symbol_recommendation_date
     ON recommendation_tracker (symbol, recommendation_date DESC);
+
+CREATE TABLE IF NOT EXISTS theme_basket_results (
+    slug        TEXT NOT NULL,
+    run_date    DATE NOT NULL,
+    result_json JSONB NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (slug, run_date)
+);
 
 COMMIT;

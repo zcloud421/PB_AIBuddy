@@ -12,6 +12,7 @@ import {
     ensureIdeaCandidatePriceColumns,
     ensureRecommendationTrackerTable,
     ensureRiskFlagEnumValues,
+    ensureThemeBasketResultsTable,
     ensureUnderlyingCompanyNameColumn,
     deleteRecommendationTrackerForDate,
     getUnderlyingBySymbol,
@@ -28,6 +29,7 @@ import type { ScoringResult } from '../scoring-engine';
 import { runDailyScreener } from '../scoring-engine';
 import { selectDailyBest, selectDailyRecommendationShowcase } from '../services/ideas-service';
 import { runPriceTracker } from '../services/tracker-service';
+import { runThemeBasketDaily } from '../services/theme-basket-service';
 import { generateNarrative } from '../utils/narrative-generator';
 import { sendDowngradeNotifications } from '../utils/push-notifications';
 import { ensureDeviceTables } from '../db/queries/devices';
@@ -72,6 +74,7 @@ async function main(): Promise<void> {
         await ensureRiskFlagEnumValues();
         await ensureRecommendationTrackerTable();
         await ensureUnderlyingCompanyNameColumn();
+        await ensureThemeBasketResultsTable();
         await ensureDeviceTables();
 
         const previousGradesResult = await client.query<{ symbol: string; grade: string }>(
@@ -256,6 +259,16 @@ async function main(): Promise<void> {
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             console.warn(`[screener] Recommendation tracker refresh failed (${message})`);
+        }
+
+        console.log('[theme-baskets] starting daily run...');
+        for (const slug of ['middle-east-tensions', 'gold-repricing']) {
+            try {
+                await runThemeBasketDaily(slug);
+                console.log(`[theme-baskets] ${slug} done`);
+            } catch (error) {
+                console.warn(`[theme-baskets] ${slug} failed:`, error);
+            }
         }
 
         try {

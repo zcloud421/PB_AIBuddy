@@ -21,6 +21,7 @@ import type {
 import { fetchNewsItemsByQuery, fetchNewsItemsFromNewsData } from '../data/news-fetcher';
 import { MassiveDataFetcher } from '../data/massive-fetcher';
 import { MassiveClient } from '../data/massive-client';
+import { getLatestThemeBasketResult } from '../db/queries/ideas';
 import axios from 'axios';
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
@@ -5150,6 +5151,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
                 : [];
     const dynamicClientQuestions = await generateDynamicClientQuestions(topic, newsItems);
     const dailyVerdict = await generateDailyVerdict(topic, newsItems);
+    const themeResult = await getLatestThemeBasketResult(topic.slug).catch(() => null);
     const middleEastPrimaryEvent =
         topic.slug === 'middle-east-tensions'
             ? buildMiddleEastPrimaryEvent(newsItems)
@@ -5210,6 +5212,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         focus_secondary_price_snapshot: focusSecondaryPriceSnapshot ?? undefined,
         focus_secondary_price_history: focusSecondaryPriceHistory ?? undefined,
         gold_drivers: topic.slug === 'gold-repricing' ? buildGoldDrivers(newsItems) : undefined,
+        theme_winners_losers: (themeResult?.result_json as ClientFocusDetailResponse['theme_winners_losers']) ?? null,
         daily_verdict: effectiveDailyVerdict ?? null,
         disclaimer: DEFAULT_DISCLAIMER
     };

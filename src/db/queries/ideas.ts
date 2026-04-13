@@ -926,6 +926,7 @@ export async function ensureRiskFlagEnumValues(): Promise<void> {
         'HIGH_BETA_THEME_CAUTION',
         'LOW_COUPON',
         'LOW_LIQUIDITY',
+        'MACRO_SENSITIVITY',
         'NO_APPROVED_TENOR',
         'NO_APPROVED_STRIKE',
         'HOUSE_OVERRIDE',
@@ -1564,6 +1565,58 @@ export function mapTodayIdeasResponse(
                 };
             })
     };
+}
+
+export async function upsertThemeBasketResult(
+    slug: string,
+    runDate: string,
+    result: object
+): Promise<void> {
+    await pool.query(
+        `
+        INSERT INTO theme_basket_results (
+            slug,
+            run_date,
+            result_json
+        )
+        VALUES ($1, $2::date, $3::jsonb)
+        ON CONFLICT (slug, run_date)
+        DO UPDATE SET
+            result_json = EXCLUDED.result_json,
+            created_at = NOW()
+        `,
+        [slug, runDate, JSON.stringify(result)]
+    );
+}
+
+export async function ensureThemeBasketResultsTable(): Promise<void> {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS theme_basket_results (
+            slug        TEXT NOT NULL,
+            run_date    DATE NOT NULL,
+            result_json JSONB NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (slug, run_date)
+        )
+    `);
+}
+
+export async function getLatestThemeBasketResult(
+    slug: string
+): Promise<{ result_json: object; run_date: string } | null> {
+    const result = await pool.query<{ result_json: object; run_date: string }>(
+        `
+        SELECT result_json, run_date::text
+        FROM theme_basket_results
+        WHERE slug = $1
+          AND run_date IN (CURRENT_DATE, (CURRENT_DATE - INTERVAL '1 day')::date)
+        ORDER BY run_date DESC
+        LIMIT 1
+        `,
+        [slug]
+    );
+
+    return result.rows[0] ?? null;
 }
 
 function parseNumeric(value: number | string | null): number | null {
