@@ -5075,6 +5075,8 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         expiresAt: Date.now() + (
             topic.slug === 'hk-market-sentiment'
                 ? FOCUS_LIVE_MARKET_CACHE_TTL_MS
+                : topic.slug === 'middle-east-tensions'
+                    ? FOCUS_LONG_CACHE_TTL_MS
                 : topic.slug === 'usd-strength'
                     ? FOCUS_LIVE_MARKET_CACHE_TTL_MS
                 : topic.slug === 'private-credit-stress'
