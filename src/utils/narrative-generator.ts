@@ -81,13 +81,20 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
 重要：该公司刚于近期发布财报，
 请在why_now第一句优先提及财报结果（超预期/符合预期/不及预期）及市场反应。`
                 : '';
+        const isEarningsWait =
+            input.grade === 'AVOID' &&
+            input.days_to_earnings !== null &&
+            input.days_to_earnings !== undefined &&
+            input.days_to_earnings >= 0 &&
+            input.days_to_earnings <= 3;
         const systemPrompt = buildSystemPrompt(
             input.grade,
             input.has_recent_earnings ?? false,
             input.days_since_earnings ?? null,
-            input.earnings_weight ?? 0
+            input.earnings_weight ?? 0,
+            isEarningsWait
         );
-        const userPrompt = buildUserPrompt(input, newsSection, recentEarningsContext);
+        const userPrompt = buildUserPrompt(input, newsSection, recentEarningsContext, isEarningsWait);
 
         const response = await fetch(`${baseUrl}/chat/completions`, {
             method: 'POST',
@@ -173,13 +180,16 @@ function buildSystemPrompt(
     grade: string,
     hasRecentEarnings: boolean,
     daysSinceEarnings: number | null,
-    earningsWeight: number
+    earningsWeight: number,
+    isEarningsWait: boolean = false
 ): string {
     const base =
         '你是一位香港私人银行的FCN产品顾问助手，服务对象是高净值和超高净值客户。帮助理财经理生成简洁专业的中文话术，供RM内部参考。请结合该公司的具体产品线和近期催化剂写话术，不要使用泛泛的行业描述，要有具体产品或业务名称。第一句必须先点明公司主营业务或核心产品，不得只写“该公司”或泛泛行业标签。禁止使用空泛表达，如“前景存疑”“市场质疑”“相关领域压力”“基本面不确定性较高”，除非后面紧跟具体经营原因（如高负债、客户集中、资本开支压力、backlog兑现风险、监管风险、价格战、需求放缓等）。禁止引用与该公司无直接可比关系的其他公司股价表现来支持论点。禁止使用竞争对手、同行或其他公司的负面新闻、财报或股价表现作为该标的pitch依据；话术只能基于该标的自身业务、财报、指引、监管和技术面信息。';
 
     const gradeSpecific =
-        grade === 'GO'
+        isEarningsWait
+            ? '你是私人银行FCN产品专家。该标的因财报临近暂不推荐做FCN，财报窗口期信息已在独立模块展示。请用客观中立口吻介绍该公司的主营业务、核心产品或业务亮点，以及当前的技术面/基本面背景，帮助RM在等待期间建立对标的的基本认知。不要提财报时机、财报窗口期、建议等财报后询价等内容。不要给任何方向性判断或风险评价，结尾不需要说明何时可以重新评估。'
+            : grade === 'GO'
             ? '你是私人银行FCN产品专家，用积极推荐口吻写话术，重点说明为什么现在是好的入场时机，以及执行价提供的安全边际。语气自信，可以直接copy给客户使用。'
             : grade === 'CAUTION'
               ? "你是私人银行FCN产品专家，用审慎中性口吻写话术，标题逻辑是'留意风险'。重点说明：1. 标的当前技术面或基本面的具体不确定性是什么 2. 票息虽有吸引力，但存在哪些具体风险需要注意 3. 如客户坚持询价，建议缩短期限或降低执行价。不要使用推荐式语言，不说'建议询价'或'风险收益比具有吸引力'。"
@@ -216,7 +226,8 @@ function buildEarningsPrompt(
 function buildUserPrompt(
     input: NarrativeInput,
     newsSection: string,
-    recentEarningsContext: string
+    recentEarningsContext: string,
+    isEarningsWait: boolean
 ): string {
     const moneynessText =
         input.current_price && input.current_price > 0
@@ -281,10 +292,7 @@ ${input.flags.some((flag) => flag.type === 'HIGH_COUPON_OVERRIDE')
     ? `12. 当前标的命中HIGH_COUPON_OVERRIDE：第一句必须说明技术面偏弱和下行风险；第二句说明执行价(${moneynessText})已充分反映下行空间，票息区间(${input.estimated_coupon_range})为风险承受能力较强客户提供较高安全边际；第三句说明仅适合了解FCN结构、能承受进一步下行风险的客户
 13. 不要使用“建议询价”或任何强推荐语句`
     : ''}
-${input.days_to_earnings !== null &&
-input.days_to_earnings !== undefined &&
-input.days_to_earnings >= 0 &&
-input.days_to_earnings <= 3
+${isEarningsWait
     ? `\n16. 当前标的距财报不足3天，财报窗口期信息已在独立模块展示。why_now和risk_note禁止提及财报临近、财报窗口期、建议财报后询价等内容，正文应聚焦于标的基本面、技术面或行业背景。`
     : ''}
 14. 同时根据近期新闻和风险判断一个sentiment_score：
