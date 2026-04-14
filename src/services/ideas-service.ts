@@ -42,6 +42,7 @@ import { buildThemeNarrative } from './theme-narrative';
 import {
     getClientFocusDetail as getClientFocusDetailPayload,
     getClientFocusList as getClientFocusListPayload,
+    getClientFocusStatusesSnapshot,
     getClientFocusMarketState as getClientFocusMarketStatePayload,
     getMiddleEastPolymarket as getMiddleEastPolymarketPayload
 } from './client-focus-service';
@@ -82,6 +83,25 @@ const KNOWN_CONFERENCE_END_DATES: Partial<Record<string, string>> = {
     CES: '2026-01-09',
     OFC: '2026-03-19'
 };
+
+const IDEA_OPTIONAL_QUERY_TIMEOUT_MS = 500;
+
+async function withSoftTimeout<T>(promise: Promise<T>, fallback: T, timeoutMs = IDEA_OPTIONAL_QUERY_TIMEOUT_MS): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<T>((resolve) => {
+                timer = setTimeout(() => resolve(fallback), timeoutMs);
+            })
+        ]);
+    } finally {
+        if (timer) {
+            clearTimeout(timer);
+        }
+    }
+}
 
 const COMMODITY_BETA_SYMBOLS = new Set(['GDX', 'USO']);
 const MACRO_SENSITIVITY_MAP: Array<{
@@ -494,7 +514,7 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
         }
 
         cachedFlags = cachedRow
-            ? await getRiskFlagsByRunAndSymbol(cachedRow.run_id, normalizedSymbol)
+            ? await withSoftTimeout(getRiskFlagsByRunAndSymbol(cachedRow.run_id, normalizedSymbol), [], 300)
             : [];
     } catch {
         cachedRow = null;
@@ -509,7 +529,7 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             normalizedSymbol,
             cachedRow.company_name ?? getCompanyName(normalizedSymbol)
         );
-        const priceContext = await getPriceContextBySymbol(normalizedSymbol);
+        const priceContext = await withSoftTimeout(getPriceContextBySymbol(normalizedSymbol), null, 500);
         const shouldUseDbPriceContext =
             priceContext?.data_date !== null &&
             priceContext?.data_date !== undefined &&
@@ -550,7 +570,11 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             return await scoreSingleSymbol(normalizedSymbol);
         }
 
-        const underlying = await getUnderlyingBySymbol(normalizedSymbol).catch(() => null);
+        const underlying = await withSoftTimeout(
+            getUnderlyingBySymbol(normalizedSymbol).catch(() => null),
+            null,
+            300
+        );
         const activeFocusStatuses = await getActiveMacroFocusStatuses();
         const macroSensitivityFlag = buildMacroSensitivityFlag(underlying, activeFocusStatuses);
         const effectiveFlags = macroSensitivityFlag
@@ -2053,19 +2077,12 @@ function calculateFreshnessPenalty(
     return 0.16;
 }
 
-async function getActiveMacroFocusStatuses(): Promise<Array<{ slug: string; status: string; title: string }>> {
+function getActiveMacroFocusStatuses(): Array<{ slug: string; status: string; title: string }> {
     try {
-        const focusItems = await getClientFocusListPayload();
-        return focusItems
-            .filter(
-                (item): item is typeof item & { status: string } =>
-                    typeof item.status === 'string' && item.status.length > 0
-            )
-            .map((item) => ({
-                slug: item.slug,
-                status: item.status,
-                title: item.title
-            }));
+        return getClientFocusStatusesSnapshot().filter(
+            (item): item is typeof item & { status: string } =>
+                typeof item.status === 'string' && item.status.length > 0
+        );
     } catch {
         return [];
     }

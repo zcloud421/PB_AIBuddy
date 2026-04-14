@@ -5305,6 +5305,28 @@ export async function getClientFocusList(): Promise<ClientFocusListItem[]> {
     }));
 }
 
+export function getClientFocusStatusesSnapshot(): Array<{ slug: string; status: string; title: string }> {
+    return FOCUS_TOPICS.flatMap((topic) => {
+        const cached = focusCache.get(topic.slug);
+        const status = cached?.value.status;
+
+        if (
+            !cached ||
+            cached.expiresAt <= Date.now() ||
+            typeof status !== 'string' ||
+            status.trim().length === 0
+        ) {
+            return [];
+        }
+
+        return [{
+            slug: cached.value.slug,
+            status,
+            title: cached.value.title
+        }];
+    });
+}
+
 export async function getClientFocusMarketState(): Promise<ClientFocusMarketStateResponse> {
     const snapshot = await fetchClientFocusMarketStateSnapshot();
     return snapshot ?? {
