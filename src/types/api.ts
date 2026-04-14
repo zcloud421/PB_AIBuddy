@@ -326,6 +326,7 @@ export interface DrawdownEpisode {
     max_drawdown_pct: number;
     decline_days: number;
     recovery_days: number | null;
+    total_duration_days: number | null;
     recovered: boolean;
 }
 
@@ -338,7 +339,9 @@ export interface TailRiskStats {
     drawdown_20_count: number;
     drawdown_30_count: number;
     median_recovery_days: number | null;
+    median_total_duration_days: number | null;
     worst_episode: DrawdownEpisode | null;
+    longest_recovery_episode: DrawdownEpisode | null;
 }
 
 export interface SymbolIdeaResponse {

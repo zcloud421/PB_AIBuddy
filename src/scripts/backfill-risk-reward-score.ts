@@ -9,6 +9,7 @@ type TailRiskStats = {
     max_drawdown_pct: number | null;
     worst_episode: {
         recovery_days: number | null;
+        total_duration_days: number | null;
         recovered: boolean;
     } | null;
 } | null;
@@ -90,9 +91,9 @@ function calculateRiskRewardScore(input: {
             ? 0.5
             : !input.tailRisk.worst_episode.recovered
               ? 0.25
-              : (input.tailRisk.worst_episode.recovery_days ?? 0) <= 60
+              : (input.tailRisk.worst_episode.total_duration_days ?? 0) <= 60
                 ? 0.85
-                : (input.tailRisk.worst_episode.recovery_days ?? 0) <= 180
+                : (input.tailRisk.worst_episode.total_duration_days ?? 0) <= 180
                   ? 0.6
                   : 0.35;
     const thresholdBreachScore =
@@ -269,6 +270,7 @@ function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>
     const episodes: Array<{
         max_drawdown_pct: number;
         recovery_days: number | null;
+        total_duration_days: number | null;
         recovered: boolean;
     }> = [];
 
@@ -289,7 +291,8 @@ function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>
             if (activeEpisode) {
                 episodes.push({
                     max_drawdown_pct: roundPct(activeEpisode.maxDrawdownPct),
-                    recovery_days: index - activeEpisode.peakIndex,
+                    recovery_days: index - activeEpisode.troughIndex,
+                    total_duration_days: index - activeEpisode.peakIndex,
                     recovered: true
                 });
                 activeEpisode = null;
@@ -320,6 +323,7 @@ function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>
         episodes.push({
             max_drawdown_pct: roundPct(activeEpisode.maxDrawdownPct),
             recovery_days: null,
+            total_duration_days: null,
             recovered: false
         });
     }
@@ -336,6 +340,7 @@ function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>
         worst_episode: worstEpisode
             ? {
                   recovery_days: worstEpisode.recovery_days,
+                  total_duration_days: worstEpisode.total_duration_days,
                   recovered: worstEpisode.recovered
               }
             : null

@@ -1557,9 +1557,9 @@ function calculateRiskRewardScore(input: {
             ? 0.5
             : !input.tailRisk.worst_episode.recovered
               ? 0.25
-              : (input.tailRisk.worst_episode.recovery_days ?? 0) <= 60
+              : (input.tailRisk.worst_episode.total_duration_days ?? 0) <= 60
                 ? 0.85
-                : (input.tailRisk.worst_episode.recovery_days ?? 0) <= 180
+                : (input.tailRisk.worst_episode.total_duration_days ?? 0) <= 180
                   ? 0.6
                   : 0.35;
     const thresholdBreachScore =
@@ -2197,6 +2197,7 @@ function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>
         max_drawdown_pct: number;
         decline_days: number;
         recovery_days: number | null;
+        total_duration_days: number | null;
         recovered: boolean;
     }> = [];
 
@@ -2224,7 +2225,8 @@ function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>
                     trough_price: roundPrice(activeEpisode.troughPrice),
                     max_drawdown_pct: roundPct(activeEpisode.maxDrawdownPct),
                     decline_days: activeEpisode.troughIndex - activeEpisode.peakIndex,
-                    recovery_days: index - activeEpisode.peakIndex,
+                    recovery_days: index - activeEpisode.troughIndex,
+                    total_duration_days: index - activeEpisode.peakIndex,
                     recovered: true
                 });
                 activeEpisode = null;
@@ -2263,6 +2265,7 @@ function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>
             max_drawdown_pct: roundPct(activeEpisode.maxDrawdownPct),
             decline_days: activeEpisode.troughIndex - activeEpisode.peakIndex,
             recovery_days: null,
+            total_duration_days: null,
             recovered: false
         });
     }
@@ -2271,13 +2274,24 @@ function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>
     const sortedRecoveryDays = recoveredEpisodes
         .map((episode) => episode.recovery_days as number)
         .sort((left, right) => left - right);
-    const medianRecoveryDays =
-        sortedRecoveryDays.length === 0 ? null : calculateMedian(sortedRecoveryDays);
+    const sortedTotalDurationDays = recoveredEpisodes
+        .map((episode) => episode.total_duration_days)
+        .filter((value): value is number => value !== null)
+        .sort((left, right) => left - right);
+    const medianRecoveryDays = sortedRecoveryDays.length === 0 ? null : calculateMedian(sortedRecoveryDays);
+    const medianTotalDurationDays =
+        sortedTotalDurationDays.length === 0 ? null : calculateMedian(sortedTotalDurationDays);
     const worstEpisode =
         episodes.length === 0
             ? null
             : episodes.reduce((worst, episode) =>
                   episode.max_drawdown_pct < worst.max_drawdown_pct ? episode : worst
+              );
+    const longestRecoveryEpisode =
+        recoveredEpisodes.length === 0
+            ? null
+            : recoveredEpisodes.reduce((longest, episode) =>
+                  (episode.recovery_days ?? 0) > (longest.recovery_days ?? 0) ? episode : longest
               );
 
     return {
@@ -2289,7 +2303,9 @@ function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>
         drawdown_20_count: episodes.filter((episode) => episode.max_drawdown_pct <= -20).length,
         drawdown_30_count: episodes.filter((episode) => episode.max_drawdown_pct <= -30).length,
         median_recovery_days: medianRecoveryDays,
-        worst_episode: worstEpisode
+        median_total_duration_days: medianTotalDurationDays,
+        worst_episode: worstEpisode,
+        longest_recovery_episode: longestRecoveryEpisode
     };
 }
 
