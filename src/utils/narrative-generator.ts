@@ -281,6 +281,12 @@ ${input.flags.some((flag) => flag.type === 'HIGH_COUPON_OVERRIDE')
     ? `12. 当前标的命中HIGH_COUPON_OVERRIDE：第一句必须说明技术面偏弱和下行风险；第二句说明执行价(${moneynessText})已充分反映下行空间，票息区间(${input.estimated_coupon_range})为风险承受能力较强客户提供较高安全边际；第三句说明仅适合了解FCN结构、能承受进一步下行风险的客户
 13. 不要使用“建议询价”或任何强推荐语句`
     : ''}
+${input.days_to_earnings !== null &&
+input.days_to_earnings !== undefined &&
+input.days_to_earnings >= 0 &&
+input.days_to_earnings <= 3
+    ? `\n16. 当前标的距财报不足3天，财报窗口期信息已在独立模块展示。why_now和risk_note禁止提及财报临近、财报窗口期、建议财报后询价等内容，正文应聚焦于标的基本面、技术面或行业背景。`
+    : ''}
 14. 同时根据近期新闻和风险判断一个sentiment_score：
    14.1 强正面催化（财报超预期/行业利好/机构看好）→ 0.75-1.0
    14.2 中性，无明显催化也无明显风险 → 0.40-0.74
