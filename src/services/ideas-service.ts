@@ -579,8 +579,6 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             void refreshNarrativeInBackground(normalizedSymbol, cachedRow, priceContext, effectiveFlags).catch(() => {});
         }
 
-        const extendedPriceHistory = await loadExtendedPriceHistory(normalizedSymbol);
-
         return {
             symbol: cachedRow.symbol,
             exchange: cachedRow.exchange,
@@ -604,7 +602,6 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             news_items: newsItems,
             flags: effectiveFlags,
             sentiment_score: narrative?.sentiment_score ?? toNullableNumber(cachedRow.sentiment_score),
-            price_history: extendedPriceHistory,
             signals: buildSignalsFromCachedRow({
                 current_price: effectiveCurrentPrice,
                 ma20: effectiveMa20,
@@ -925,7 +922,6 @@ function buildUnavailableIdeaResponse(symbol: string): SymbolIdeaResponse {
         news_items: [],
         flags: [],
         signals: [],
-        price_history: [],
         sentiment_score: 0.3,
         price_context: {
             current_price: null,
@@ -1279,10 +1275,6 @@ function mapScoringResultToSymbolIdea(
         news_items: newsItems,
         flags,
         sentiment_score: narrative?.sentiment_score ?? null,
-        price_history: symbolData.price_history.map((point) => ({
-            date: point.date,
-            close: point.close
-        })),
         signals: buildSignals(symbolData, scoring),
         price_context: {
             current_price: symbolData.current_price,

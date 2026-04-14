@@ -365,7 +365,6 @@ export interface SymbolIdeaResponse {
     flags: Flag[];
     signals: SignalRow[];
     price_context: PriceContext;
-    price_history: PriceHistoryPoint[];
     sentiment_score: number | null;
 }
 
