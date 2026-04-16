@@ -91,15 +91,35 @@ const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
 
 type AttributionAppliesTo = 'all' | 'us_tech' | 'china_tech' | 'symbols_only';
+type AttributionDriverType = 'macro' | 'policy' | 'sector' | 'company' | 'geopolitical' | 'mixed';
 
 interface AttributionMacroRule {
     id: string;
     start: string;
     end: string;
     reason_zh: string;
+    family: string;
+    driver_type: AttributionDriverType;
     applies_to: AttributionAppliesTo;
     symbols?: string[];
     keywords?: string[];
+    markers?: string[];
+}
+
+interface RankedAttributionRule {
+    rule: AttributionMacroRule;
+    score: number;
+}
+
+interface StructuredAttributionReason {
+    reason_family: string | null;
+    background_regime: string | null;
+    primary_driver_type: AttributionDriverType | null;
+    primary_driver: string | null;
+    secondary_driver: string | null;
+    reason_zh: string;
+    primary_rule_id: string | null;
+    background_rule_id: string | null;
 }
 
 const CHINA_TECH_ATTRIBUTION_SYMBOLS = new Set([
@@ -118,103 +138,139 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         start: '2021-09-01',
         end: '2022-12-31',
         reason_zh: 'Meta平台承压：苹果ATT隐私新政冲击广告定向、短视频竞争加剧，元宇宙高投入拖累利润',
+        family: 'meta-platform',
+        driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['META'],
-        keywords: ['att', 'privacy', 'ad', 'advertising', 'metaverse', 'reality labs', 'tiktok', 'daily users']
+        keywords: ['att', 'privacy', 'ad', 'advertising', 'metaverse', 'reality labs', 'tiktok', 'daily users'],
+        markers: ['ATT', '元宇宙', 'TikTok', 'Reality Labs']
     },
     {
         id: 'broad-semiconductor-downcycle-2022',
         start: '2021-11-01',
         end: '2023-01-31',
         reason_zh: '半导体景气回落：PC需求转弱与渠道库存修正压制行业估值，叠加加息环境放大回撤',
+        family: 'semiconductor-downcycle',
+        driver_type: 'sector',
         applies_to: 'symbols_only',
         symbols: ['AMD', 'INTC'],
-        keywords: ['pc', 'inventory', 'client', 'outlook', 'guidance', 'demand', 'slowdown']
+        keywords: ['pc', 'inventory', 'client', 'outlook', 'guidance', 'demand', 'slowdown'],
+        markers: ['半导体', 'PC需求', '库存', 'Client']
     },
     {
         id: 'memory-downcycle-2022',
         start: '2022-01-01',
         end: '2023-12-31',
         reason_zh: '存储芯片周期下行：DRAM/NAND供需失衡与库存累积拖累盈利，行业进入下修阶段',
+        family: 'memory-downcycle',
+        driver_type: 'sector',
         applies_to: 'symbols_only',
         symbols: ['MU', 'WDC', 'STX'],
-        keywords: ['dram', 'nand', 'memory', 'inventory', 'pricing', 'oversupply']
+        keywords: ['dram', 'nand', 'memory', 'inventory', 'pricing', 'oversupply'],
+        markers: ['存储', 'DRAM', 'NAND', '供需失衡']
     },
     {
         id: 'fed-hike-2022',
         start: '2022-01-01',
         end: '2023-02-28',
         reason_zh: '美联储激进加息叠加衰退担忧，高估值科技股整体估值被压缩',
+        family: 'rates',
+        driver_type: 'macro',
         applies_to: 'us_tech',
-        keywords: ['fed', 'rate', 'inflation', 'yield', 'hike']
+        keywords: ['fed', 'rate', 'inflation', 'yield', 'hike'],
+        markers: ['加息', 'Fed', '利率', '收益率']
     },
     {
         id: 'svb-crisis-2023',
         start: '2023-03-08',
         end: '2023-03-31',
         reason_zh: '硅谷银行挤兑倒闭，金融稳定担忧短暂蔓延至成长与科技板块',
+        family: 'financial-stability',
+        driver_type: 'macro',
         applies_to: 'all',
-        keywords: ['svb', 'silicon valley bank', 'bank run', 'deposit', 'liquidity']
+        keywords: ['svb', 'silicon valley bank', 'bank run', 'deposit', 'liquidity'],
+        markers: ['硅谷银行', 'SVB', 'bank run']
     },
     {
         id: 'meta-ai-capex-reset-2025',
         start: '2025-01-20',
         end: '2025-03-31',
         reason_zh: 'Meta AI资本开支与回报节奏再定价：广告主线稳健，但大规模AI投入拖累估值弹性',
+        family: 'meta-ai-capex',
+        driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['META'],
-        keywords: ['capex', 'ai spending', 'ad revenue', 'reels', 'monetization']
+        keywords: ['capex', 'ai spending', 'ad revenue', 'reels', 'monetization'],
+        markers: ['Meta', 'AI投入', '广告主线', '资本开支']
     },
     {
         id: 'deepseek-ai-reset-2025',
         start: '2025-01-20',
         end: '2025-03-31',
         reason_zh: 'DeepSeek低成本模型冲击AI链条定价，算力需求与资本开支回报预期被重估',
+        family: 'ai-reset',
+        driver_type: 'sector',
         applies_to: 'symbols_only',
         symbols: ['NVDA', 'AMD', 'AVGO', 'MRVL', 'ANET'],
-        keywords: ['deepseek', 'ai', 'capex', 'gpu', 'inference', 'training']
+        keywords: ['deepseek', 'ai', 'capex', 'gpu', 'inference', 'training'],
+        markers: ['DeepSeek', '算力', '资本开支', 'AI链条']
     },
     {
         id: 'unh-cost-guidance-reset-2025',
         start: '2025-04-01',
         end: '2026-12-31',
         reason_zh: 'UnitedHealth经营承压：Medicare Advantage医疗成本超预期、指引撤回与监管调查压制估值',
+        family: 'unh-fundamental',
+        driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['UNH'],
-        keywords: ['medicare advantage', 'medical costs', 'guidance', 'doj', 'probe', 'billing', 'ceo']
+        keywords: ['medicare advantage', 'medical costs', 'guidance', 'doj', 'probe', 'billing', 'ceo'],
+        markers: ['UnitedHealth', 'Medicare Advantage', '医疗成本', '监管调查']
     },
     {
         id: 'tariff-shock-2025',
         start: '2025-04-01',
         end: '2025-12-31',
         reason_zh: '美国对等关税冲击，全球股市与风险资产急剧下跌',
+        family: 'tariff',
+        driver_type: 'policy',
         applies_to: 'us_tech',
-        keywords: ['tariff', 'trade', 'duties', 'levy']
+        keywords: ['tariff', 'trade', 'duties', 'levy'],
+        markers: ['关税', 'tariff', '贸易']
     },
     {
         id: 'china-macro-2025',
         start: '2025-04-01',
         end: '2025-12-31',
         reason_zh: '中美关税博弈升级，中国科技股受外部需求收缩、汇率与地缘压力拖累',
+        family: 'china-policy',
+        driver_type: 'policy',
         applies_to: 'china_tech',
-        keywords: ['tariff', 'china', 'export', 'yuan', 'demand']
+        keywords: ['tariff', 'china', 'export', 'yuan', 'demand'],
+        markers: ['中美关税', '中国科技股', '汇率', '外部需求']
     },
     {
         id: 'mag7-pullback-2026',
         start: '2026-01-01',
         end: '2026-02-27',
         reason_zh: '科技巨头高位回撤：创新高后，AI投入回报与估值弹性阶段性回落',
+        family: 'mag7-pullback',
+        driver_type: 'sector',
         applies_to: 'symbols_only',
         symbols: ['META', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'AAPL', 'NVDA', 'TSLA'],
-        keywords: ['valuation', 'capex', 'ai', 'pullback']
+        keywords: ['valuation', 'capex', 'ai', 'pullback'],
+        markers: ['Mag7', '科技巨头', '估值', 'AI投入回报']
     },
     {
         id: 'us-iran-war-2026',
         start: '2026-02-28',
         end: '2026-12-31',
         reason_zh: '中东局势急剧恶化，能源、利率与风险资产同步波动，科技股高位回撤放大',
+        family: 'middle-east',
+        driver_type: 'geopolitical',
         applies_to: 'all',
-        keywords: ['iran', 'middle east', 'oil', 'hormuz', 'war', 'ceasefire']
+        keywords: ['iran', 'middle east', 'oil', 'hormuz', 'war', 'ceasefire'],
+        markers: ['中东', '伊朗', '霍尔木兹', '能源', '停火']
     }
 ];
 
@@ -2494,27 +2550,157 @@ function buildFallbackAttributionReason(symbol: string, companyName: string | nu
     return `${label} ${issuer} 暂无明确单一宏观主因，回撤更可能由个股基本面、板块节奏或市场风险偏好共同驱动`;
 }
 
+function getRuleSpecificityScore(rule: AttributionMacroRule, symbol: string): number {
+    const upper = symbol.toUpperCase();
+    if (rule.symbols?.includes(upper)) {
+        return 50;
+    }
+    if (rule.applies_to === 'symbols_only') {
+        return 35;
+    }
+    if (rule.applies_to === 'china_tech' || rule.applies_to === 'us_tech') {
+        return 18;
+    }
+    return 8;
+}
+
+function getDriverPriority(rule: AttributionMacroRule): number {
+    switch (rule.driver_type) {
+        case 'company':
+            return 16;
+        case 'sector':
+            return 13;
+        case 'policy':
+            return 11;
+        case 'geopolitical':
+            return 10;
+        case 'macro':
+            return 9;
+        default:
+            return 0;
+    }
+}
+
+function rankAttributionRules(
+    symbol: string,
+    peakDate: string,
+    troughDate: string,
+    newsItems: NewsItem[]
+): RankedAttributionRule[] {
+    return DRAWDOWN_ATTRIBUTION_RULES
+        .filter((rule) => eventOverlapsRule(peakDate, troughDate, rule) && isRuleApplicableToSymbol(rule, symbol))
+        .map((rule) => {
+            const specificityScore = getRuleSpecificityScore(rule, symbol);
+            const keywordScore = countKeywordHits(newsItems, rule.keywords) * 8;
+            const driverScore = getDriverPriority(rule);
+            return {
+                rule,
+                score: specificityScore + keywordScore + driverScore
+            };
+        })
+        .sort((left, right) => right.score - left.score);
+}
+
+function buildStructuredFallbackAttribution(
+    symbol: string,
+    companyName: string | null,
+    peakDate: string
+): StructuredAttributionReason {
+    const issuer = companyName?.trim() || symbol.toUpperCase();
+    return {
+        reason_family: 'company-fundamental',
+        background_regime: null,
+        primary_driver_type: 'company',
+        primary_driver: `${issuer} 基本面或板块节奏承压`,
+        secondary_driver: '市场风险偏好回落放大跌幅',
+        reason_zh: buildFallbackAttributionReason(symbol, companyName, peakDate),
+        primary_rule_id: null,
+        background_rule_id: null
+    };
+}
+
+function renderStructuredAttributionReason(reason: StructuredAttributionReason): string {
+    if (!reason.primary_driver) {
+        return reason.reason_zh;
+    }
+
+    if (reason.secondary_driver) {
+        return `${reason.primary_driver}，叠加${reason.secondary_driver}`;
+    }
+
+    if (reason.background_regime && reason.background_regime !== reason.primary_driver) {
+        return `${reason.primary_driver}，背景环境为${reason.background_regime}`;
+    }
+
+    return reason.primary_driver;
+}
+
 function chooseHeuristicAttributionReason(
     symbol: string,
     companyName: string | null,
     peakDate: string,
     troughDate: string,
     newsItems: NewsItem[]
-): string {
-    const candidates = DRAWDOWN_ATTRIBUTION_RULES
-        .filter((rule) => eventOverlapsRule(peakDate, troughDate, rule) && isRuleApplicableToSymbol(rule, symbol))
-        .map((rule) => {
-            const symbolScore = rule.symbols?.includes(symbol.toUpperCase()) ? 40 : 0;
-            const categoryScore = rule.applies_to === 'symbols_only' ? 0 : rule.applies_to === 'all' ? 10 : 20;
-            const keywordScore = countKeywordHits(newsItems, rule.keywords) * 8;
-            return {
-                rule,
-                score: symbolScore + categoryScore + keywordScore
-            };
-        })
-        .sort((left, right) => right.score - left.score);
+): StructuredAttributionReason {
+    const candidates = rankAttributionRules(symbol, peakDate, troughDate, newsItems);
+    const primary = candidates[0]?.rule;
+    if (!primary) {
+        return buildStructuredFallbackAttribution(symbol, companyName, peakDate);
+    }
 
-    return candidates[0]?.rule.reason_zh ?? buildFallbackAttributionReason(symbol, companyName, peakDate);
+    const background = candidates.find(
+        (candidate) =>
+            candidate.rule.id !== primary.id &&
+            ['macro', 'policy', 'geopolitical'].includes(candidate.rule.driver_type)
+    )?.rule;
+
+    const structured: StructuredAttributionReason = {
+        reason_family: primary.family,
+        background_regime:
+            ['macro', 'policy', 'geopolitical'].includes(primary.driver_type) ? primary.reason_zh : background?.reason_zh ?? null,
+        primary_driver_type: primary.driver_type,
+        primary_driver: primary.reason_zh,
+        secondary_driver:
+            primary.driver_type === 'company' || primary.driver_type === 'sector'
+                ? background?.reason_zh ?? null
+                : null,
+        reason_zh: primary.reason_zh,
+        primary_rule_id: primary.id,
+        background_rule_id: background?.id ?? null
+    };
+
+    structured.reason_zh = renderStructuredAttributionReason(structured);
+    return structured;
+}
+
+function collectRuleMarkers(ruleIds: Array<string | null | undefined>): string[] {
+    const allowed = new Set(
+        ruleIds
+            .filter((value): value is string => Boolean(value))
+            .flatMap((ruleId) => DRAWDOWN_ATTRIBUTION_RULES.find((rule) => rule.id === ruleId)?.markers ?? [])
+    );
+    return [...allowed];
+}
+
+function collectForbiddenMarkers(ruleIds: Array<string | null | undefined>): string[] {
+    const allowedIds = new Set(ruleIds.filter((value): value is string => Boolean(value)));
+    return DRAWDOWN_ATTRIBUTION_RULES.filter((rule) => !allowedIds.has(rule.id)).flatMap((rule) => rule.markers ?? []);
+}
+
+function isRefinedReasonConsistent(
+    refinedReason: string,
+    reason: StructuredAttributionReason
+): boolean {
+    if (!refinedReason || refinedReason.length > 80) {
+        return false;
+    }
+
+    const allowedMarkers = collectRuleMarkers([reason.primary_rule_id, reason.background_rule_id]);
+    const forbiddenMarkers = collectForbiddenMarkers([reason.primary_rule_id, reason.background_rule_id]);
+    const hasAllowedMarker = allowedMarkers.length === 0 || allowedMarkers.some((marker) => refinedReason.includes(marker));
+    const hasForbiddenMarker = forbiddenMarkers.some((marker) => refinedReason.includes(marker));
+
+    return hasAllowedMarker && !hasForbiddenMarker;
 }
 
 async function refineDrawdownAttributionsWithLLM(input: {
@@ -2524,7 +2710,12 @@ async function refineDrawdownAttributionsWithLLM(input: {
         peak_date: string;
         trough_date: string;
         max_drawdown_pct: number;
+        background_regime: string | null;
+        primary_driver_type: AttributionDriverType | null;
+        primary_driver: string | null;
+        secondary_driver: string | null;
         heuristic_reason: string;
+        allowed_markers: string[];
         news_titles: string[];
     }>;
 }): Promise<Map<string, string>> {
@@ -2538,15 +2729,15 @@ async function refineDrawdownAttributionsWithLLM(input: {
 
 目标：
 - 对每段回撤给出 1 句中文主因归因，18-40 字
-- 优先识别公司/行业主因；只有证据不足时才用宏观主因
-- 不要机械重复“暂无明确宏观归因”
+- 只能基于已提供的背景环境、主因、放大因素改写
+- 严禁引入任何未提供的事件名称、政策名称、公司丑闻或宏观冲击
 - 不要写成长段分析，不要给投资建议
 
 个股：${input.companyName?.trim() || input.symbol}
 回撤清单：
 ${input.items.map((item, index) => {
     const newsBlock = item.news_titles.length > 0 ? item.news_titles.map((title) => `- ${title}`).join('\n') : '- 无明确新闻标题';
-    return `${index + 1}. peak=${item.peak_date}, trough=${item.trough_date}, drawdown=${item.max_drawdown_pct.toFixed(1)}%, heuristic=${item.heuristic_reason}\n${newsBlock}`;
+    return `${index + 1}. peak=${item.peak_date}, trough=${item.trough_date}, drawdown=${item.max_drawdown_pct.toFixed(1)}%, background=${item.background_regime ?? '无'}, primary_type=${item.primary_driver_type ?? 'unknown'}, primary=${item.primary_driver ?? '无'}, secondary=${item.secondary_driver ?? '无'}, heuristic=${item.heuristic_reason}, markers=${item.allowed_markers.join('/') || '无'}\n${newsBlock}`;
 }).join('\n\n')}
 
 请返回纯 JSON 数组：
@@ -2635,15 +2826,36 @@ async function buildDrawdownAttributions(
             peak_date: item.episode.peak_date,
             trough_date: item.episode.trough_date,
             max_drawdown_pct: item.episode.max_drawdown_pct,
-            heuristic_reason: item.heuristicReason,
+            background_regime: item.heuristicReason.background_regime,
+            primary_driver_type: item.heuristicReason.primary_driver_type,
+            primary_driver: item.heuristicReason.primary_driver,
+            secondary_driver: item.heuristicReason.secondary_driver,
+            heuristic_reason: item.heuristicReason.reason_zh,
+            allowed_markers: collectRuleMarkers([
+                item.heuristicReason.primary_rule_id,
+                item.heuristicReason.background_rule_id
+            ]),
             news_titles: item.newsItems.map((news) => news.title)
         }))
     });
 
-    const value = newsByEpisode.map(({ episode, heuristicReason }) => ({
-        ...episode,
-        reason_zh: llmReasons.get(`${episode.peak_date}::${episode.trough_date}`) ?? heuristicReason
-    }));
+    const value = newsByEpisode.map(({ episode, heuristicReason }) => {
+        const llmReason = llmReasons.get(`${episode.peak_date}::${episode.trough_date}`);
+        const reason_zh =
+            llmReason && isRefinedReasonConsistent(llmReason, heuristicReason)
+                ? llmReason
+                : heuristicReason.reason_zh;
+
+        return {
+            ...episode,
+            reason_family: heuristicReason.reason_family,
+            background_regime: heuristicReason.background_regime,
+            primary_driver_type: heuristicReason.primary_driver_type,
+            primary_driver: heuristicReason.primary_driver,
+            secondary_driver: heuristicReason.secondary_driver,
+            reason_zh
+        };
+    });
 
     drawdownAttributionCache.set(cacheKey, {
         expiresAt: Date.now() + DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS,
