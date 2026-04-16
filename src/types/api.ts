@@ -341,6 +341,7 @@ export interface DrawdownAttribution {
     recovered: boolean;
     closed_by_partial_recovery: boolean;
     subsector?: string | null;
+    cycle_family?: string | null;
     event_signals?: string[] | null;
     reason_family?: string | null;
     background_regime?: string | null;

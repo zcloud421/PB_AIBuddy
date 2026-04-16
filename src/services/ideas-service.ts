@@ -94,6 +94,15 @@ const drawdownAttributionCache = new Map<string, { expiresAt: number; value: Dra
 
 type AttributionAppliesTo = 'all' | 'us_tech' | 'china_tech' | 'symbols_only';
 type AttributionDriverType = 'macro' | 'policy' | 'sector' | 'company' | 'geopolitical' | 'mixed';
+type AttributionCycleFamily =
+    | 'banking-credit-cycle'
+    | 'energy-oil-cycle'
+    | 'industrial-capex-cycle'
+    | 'materials-cycle'
+    | 'consumer-discretionary-cycle'
+    | 'semiconductor-cycle'
+    | 'travel-leisure-cycle'
+    | 'crypto-cycle';
 
 interface AttributionMacroRule {
     id: string;
@@ -105,6 +114,7 @@ interface AttributionMacroRule {
     applies_to: AttributionAppliesTo;
     symbols?: string[];
     subsectors?: string[];
+    cycle_families?: AttributionCycleFamily[];
     keywords?: string[];
     event_signal_tags?: string[];
     markers?: string[];
@@ -117,6 +127,7 @@ interface RankedAttributionRule {
 
 interface StructuredAttributionReason {
     subsector: string | null;
+    cycle_family: AttributionCycleFamily | null;
     event_signals: string[];
     reason_family: string | null;
     background_regime: string | null;
@@ -147,6 +158,41 @@ const SYMBOL_SUBSECTOR_MAP: Array<{ subsector: string; symbols: string[] }> = [
     { subsector: 'crypto-platform', symbols: ['COIN', 'HOOD', 'MSTR'] },
     { subsector: 'memory', symbols: ['MU', 'WDC', 'STX'] },
     { subsector: 'semiconductor', symbols: ['AMD', 'INTC', 'AVGO', 'MRVL', 'NVDA', 'MU', 'TSM'] }
+];
+
+const SYMBOL_CYCLE_FAMILY_MAP: Array<{ cycle_family: AttributionCycleFamily; symbols: string[] }> = [
+    {
+        cycle_family: 'banking-credit-cycle',
+        symbols: ['JPM', 'BAC', 'C', 'WFC', 'GS', 'MS', 'HSBC', 'UNH', 'HUM', 'ELV', 'CI', 'CVS']
+    },
+    {
+        cycle_family: 'energy-oil-cycle',
+        symbols: ['XOM', 'CVX', 'COP', 'SLB', 'EOG', 'OXY']
+    },
+    {
+        cycle_family: 'industrial-capex-cycle',
+        symbols: ['CAT', 'GE', 'GEV', 'BA', 'UAL', 'DAL', 'DE', 'HON', 'MMM', 'CMI', 'DOV']
+    },
+    {
+        cycle_family: 'materials-cycle',
+        symbols: ['NUE', 'FCX', 'DOW', 'AA', 'VMC']
+    },
+    {
+        cycle_family: 'consumer-discretionary-cycle',
+        symbols: ['TSLA', 'GM', 'F', 'AMZN', 'HD', 'LOW', 'MCD', 'NKE', 'DIS', 'ABNB', 'BKNG', 'TJX', 'KMX', 'BBWI']
+    },
+    {
+        cycle_family: 'semiconductor-cycle',
+        symbols: ['INTC', 'AMD', 'MU', 'NVDA', 'AVGO', 'TXN', 'AMAT', 'LRCX', 'TSM', 'QCOM', 'MRVL', 'VRT', 'LITE']
+    },
+    {
+        cycle_family: 'travel-leisure-cycle',
+        symbols: ['LVS', 'MGM', 'NCLH', 'EPR']
+    },
+    {
+        cycle_family: 'crypto-cycle',
+        symbols: ['HOOD', 'COIN', 'MSTR', 'MARA', 'CLSK', 'RIOT', 'CRCL']
+    }
 ];
 
 const NEWS_EVENT_SIGNAL_KEYWORDS: Array<{ tag: string; keywords: string[] }> = [
@@ -191,6 +237,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'symbols_only',
         symbols: ['AMD', 'INTC'],
         subsectors: ['semiconductor'],
+        cycle_families: ['semiconductor-cycle'],
         keywords: ['pc', 'inventory', 'client', 'outlook', 'guidance', 'demand', 'slowdown'],
         event_signal_tags: ['demand-slowdown', 'inventory-correction', 'guidance-cut'],
         markers: ['半导体', 'PC需求', '库存', 'Client']
@@ -205,6 +252,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'symbols_only',
         symbols: ['MU', 'WDC', 'STX'],
         subsectors: ['memory'],
+        cycle_families: ['semiconductor-cycle'],
         keywords: ['dram', 'nand', 'memory', 'inventory', 'pricing', 'oversupply'],
         event_signal_tags: ['inventory-correction', 'pricing-pressure', 'demand-slowdown'],
         markers: ['存储', 'DRAM', 'NAND', '供需失衡']
@@ -219,6 +267,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'symbols_only',
         symbols: ['TSLA'],
         subsectors: ['ev-oem'],
+        cycle_families: ['consumer-discretionary-cycle'],
         keywords: ['musk', 'sell', 'share sale', 'twitter poll', 'valuation', 'delivery'],
         event_signal_tags: ['demand-slowdown'],
         markers: ['Tesla', '马斯克', '减持', '高估值']
@@ -255,6 +304,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'symbols_only',
         symbols: ['TSLA'],
         subsectors: ['ev-oem'],
+        cycle_families: ['consumer-discretionary-cycle'],
         keywords: ['deliveries', 'registrations', 'europe', 'price cuts', 'margins', 'backlash', 'model y', 'sales plunge', 'demand slowdown'],
         event_signal_tags: ['demand-slowdown', 'pricing-pressure'],
         markers: ['Tesla', '销量', '价格战', '利润率', '欧洲']
@@ -269,6 +319,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'symbols_only',
         symbols: ['TSLA'],
         subsectors: ['ev-oem'],
+        cycle_families: ['consumer-discretionary-cycle'],
         keywords: ['trump', 'musk', 'feud', 'government contracts', 'subsidies', 'deliveries'],
         event_signal_tags: ['political-risk', 'demand-slowdown'],
         markers: ['Tesla', '特朗普', '马斯克', '政策风险', '交付压力']
@@ -283,6 +334,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'symbols_only',
         symbols: ['COIN', 'HOOD', 'MSTR'],
         subsectors: ['crypto-platform'],
+        cycle_families: ['crypto-cycle'],
         keywords: ['bitcoin', 'crypto', 'ether', 'trading volume', 'coinbase', 'token prices'],
         event_signal_tags: ['crypto-drawdown'],
         markers: ['加密货币', '比特币', '交易量', '币价']
@@ -297,6 +349,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'symbols_only',
         symbols: ['COIN', 'HOOD', 'MSTR'],
         subsectors: ['crypto-platform'],
+        cycle_families: ['crypto-cycle'],
         keywords: ['silvergate', 'signature bank', 'crypto banking', 'usdc'],
         event_signal_tags: ['crypto-banking-stress'],
         markers: ['Silvergate', 'Signature', '加密银行', '资金通道']
@@ -311,6 +364,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'symbols_only',
         symbols: ['COIN', 'HOOD', 'MSTR'],
         subsectors: ['crypto-platform'],
+        cycle_families: ['crypto-cycle'],
         keywords: ['etf', 'bitcoin', 'crypto', 'trading volume', 'flows'],
         event_signal_tags: ['crypto-drawdown'],
         markers: ['ETF', '比特币', '交易量', '加密资产']
@@ -325,6 +379,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'symbols_only',
         symbols: ['LITE', 'CIEN', 'COHR', 'AAOI', 'INFN'],
         subsectors: ['optical-networking'],
+        cycle_families: ['semiconductor-cycle'],
         keywords: ['inventory correction', 'telecom', 'networking', 'datacom', 'optical', 'carrier'],
         event_signal_tags: ['inventory-correction', 'demand-slowdown'],
         markers: ['光通信', '去库存', '运营商', '数通']
@@ -353,6 +408,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'symbols_only',
         symbols: ['TSM'],
         subsectors: ['semiconductor'],
+        cycle_families: ['semiconductor-cycle'],
         keywords: ['inventory', 'smartphone', 'pc', 'chip demand', 'fab', 'wafer'],
         event_signal_tags: ['inventory-correction', 'demand-slowdown'],
         markers: ['TSMC', '晶圆代工', '库存调整', '终端需求']
@@ -367,6 +423,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'symbols_only',
         symbols: ['TSM'],
         subsectors: ['semiconductor'],
+        cycle_families: ['semiconductor-cycle'],
         keywords: ['ai demand', 'advanced packaging', 'tariff', 'export controls', 'foundry'],
         event_signal_tags: ['capex-reset'],
         markers: ['TSMC', '先进制程', 'AI链条', '贸易政策']
@@ -435,6 +492,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'symbols_only',
         symbols: ['VRT'],
         subsectors: ['ai-infra'],
+        cycle_families: ['semiconductor-cycle'],
         keywords: ['data center', 'orders', 'ai spending', 'deepseek', 'cooling', 'power'],
         event_signal_tags: ['orders-slowdown', 'capex-reset'],
         markers: ['Vertiv', '数据中心', 'AI基建', '订单节奏']
@@ -471,6 +529,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'symbols_only',
         symbols: ['VRT'],
         subsectors: ['ai-infra'],
+        cycle_families: ['semiconductor-cycle'],
         keywords: ['capex', 'hyperscaler', 'data center', 'orders', 'sustainability'],
         event_signal_tags: ['orders-slowdown', 'capex-reset'],
         markers: ['数据中心', '资本开支', '订单可持续性', 'AI基建']
@@ -2789,6 +2848,16 @@ function inferSymbolSubsector(symbol: string, companyName: string | null, newsIt
     return null;
 }
 
+function inferSymbolCycleFamily(symbol: string): AttributionCycleFamily | null {
+    const upper = symbol.toUpperCase();
+    for (const entry of SYMBOL_CYCLE_FAMILY_MAP) {
+        if (entry.symbols.includes(upper)) {
+            return entry.cycle_family;
+        }
+    }
+    return null;
+}
+
 function extractNewsEventSignals(newsItems: NewsItem[]): string[] {
     if (newsItems.length === 0) {
         return [];
@@ -2875,6 +2944,7 @@ function rankAttributionRules(
     newsItems: NewsItem[]
 ): RankedAttributionRule[] {
     const inferredSubsector = inferSymbolSubsector(symbol, companyName, newsItems);
+    const inferredCycleFamily = inferSymbolCycleFamily(symbol);
     const eventSignals = new Set(extractNewsEventSignals(newsItems));
 
     return DRAWDOWN_ATTRIBUTION_RULES
@@ -2884,13 +2954,14 @@ function rankAttributionRules(
             const keywordScore = countKeywordHits(newsItems, rule.keywords) * 8;
             const driverScore = getDriverPriority(rule);
             const subsectorScore = inferredSubsector && rule.subsectors?.includes(inferredSubsector) ? 18 : 0;
+            const cycleScore = inferredCycleFamily && rule.cycle_families?.includes(inferredCycleFamily) ? 14 : 0;
             const signalScore = (rule.event_signal_tags ?? []).reduce(
                 (total, tag) => total + (eventSignals.has(tag) ? 10 : 0),
                 0
             );
             return {
                 rule,
-                score: specificityScore + keywordScore + driverScore + subsectorScore + signalScore
+                score: specificityScore + keywordScore + driverScore + subsectorScore + cycleScore + signalScore
             };
         })
         .sort((left, right) => right.score - left.score);
@@ -2904,8 +2975,10 @@ function buildStructuredFallbackAttribution(
     eventSignals: string[]
 ): StructuredAttributionReason {
     const issuer = normalizeIssuerName(symbol, companyName);
+    const cycleFamily = inferSymbolCycleFamily(symbol);
     return {
         subsector,
+        cycle_family: cycleFamily,
         event_signals: eventSignals,
         reason_family: 'company-fundamental',
         background_regime: null,
@@ -2942,6 +3015,7 @@ function chooseHeuristicAttributionReason(
     newsItems: NewsItem[]
 ): StructuredAttributionReason {
     const inferredSubsector = inferSymbolSubsector(symbol, companyName, newsItems);
+    const inferredCycleFamily = inferSymbolCycleFamily(symbol);
     const eventSignals = extractNewsEventSignals(newsItems);
     const candidates = rankAttributionRules(symbol, companyName, peakDate, troughDate, newsItems);
     const primary = candidates[0]?.rule;
@@ -2957,6 +3031,7 @@ function chooseHeuristicAttributionReason(
 
     const structured: StructuredAttributionReason = {
         subsector: inferredSubsector,
+        cycle_family: inferredCycleFamily,
         event_signals: eventSignals,
         reason_family: primary.family,
         background_regime:
@@ -3172,6 +3247,7 @@ async function buildDrawdownAttributions(
         return {
             ...episode,
             subsector: heuristicReason.subsector,
+            cycle_family: heuristicReason.cycle_family,
             event_signals: heuristicReason.event_signals,
             reason_family: heuristicReason.reason_family,
             background_regime: heuristicReason.background_regime,
