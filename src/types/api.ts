@@ -340,6 +340,8 @@ export interface DrawdownAttribution {
     total_duration_days: number | null;
     recovered: boolean;
     closed_by_partial_recovery: boolean;
+    subsector?: string | null;
+    event_signals?: string[] | null;
     reason_family?: string | null;
     background_regime?: string | null;
     primary_driver_type?: 'macro' | 'policy' | 'sector' | 'company' | 'geopolitical' | 'mixed' | null;

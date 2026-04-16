@@ -104,7 +104,9 @@ interface AttributionMacroRule {
     driver_type: AttributionDriverType;
     applies_to: AttributionAppliesTo;
     symbols?: string[];
+    subsectors?: string[];
     keywords?: string[];
+    event_signal_tags?: string[];
     markers?: string[];
 }
 
@@ -114,6 +116,8 @@ interface RankedAttributionRule {
 }
 
 interface StructuredAttributionReason {
+    subsector: string | null;
+    event_signals: string[];
     reason_family: string | null;
     background_regime: string | null;
     primary_driver_type: AttributionDriverType | null;
@@ -134,6 +138,30 @@ const US_TECH_ATTRIBUTION_SYMBOLS = new Set([
     'SNOW', 'WDAY', 'ADBE', 'NOW', 'TSM', 'INTC', 'ROKU', 'SNAP', 'RBLX', 'DOCU', 'ZM', 'PTON'
 ]);
 
+const SYMBOL_SUBSECTOR_MAP: Array<{ subsector: string; symbols: string[] }> = [
+    { subsector: 'ad-platform-internet', symbols: ['GOOG', 'GOOGL', 'META', 'SNAP', 'PINS'] },
+    { subsector: 'ev-oem', symbols: ['TSLA', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI'] },
+    { subsector: 'optical-networking', symbols: ['LITE', 'CIEN', 'COHR', 'AAOI', 'INFN'] },
+    { subsector: 'managed-care', symbols: ['UNH', 'HUM', 'ELV', 'CI', 'CVS'] },
+    { subsector: 'ai-infra', symbols: ['VRT', 'SMCI', 'DELL', 'ANET', 'AVGO', 'MRVL', 'NVDA'] },
+    { subsector: 'memory', symbols: ['MU', 'WDC', 'STX'] },
+    { subsector: 'semiconductor', symbols: ['AMD', 'INTC', 'AVGO', 'MRVL', 'NVDA', 'MU', 'TSM'] }
+];
+
+const NEWS_EVENT_SIGNAL_KEYWORDS: Array<{ tag: string; keywords: string[] }> = [
+    { tag: 'earnings-miss', keywords: ['earnings miss', 'missed estimates', 'misses estimates', 'results miss', 'revenue miss'] },
+    { tag: 'guidance-cut', keywords: ['guidance cut', 'cuts forecast', 'withdraws guidance', 'outlook cut', 'lowers forecast', 'suspends guidance'] },
+    { tag: 'demand-slowdown', keywords: ['demand slowdown', 'weaker demand', 'demand weak', 'soft demand', 'sales plunge', 'registrations fell'] },
+    { tag: 'inventory-correction', keywords: ['inventory correction', 'inventory', 'channel inventory', 'destocking'] },
+    { tag: 'pricing-pressure', keywords: ['price cuts', 'price war', 'margin pressure', 'pricing pressure'] },
+    { tag: 'regulatory-probe', keywords: ['antitrust', 'doj', 'probe', 'investigation', 'lawsuit', 'regulatory'] },
+    { tag: 'search-disruption', keywords: ['ai search', 'safari', 'default search', 'search traffic', 'search queries'] },
+    { tag: 'ceo-change', keywords: ['ceo steps down', 'ceo resigns', 'management change'] },
+    { tag: 'accounting-issue', keywords: ['accounting', 'auditor', 'short report', 'fraud', 'restatement'] },
+    { tag: 'capex-reset', keywords: ['capex', 'capital expenditure', 'ai spending', 'spending plan'] },
+    { tag: 'orders-slowdown', keywords: ['orders', 'bookings', 'backlog', 'order slowdown'] }
+];
+
 const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
     {
         id: 'meta-platform-reset-2022',
@@ -144,7 +172,9 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['META'],
+        subsectors: ['ad-platform-internet'],
         keywords: ['att', 'privacy', 'ad', 'advertising', 'metaverse', 'reality labs', 'tiktok', 'daily users'],
+        event_signal_tags: ['regulatory-probe'],
         markers: ['ATT', '元宇宙', 'TikTok', 'Reality Labs']
     },
     {
@@ -156,7 +186,9 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'sector',
         applies_to: 'symbols_only',
         symbols: ['AMD', 'INTC'],
+        subsectors: ['semiconductor'],
         keywords: ['pc', 'inventory', 'client', 'outlook', 'guidance', 'demand', 'slowdown'],
+        event_signal_tags: ['demand-slowdown', 'inventory-correction', 'guidance-cut'],
         markers: ['半导体', 'PC需求', '库存', 'Client']
     },
     {
@@ -168,7 +200,9 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'sector',
         applies_to: 'symbols_only',
         symbols: ['MU', 'WDC', 'STX'],
+        subsectors: ['memory'],
         keywords: ['dram', 'nand', 'memory', 'inventory', 'pricing', 'oversupply'],
+        event_signal_tags: ['inventory-correction', 'pricing-pressure', 'demand-slowdown'],
         markers: ['存储', 'DRAM', 'NAND', '供需失衡']
     },
     {
@@ -180,7 +214,9 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['TSLA'],
+        subsectors: ['ev-oem'],
         keywords: ['musk', 'sell', 'share sale', 'twitter poll', 'valuation', 'delivery'],
+        event_signal_tags: ['demand-slowdown'],
         markers: ['Tesla', '马斯克', '减持', '高估值']
     },
     {
@@ -214,7 +250,9 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['TSLA'],
+        subsectors: ['ev-oem'],
         keywords: ['deliveries', 'registrations', 'europe', 'price cuts', 'margins', 'backlash', 'model y'],
+        event_signal_tags: ['demand-slowdown', 'pricing-pressure'],
         markers: ['Tesla', '销量', '价格战', '利润率', '欧洲']
     },
     {
@@ -226,7 +264,9 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'sector',
         applies_to: 'symbols_only',
         symbols: ['LITE', 'CIEN', 'COHR', 'AAOI', 'INFN'],
+        subsectors: ['optical-networking'],
         keywords: ['inventory correction', 'telecom', 'networking', 'datacom', 'optical', 'carrier'],
+        event_signal_tags: ['inventory-correction', 'demand-slowdown'],
         markers: ['光通信', '去库存', '运营商', '数通']
     },
     {
@@ -238,7 +278,9 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['GOOG', 'GOOGL'],
+        subsectors: ['ad-platform-internet'],
         keywords: ['cloud', 'capex', 'ai spending', 'revenue miss', 'margin'],
+        event_signal_tags: ['capex-reset', 'earnings-miss'],
         markers: ['Alphabet', 'Cloud', 'AI资本开支', '估值弹性']
     },
     {
@@ -250,7 +292,9 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['META'],
+        subsectors: ['ad-platform-internet'],
         keywords: ['capex', 'ai spending', 'ad revenue', 'reels', 'monetization'],
+        event_signal_tags: ['capex-reset'],
         markers: ['Meta', 'AI投入', '广告主线', '资本开支']
     },
     {
@@ -274,7 +318,9 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['UNH'],
+        subsectors: ['managed-care'],
         keywords: ['medicare advantage', 'medical costs', 'guidance', 'doj', 'probe', 'billing', 'ceo'],
+        event_signal_tags: ['guidance-cut', 'regulatory-probe', 'ceo-change'],
         markers: ['UnitedHealth', 'Medicare Advantage', '医疗成本', '监管调查']
     },
     {
@@ -286,7 +332,9 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['GOOG', 'GOOGL'],
+        subsectors: ['ad-platform-internet'],
         keywords: ['search', 'safari', 'apple', 'eddie cue', 'antitrust', 'ai search', 'default'],
+        event_signal_tags: ['search-disruption', 'regulatory-probe'],
         markers: ['Alphabet', '搜索', 'Safari', 'AI搜索', '反垄断']
     },
     {
@@ -298,7 +346,9 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'sector',
         applies_to: 'symbols_only',
         symbols: ['VRT'],
+        subsectors: ['ai-infra'],
         keywords: ['data center', 'orders', 'ai spending', 'deepseek', 'cooling', 'power'],
+        event_signal_tags: ['orders-slowdown', 'capex-reset'],
         markers: ['Vertiv', '数据中心', 'AI基建', '订单节奏']
     },
     {
@@ -332,7 +382,9 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'sector',
         applies_to: 'symbols_only',
         symbols: ['VRT'],
+        subsectors: ['ai-infra'],
         keywords: ['capex', 'hyperscaler', 'data center', 'orders', 'sustainability'],
+        event_signal_tags: ['orders-slowdown', 'capex-reset'],
         markers: ['数据中心', '资本开支', '订单可持续性', 'AI基建']
     },
     {
@@ -2630,6 +2682,36 @@ function countKeywordHits(items: NewsItem[], keywords: string[] | undefined): nu
     return keywords.reduce((count, keyword) => count + (text.includes(keyword.toLowerCase()) ? 1 : 0), 0);
 }
 
+function inferSymbolSubsector(symbol: string, companyName: string | null, newsItems: NewsItem[]): string | null {
+    const upper = symbol.toUpperCase();
+    for (const entry of SYMBOL_SUBSECTOR_MAP) {
+        if (entry.symbols.includes(upper)) {
+            return entry.subsector;
+        }
+    }
+
+    const text = `${companyName ?? ''} ${newsItems.map((item) => item.title).join(' ')}`.toLowerCase();
+    if (text.includes('medicare advantage') || text.includes('health insurer')) return 'managed-care';
+    if (text.includes('optical') || text.includes('networking') || text.includes('telecom')) return 'optical-networking';
+    if (text.includes('search') || text.includes('advertising') || text.includes('browser')) return 'ad-platform-internet';
+    if (text.includes('ev') || text.includes('electric vehicle') || text.includes('model y')) return 'ev-oem';
+    if (text.includes('data center') || text.includes('cooling') || text.includes('power infrastructure')) return 'ai-infra';
+    if (text.includes('dram') || text.includes('nand') || text.includes('memory')) return 'memory';
+    if (text.includes('semiconductor') || text.includes('chip')) return 'semiconductor';
+    return null;
+}
+
+function extractNewsEventSignals(newsItems: NewsItem[]): string[] {
+    if (newsItems.length === 0) {
+        return [];
+    }
+
+    const text = newsItems.map((item) => item.title.toLowerCase()).join(' ');
+    return NEWS_EVENT_SIGNAL_KEYWORDS
+        .filter((entry) => entry.keywords.some((keyword) => text.includes(keyword.toLowerCase())))
+        .map((entry) => entry.tag);
+}
+
 function buildFallbackAttributionReason(symbol: string, companyName: string | null, peakDate: string): string {
     const label = `${new Date(`${peakDate}T00:00:00Z`).getUTCFullYear()}年${new Date(`${peakDate}T00:00:00Z`).getUTCMonth() + 1}月`;
     const issuer = companyName?.trim() || symbol.toUpperCase();
@@ -2669,19 +2751,28 @@ function getDriverPriority(rule: AttributionMacroRule): number {
 
 function rankAttributionRules(
     symbol: string,
+    companyName: string | null,
     peakDate: string,
     troughDate: string,
     newsItems: NewsItem[]
 ): RankedAttributionRule[] {
+    const inferredSubsector = inferSymbolSubsector(symbol, companyName, newsItems);
+    const eventSignals = new Set(extractNewsEventSignals(newsItems));
+
     return DRAWDOWN_ATTRIBUTION_RULES
         .filter((rule) => eventOverlapsRule(peakDate, troughDate, rule) && isRuleApplicableToSymbol(rule, symbol))
         .map((rule) => {
             const specificityScore = getRuleSpecificityScore(rule, symbol);
             const keywordScore = countKeywordHits(newsItems, rule.keywords) * 8;
             const driverScore = getDriverPriority(rule);
+            const subsectorScore = inferredSubsector && rule.subsectors?.includes(inferredSubsector) ? 18 : 0;
+            const signalScore = (rule.event_signal_tags ?? []).reduce(
+                (total, tag) => total + (eventSignals.has(tag) ? 10 : 0),
+                0
+            );
             return {
                 rule,
-                score: specificityScore + keywordScore + driverScore
+                score: specificityScore + keywordScore + driverScore + subsectorScore + signalScore
             };
         })
         .sort((left, right) => right.score - left.score);
@@ -2690,10 +2781,14 @@ function rankAttributionRules(
 function buildStructuredFallbackAttribution(
     symbol: string,
     companyName: string | null,
-    peakDate: string
+    peakDate: string,
+    subsector: string | null,
+    eventSignals: string[]
 ): StructuredAttributionReason {
     const issuer = companyName?.trim() || symbol.toUpperCase();
     return {
+        subsector,
+        event_signals: eventSignals,
         reason_family: 'company-fundamental',
         background_regime: null,
         primary_driver_type: 'company',
@@ -2728,10 +2823,12 @@ function chooseHeuristicAttributionReason(
     troughDate: string,
     newsItems: NewsItem[]
 ): StructuredAttributionReason {
-    const candidates = rankAttributionRules(symbol, peakDate, troughDate, newsItems);
+    const inferredSubsector = inferSymbolSubsector(symbol, companyName, newsItems);
+    const eventSignals = extractNewsEventSignals(newsItems);
+    const candidates = rankAttributionRules(symbol, companyName, peakDate, troughDate, newsItems);
     const primary = candidates[0]?.rule;
     if (!primary) {
-        return buildStructuredFallbackAttribution(symbol, companyName, peakDate);
+        return buildStructuredFallbackAttribution(symbol, companyName, peakDate, inferredSubsector, eventSignals);
     }
 
     const background = candidates.find(
@@ -2741,6 +2838,8 @@ function chooseHeuristicAttributionReason(
     )?.rule;
 
     const structured: StructuredAttributionReason = {
+        subsector: inferredSubsector,
+        event_signals: eventSignals,
         reason_family: primary.family,
         background_regime:
             ['macro', 'policy', 'geopolitical'].includes(primary.driver_type) ? primary.reason_zh : background?.reason_zh ?? null,
@@ -2954,6 +3053,8 @@ async function buildDrawdownAttributions(
 
         return {
             ...episode,
+            subsector: heuristicReason.subsector,
+            event_signals: heuristicReason.event_signals,
             reason_family: heuristicReason.reason_family,
             background_regime: heuristicReason.background_regime,
             primary_driver_type: heuristicReason.primary_driver_type,
