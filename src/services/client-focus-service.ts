@@ -990,17 +990,24 @@ function buildMiddleEastStatus(newsItems: NewsItem[]): string {
 
     const hasCeasefireSignal = /停火|ceasefire|truce|deal|协议达成|和平协议/.test(joined);
     const hasEscalationSignal = /空袭|导弹|封锁|blockade|strike|missile|escalation/.test(joined);
-
-    if (recentTitles.some((title) => /封锁|关闭霍尔木兹|生效|实施|execute|effective|blockade|seal/i.test(title))) {
-        return '供应扰动交易中';
-    }
-
-    if (recentTitles.some((title) => /油轮|船只|航运|运费|保险|shipping|tanker|freight|insurance/i.test(title))) {
-        return '供应扰动交易中';
-    }
+    const hasNegotiationSignal = /谈判|会谈|外交|斡旋|原则性协议|延长停火|间接谈判|阿曼|卡塔尔|巴基斯坦/.test(joined);
+    const hasShippingSignal = recentTitles.some((title) => /油轮|船只|航运|运费|保险|shipping|tanker|freight|insurance/i.test(title));
+    const hasHardBlockadeSignal = recentTitles.some((title) => /封锁|关闭霍尔木兹|生效|实施|execute|effective|blockade|seal/i.test(title));
 
     if (hasCeasefireSignal && !hasEscalationSignal) {
         return '风险溢价回吐中';
+    }
+
+    if (hasNegotiationSignal && hasShippingSignal && !hasHardBlockadeSignal) {
+        return '风险溢价回吐中';
+    }
+
+    if (hasHardBlockadeSignal) {
+        return '供应扰动交易中';
+    }
+
+    if (hasShippingSignal && !hasNegotiationSignal) {
+        return '供应扰动交易中';
     }
 
     if (recentTitles.some((title) => /黄金|美债|美元|收益率|gold|treasury|yield|dollar/i.test(title))) {
