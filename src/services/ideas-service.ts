@@ -2727,9 +2727,37 @@ function extractNewsEventSignals(newsItems: NewsItem[]): string[] {
         .map((entry) => entry.tag);
 }
 
+function normalizeIssuerName(symbol: string, companyName: string | null): string {
+    const upper = symbol.toUpperCase();
+    const aliasMap: Partial<Record<string, string>> = {
+        GOOG: 'Google',
+        GOOGL: 'Google',
+        META: 'Meta',
+        TSLA: 'Tesla',
+        MSFT: 'Microsoft',
+        AAPL: 'Apple',
+        AMZN: 'Amazon'
+    };
+
+    const alias = aliasMap[upper];
+    if (alias) {
+        return alias;
+    }
+
+    const raw = (companyName?.trim() || upper)
+        .replace(/\b(Class\s+[A-Z]\s+Capital\s+Stock|Class\s+[A-Z]\s+Common\s+Stock|Common\s+Stock)\b/gi, '')
+        .replace(/\b(Inc\.?|Corporation|Corp\.?|Holdings?|Group|Ltd\.?|Limited|PLC|S\.A\.)\b/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/\s+,/g, ',')
+        .trim()
+        .replace(/[,\s]+$/g, '');
+
+    return raw || upper;
+}
+
 function buildFallbackAttributionReason(symbol: string, companyName: string | null, peakDate: string): string {
     const label = `${new Date(`${peakDate}T00:00:00Z`).getUTCFullYear()}年${new Date(`${peakDate}T00:00:00Z`).getUTCMonth() + 1}月`;
-    const issuer = companyName?.trim() || symbol.toUpperCase();
+    const issuer = normalizeIssuerName(symbol, companyName);
     return `${label} ${issuer} 暂无明确单一宏观主因，回撤更可能由个股基本面、板块节奏或市场风险偏好共同驱动`;
 }
 
@@ -2800,7 +2828,7 @@ function buildStructuredFallbackAttribution(
     subsector: string | null,
     eventSignals: string[]
 ): StructuredAttributionReason {
-    const issuer = companyName?.trim() || symbol.toUpperCase();
+    const issuer = normalizeIssuerName(symbol, companyName);
     return {
         subsector,
         event_signals: eventSignals,
@@ -2933,7 +2961,7 @@ async function refineDrawdownAttributionsWithLLM(input: {
 - 严禁引入任何未提供的事件名称、政策名称、公司丑闻或宏观冲击
 - 不要写成长段分析，不要给投资建议
 
-个股：${input.companyName?.trim() || input.symbol}
+个股：${normalizeIssuerName(input.symbol, input.companyName)}
 回撤清单：
 ${input.items.map((item, index) => {
     const newsBlock = item.news_titles.length > 0 ? item.news_titles.map((title) => `- ${title}`).join('\n') : '- 无明确新闻标题';
