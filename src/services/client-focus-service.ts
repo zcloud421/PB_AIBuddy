@@ -2429,6 +2429,99 @@ ${newsList}
     }
 }
 
+async function generateMiddleEastPitchFocusSummary(
+    newsItems: NewsItem[],
+    marketState: ClientFocusMarketStateResponse | null
+): Promise<string | null> {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) {
+        return null;
+    }
+
+    const contextItems = newsItems
+        .slice()
+        .sort((a, b) => new Date(b.published_at).getTime() - new Date(a.published_at).getTime())
+        .slice(0, 8);
+
+    if (contextItems.length === 0) {
+        return null;
+    }
+
+    const newsList = contextItems
+        .map((item, index) => `${index + 1}. ${formatClockTime(item.published_at)} | ${item.title}`)
+        .join('\n');
+
+    const marketLines = (marketState?.indices ?? [])
+        .filter((item) => ['SPX', 'NDX', 'GOLD', 'OIL', 'BRENT', 'TNX', 'DXY', 'HSI', 'HSTECH'].includes(item.code))
+        .map((item) => `${item.name}(${item.code}) ${item.change_pct !== null && Number.isFinite(item.change_pct) ? `${item.change_pct >= 0 ? '+' : ''}${item.change_pct.toFixed(2)}%` : '--'}`)
+        .join('；');
+
+    const marketSummary = marketState?.summary?.trim() || '';
+
+    const prompt = `
+你是香港私人银行 IC，正在为 RM 准备“中东冲突”详情页里的今日沟通重点主句。
+
+请结合两类输入：
+1. 最新局势新闻（停火是否延长、间接谈判、海峡运输执行、制裁与军事动向）
+2. 当日跨资产收盘表现（美股、原油、黄金、美债收益率、美元、港股）
+
+目标：
+- 只写 1 句话，35-55 字
+- 必须点出“今天客户最该沟通的主线”
+- 优先回答：市场现在是在交易停火/谈判，还是在交易运输/供应风险，风险资产是否已开始修复或重定价
+- 语气专业、克制、适合私人银行 RM/IC
+- 不要写成新闻摘要
+- 不要写成投资建议
+- 不要用“我们认为”“建议关注”等研究口吻
+
+今日相关新闻：
+${newsList}
+
+今日市场状态摘要：
+${marketSummary || '无'}
+
+重点资产收盘：
+${marketLines || '无'}
+
+返回纯 JSON：
+{"pitch_focus_summary":"..."}
+`.trim();
+
+    try {
+        const response = await fetch('https://api.deepseek.com/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: 'deepseek-chat',
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.2,
+                response_format: { type: 'json_object' }
+            })
+        });
+
+        if (!response.ok) {
+            return null;
+        }
+
+        const payload = (await response.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+        };
+        const raw = payload.choices?.[0]?.message?.content;
+        if (!raw) {
+            return null;
+        }
+
+        const parsed = JSON.parse(raw) as { pitch_focus_summary?: string };
+        const summary = typeof parsed.pitch_focus_summary === 'string' ? parsed.pitch_focus_summary.trim() : '';
+        return summary || null;
+    } catch {
+        return null;
+    }
+}
+
 function buildFallbackPrivateCreditWhatChangedGroups(newsItems: NewsItem[]): WhatChangedGroup[] {
     const fixedGroups = [
         { group_label: '流动性与赎回', group_icon: '💧' },
@@ -5184,7 +5277,15 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
                 ? await generatePrivateCreditWhatChanged(newsItems)
                 : [];
     const dynamicClientQuestions = await generateDynamicClientQuestions(topic, newsItems);
+    const middleEastMarketState =
+        topic.slug === 'middle-east-tensions'
+            ? await fetchClientFocusMarketStateSnapshot().catch(() => null)
+            : null;
     const dailyVerdict = await generateDailyVerdict(topic, newsItems);
+    const middleEastPitchFocusSummary =
+        topic.slug === 'middle-east-tensions'
+            ? await generateMiddleEastPitchFocusSummary(newsItems, middleEastMarketState)
+            : null;
     const themeResult = await getLatestThemeBasketResult(topic.slug).catch(() => null);
     const middleEastPrimaryEvent =
         topic.slug === 'middle-east-tensions'
@@ -5199,9 +5300,15 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
             ? {
                 ...dailyVerdict,
                 primary_event: middleEastPrimaryEvent ?? dailyVerdict.primary_event,
-                key_change: middleEastCommunicationFocus ?? dailyVerdict.key_change
+                key_change: middleEastCommunicationFocus ?? dailyVerdict.key_change,
+                pitch_focus_summary: middleEastPitchFocusSummary ?? dailyVerdict.pitch_focus_summary
             }
-            : dailyVerdict;
+            : dailyVerdict
+                ? {
+                    ...dailyVerdict,
+                    pitch_focus_summary: middleEastPitchFocusSummary ?? dailyVerdict.pitch_focus_summary
+                }
+                : dailyVerdict;
     const questionCategoryPool = FOCUS_QUESTION_CATEGORIES[topic.slug] ?? [];
     const clientQuestions =
         dynamicClientQuestions

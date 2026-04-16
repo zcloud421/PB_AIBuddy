@@ -119,6 +119,7 @@ export interface ClientFocusDailyVerdict {
     fcn_impact: string;
     key_change: string;
     primary_event?: string;
+    pitch_focus_summary?: string;
 }
 
 export interface ThemeBasketItem {
