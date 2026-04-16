@@ -172,6 +172,18 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['存储', 'DRAM', 'NAND', '供需失衡']
     },
     {
+        id: 'tesla-musk-sale-volatility-2021',
+        start: '2021-11-01',
+        end: '2021-12-31',
+        reason_zh: 'Tesla股价高位震荡：马斯克减持预期与高估值回吐叠加放大波动',
+        family: 'tesla-valuation',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['TSLA'],
+        keywords: ['musk', 'sell', 'share sale', 'twitter poll', 'valuation', 'delivery'],
+        markers: ['Tesla', '马斯克', '减持', '高估值']
+    },
+    {
         id: 'fed-hike-2022',
         start: '2022-01-01',
         end: '2023-02-28',
@@ -192,6 +204,42 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'all',
         keywords: ['svb', 'silicon valley bank', 'bank run', 'deposit', 'liquidity'],
         markers: ['硅谷银行', 'SVB', 'bank run']
+    },
+    {
+        id: 'tsla-demand-reset-2024',
+        start: '2024-01-01',
+        end: '2025-12-31',
+        reason_zh: 'Tesla需求与利润率承压：电动车价格战、欧洲销量疲弱与品牌扰动拖累估值',
+        family: 'tesla-demand',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['TSLA'],
+        keywords: ['deliveries', 'registrations', 'europe', 'price cuts', 'margins', 'backlash', 'model y'],
+        markers: ['Tesla', '销量', '价格战', '利润率', '欧洲']
+    },
+    {
+        id: 'optical-networking-downcycle-2023',
+        start: '2022-10-01',
+        end: '2024-12-31',
+        reason_zh: '光通信链景气承压：网络客户去库存、运营商与数通需求偏弱拖累估值',
+        family: 'optical-networking',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['LITE', 'CIEN', 'COHR', 'AAOI', 'INFN'],
+        keywords: ['inventory correction', 'telecom', 'networking', 'datacom', 'optical', 'carrier'],
+        markers: ['光通信', '去库存', '运营商', '数通']
+    },
+    {
+        id: 'google-cloud-capex-reset-2025',
+        start: '2025-01-15',
+        end: '2025-04-30',
+        reason_zh: 'Alphabet云业务增速与AI资本开支回报承压，市场下修估值弹性',
+        family: 'google-cloud-ai',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['GOOG', 'GOOGL'],
+        keywords: ['cloud', 'capex', 'ai spending', 'revenue miss', 'margin'],
+        markers: ['Alphabet', 'Cloud', 'AI资本开支', '估值弹性']
     },
     {
         id: 'meta-ai-capex-reset-2025',
@@ -230,6 +278,30 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['UnitedHealth', 'Medicare Advantage', '医疗成本', '监管调查']
     },
     {
+        id: 'google-search-challenge-2025',
+        start: '2025-05-01',
+        end: '2025-10-31',
+        reason_zh: 'Alphabet搜索主业受AI替代与反垄断压力挑战，默认入口与搜索变现预期受压',
+        family: 'google-search',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['GOOG', 'GOOGL'],
+        keywords: ['search', 'safari', 'apple', 'eddie cue', 'antitrust', 'ai search', 'default'],
+        markers: ['Alphabet', '搜索', 'Safari', 'AI搜索', '反垄断']
+    },
+    {
+        id: 'vrt-ai-infra-reset-2025',
+        start: '2025-01-01',
+        end: '2025-06-30',
+        reason_zh: 'Vertiv AI基建链估值回调：订单节奏与AI资本开支回报预期被重新定价',
+        family: 'vrt-ai-infra',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['VRT'],
+        keywords: ['data center', 'orders', 'ai spending', 'deepseek', 'cooling', 'power'],
+        markers: ['Vertiv', '数据中心', 'AI基建', '订单节奏']
+    },
+    {
         id: 'tariff-shock-2025',
         start: '2025-04-01',
         end: '2025-12-31',
@@ -250,6 +322,18 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'china_tech',
         keywords: ['tariff', 'china', 'export', 'yuan', 'demand'],
         markers: ['中美关税', '中国科技股', '汇率', '外部需求']
+    },
+    {
+        id: 'vrt-hyperscaler-reset-2026',
+        start: '2026-01-01',
+        end: '2026-03-31',
+        reason_zh: 'AI数据中心链高位回撤：云厂商资本开支与订单可持续性担忧压缩估值',
+        family: 'vrt-ai-infra',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['VRT'],
+        keywords: ['capex', 'hyperscaler', 'data center', 'orders', 'sustainability'],
+        markers: ['数据中心', '资本开支', '订单可持续性', 'AI基建']
     },
     {
         id: 'mag7-pullback-2026',
