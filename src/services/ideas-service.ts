@@ -86,6 +86,7 @@ const KNOWN_CONFERENCE_END_DATES: Partial<Record<string, string>> = {
 };
 
 const IDEA_OPTIONAL_QUERY_TIMEOUT_MS = 500;
+const DRAWDOWN_ATTRIBUTION_TIMEOUT_MS = 1500;
 const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
 
@@ -853,11 +854,15 @@ export async function getSymbolPriceHistory(symbol: string): Promise<SymbolPrice
     }
 
     const underlying = await withSoftTimeout(getUnderlyingBySymbol(normalizedSymbol).catch(() => null), null, 300);
-    const drawdownAttributions = await buildDrawdownAttributions(
-        normalizedSymbol,
-        underlying?.company_name ?? getCompanyName(normalizedSymbol),
-        priceHistory
-    ).catch(() => []);
+    const drawdownAttributions = await withSoftTimeout(
+        buildDrawdownAttributions(
+            normalizedSymbol,
+            underlying?.company_name ?? getCompanyName(normalizedSymbol),
+            priceHistory
+        ).catch(() => []),
+        [],
+        DRAWDOWN_ATTRIBUTION_TIMEOUT_MS
+    );
 
     return {
         symbol: normalizedSymbol,
