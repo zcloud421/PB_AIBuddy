@@ -21,7 +21,7 @@ import type {
 import { fetchNewsItemsByQuery, fetchNewsItemsFromNewsData } from '../data/news-fetcher';
 import { MassiveDataFetcher } from '../data/massive-fetcher';
 import { MassiveClient } from '../data/massive-client';
-import { getLatestThemeBasketResult } from '../db/queries/ideas';
+import { getLatestClientFocusDailyVerdict, getLatestThemeBasketResult } from '../db/queries/ideas';
 import axios from 'axios';
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
@@ -2520,6 +2520,46 @@ ${marketLines || '无'}
     } catch {
         return null;
     }
+}
+
+async function buildFocusDailyVerdictSnapshot(
+    topic: FocusTopicConfig,
+    newsItems: NewsItem[]
+): Promise<ClientFocusDailyVerdict | null> {
+    const dailyVerdict = await generateDailyVerdict(topic, newsItems);
+    if (!dailyVerdict) {
+        return null;
+    }
+
+    if (topic.slug !== 'middle-east-tensions') {
+        return dailyVerdict;
+    }
+
+    const marketState = await fetchClientFocusMarketStateSnapshot().catch(() => null);
+    const pitchFocusSummary = await generateMiddleEastPitchFocusSummary(newsItems, marketState);
+    const primaryEvent = buildMiddleEastPrimaryEvent(newsItems);
+    const communicationFocus = buildMiddleEastCommunicationFocus(newsItems);
+
+    return {
+        ...dailyVerdict,
+        primary_event: primaryEvent ?? dailyVerdict.primary_event,
+        key_change: communicationFocus ?? dailyVerdict.key_change,
+        pitch_focus_summary: pitchFocusSummary ?? dailyVerdict.pitch_focus_summary
+    };
+}
+
+export async function generateClientFocusDailyVerdictSnapshot(slug: string): Promise<ClientFocusDailyVerdict | null> {
+    const topic = getFocusTopic(slug);
+    if (!topic) {
+        return null;
+    }
+
+    const newsItems = await fetchFocusNewsItems(topic);
+    if (newsItems.length === 0) {
+        return null;
+    }
+
+    return buildFocusDailyVerdictSnapshot(topic, newsItems);
 }
 
 function buildFallbackPrivateCreditWhatChangedGroups(newsItems: NewsItem[]): WhatChangedGroup[] {
@@ -5277,38 +5317,10 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
                 ? await generatePrivateCreditWhatChanged(newsItems)
                 : [];
     const dynamicClientQuestions = await generateDynamicClientQuestions(topic, newsItems);
-    const middleEastMarketState =
-        topic.slug === 'middle-east-tensions'
-            ? await fetchClientFocusMarketStateSnapshot().catch(() => null)
-            : null;
-    const dailyVerdict = await generateDailyVerdict(topic, newsItems);
-    const middleEastPitchFocusSummary =
-        topic.slug === 'middle-east-tensions'
-            ? await generateMiddleEastPitchFocusSummary(newsItems, middleEastMarketState)
-            : null;
+    const persistedDailyVerdict = await getLatestClientFocusDailyVerdict(topic.slug).catch(() => null);
+    const dailyVerdict = persistedDailyVerdict?.verdict_json as ClientFocusDailyVerdict | null
+        ?? await buildFocusDailyVerdictSnapshot(topic, newsItems);
     const themeResult = await getLatestThemeBasketResult(topic.slug).catch(() => null);
-    const middleEastPrimaryEvent =
-        topic.slug === 'middle-east-tensions'
-            ? buildMiddleEastPrimaryEvent(newsItems)
-            : null;
-    const middleEastCommunicationFocus =
-        topic.slug === 'middle-east-tensions'
-            ? buildMiddleEastCommunicationFocus(newsItems)
-            : null;
-    const effectiveDailyVerdict =
-        dailyVerdict && (middleEastPrimaryEvent || middleEastCommunicationFocus)
-            ? {
-                ...dailyVerdict,
-                primary_event: middleEastPrimaryEvent ?? dailyVerdict.primary_event,
-                key_change: middleEastCommunicationFocus ?? dailyVerdict.key_change,
-                pitch_focus_summary: middleEastPitchFocusSummary ?? dailyVerdict.pitch_focus_summary
-            }
-            : dailyVerdict
-                ? {
-                    ...dailyVerdict,
-                    pitch_focus_summary: middleEastPitchFocusSummary ?? dailyVerdict.pitch_focus_summary
-                }
-                : dailyVerdict;
     const questionCategoryPool = FOCUS_QUESTION_CATEGORIES[topic.slug] ?? [];
     const clientQuestions =
         dynamicClientQuestions
@@ -5354,7 +5366,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         focus_secondary_price_history: focusSecondaryPriceHistory ?? undefined,
         gold_drivers: topic.slug === 'gold-repricing' ? buildGoldDrivers(newsItems) : undefined,
         theme_winners_losers: (themeResult?.result_json as ClientFocusDetailResponse['theme_winners_losers']) ?? null,
-        daily_verdict: effectiveDailyVerdict ?? null,
+        daily_verdict: dailyVerdict ?? null,
         disclaimer: DEFAULT_DISCLAIMER
     };
 

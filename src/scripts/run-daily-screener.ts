@@ -5,6 +5,7 @@ import { fetchTickerCompanyName, MassiveDataFetcher } from '../data/massive-fetc
 import { fetchStockNewsContext } from '../data/news-fetcher';
 import { pool } from '../db/client';
 import {
+    ensureClientFocusDailyVerdictsTable,
     createIdeaRun,
     ensureDailyBestHistoryTable,
     ensureDailyRecommendationHistoryTable,
@@ -20,6 +21,7 @@ import {
     saveDailyBest,
     saveDailyRecommendations,
     saveRiskFlags,
+    upsertClientFocusDailyVerdict,
     upsertRecommendationTracker,
     upsertUnderlyingCompanyName,
     upsertEarningsCalendar,
@@ -30,6 +32,7 @@ import { runDailyScreener } from '../scoring-engine';
 import { selectDailyBest, selectDailyRecommendationShowcase } from '../services/ideas-service';
 import { runPriceTracker } from '../services/tracker-service';
 import { runThemeBasketDaily } from '../services/theme-basket-service';
+import { generateClientFocusDailyVerdictSnapshot } from '../services/client-focus-service';
 import { generateNarrative } from '../utils/narrative-generator';
 import { sendDowngradeNotifications } from '../utils/push-notifications';
 import { ensureDeviceTables } from '../db/queries/devices';
@@ -75,6 +78,7 @@ async function main(): Promise<void> {
         await ensureRecommendationTrackerTable();
         await ensureUnderlyingCompanyNameColumn();
         await ensureThemeBasketResultsTable();
+        await ensureClientFocusDailyVerdictsTable();
         await ensureDeviceTables();
 
         const previousGradesResult = await client.query<{ symbol: string; grade: string }>(
@@ -269,6 +273,23 @@ async function main(): Promise<void> {
             } catch (error) {
                 console.warn(`[theme-baskets] ${slug} failed:`, error);
             }
+        }
+
+        try {
+            const middleEastVerdict = await generateClientFocusDailyVerdictSnapshot('middle-east-tensions');
+            if (middleEastVerdict) {
+                await upsertClientFocusDailyVerdict(
+                    'middle-east-tensions',
+                    new Date().toISOString().slice(0, 10),
+                    middleEastVerdict
+                );
+                console.log('[focus-daily] middle-east-tensions saved');
+            } else {
+                console.warn('[focus-daily] middle-east-tensions skipped: no verdict generated');
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn(`[focus-daily] middle-east-tensions failed (${message})`);
         }
 
         try {

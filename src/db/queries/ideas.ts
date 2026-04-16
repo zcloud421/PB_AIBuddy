@@ -1601,6 +1601,58 @@ export async function ensureThemeBasketResultsTable(): Promise<void> {
     `);
 }
 
+export async function upsertClientFocusDailyVerdict(
+    slug: string,
+    runDate: string,
+    verdict: object
+): Promise<void> {
+    await pool.query(
+        `
+        INSERT INTO client_focus_daily_verdicts (
+            slug,
+            run_date,
+            verdict_json
+        )
+        VALUES ($1, $2::date, $3::jsonb)
+        ON CONFLICT (slug, run_date)
+        DO UPDATE SET
+            verdict_json = EXCLUDED.verdict_json,
+            created_at = NOW()
+        `,
+        [slug, runDate, JSON.stringify(verdict)]
+    );
+}
+
+export async function ensureClientFocusDailyVerdictsTable(): Promise<void> {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS client_focus_daily_verdicts (
+            slug         TEXT NOT NULL,
+            run_date     DATE NOT NULL,
+            verdict_json JSONB NOT NULL,
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (slug, run_date)
+        )
+    `);
+}
+
+export async function getLatestClientFocusDailyVerdict(
+    slug: string
+): Promise<{ verdict_json: object; run_date: string } | null> {
+    const result = await pool.query<{ verdict_json: object; run_date: string }>(
+        `
+        SELECT verdict_json, run_date::text
+        FROM client_focus_daily_verdicts
+        WHERE slug = $1
+          AND run_date IN (CURRENT_DATE, (CURRENT_DATE - INTERVAL '1 day')::date)
+        ORDER BY run_date DESC
+        LIMIT 1
+        `,
+        [slug]
+    );
+
+    return result.rows[0] ?? null;
+}
+
 export async function getLatestThemeBasketResult(
     slug: string
 ): Promise<{ result_json: object; run_date: string } | null> {
