@@ -951,20 +951,79 @@ export async function selectDailyRecommendationShowcase(
         }
     }
 
-    rankedGo
-        .filter((candidate) => candidate.symbol !== dailyBestSymbol)
-        .slice(0, 3)
-        .forEach((candidate, index) => {
-            showcase.push({
-                symbol: candidate.symbol,
-                slotRank: index + 2,
-                placement: 'RECOMMENDED',
-                compositeScore: candidate.composite_score,
-                recommendedStrike: candidate.recommended_strike,
-                recommendedTenorDays: candidate.recommended_tenor_days,
-                moneynessPct: candidate.moneyness_pct
-            });
+    const usedSubsectors = new Map<string, number>();
+    const usedCycleFamilies = new Map<string, number>();
+    const usedThemes = new Map<string, number>();
+
+    for (const item of showcase) {
+        const subsector = inferMappedSubsector(item.symbol);
+        const cycleFamily = inferSymbolCycleFamily(item.symbol);
+        const theme = underlyingMap.get(item.symbol)?.themes?.[0] ?? null;
+        if (subsector) {
+            usedSubsectors.set(subsector, (usedSubsectors.get(subsector) ?? 0) + 1);
+        }
+        if (cycleFamily) {
+            usedCycleFamilies.set(cycleFamily, (usedCycleFamilies.get(cycleFamily) ?? 0) + 1);
+        }
+        if (theme) {
+            usedThemes.set(theme, (usedThemes.get(theme) ?? 0) + 1);
+        }
+    }
+
+    const remaining = rankedGo.filter((candidate) => candidate.symbol !== dailyBestSymbol);
+    while (showcase.filter((item) => item.placement === 'RECOMMENDED').length < 3 && remaining.length > 0) {
+        let bestIndex = -1;
+        let bestScore = Number.NEGATIVE_INFINITY;
+
+        for (let index = 0; index < remaining.length; index += 1) {
+            const candidate = remaining[index];
+            const underlying = underlyingMap.get(candidate.symbol) ?? null;
+            const baseScore =
+                adjustedShowcaseScore(candidate, recentHistory, dailyBestSymbol) -
+                applyMacroSensitivityPenalty(candidate, underlying, activeFocusStatuses);
+            const subsector = inferMappedSubsector(candidate.symbol);
+            const cycleFamily = inferSymbolCycleFamily(candidate.symbol);
+            const theme = underlying?.themes?.[0] ?? null;
+
+            const subsectorPenalty = subsector && (usedSubsectors.get(subsector) ?? 0) > 0 ? 0.16 : 0;
+            const cyclePenalty = cycleFamily && (usedCycleFamilies.get(cycleFamily) ?? 0) > 0 ? 0.08 : 0;
+            const themePenalty = theme && (usedThemes.get(theme) ?? 0) > 0 ? 0.03 : 0;
+            const diversifiedScore = baseScore - subsectorPenalty - cyclePenalty - themePenalty;
+
+            if (diversifiedScore > bestScore) {
+                bestScore = diversifiedScore;
+                bestIndex = index;
+            }
+        }
+
+        if (bestIndex === -1) {
+            break;
+        }
+
+        const [selected] = remaining.splice(bestIndex, 1);
+        showcase.push({
+            symbol: selected.symbol,
+            slotRank: showcase.length + 1,
+            placement: 'RECOMMENDED',
+            compositeScore: selected.composite_score,
+            recommendedStrike: selected.recommended_strike,
+            recommendedTenorDays: selected.recommended_tenor_days,
+            moneynessPct: selected.moneyness_pct
         });
+
+        const selectedSubsector = inferMappedSubsector(selected.symbol);
+        const selectedCycleFamily = inferSymbolCycleFamily(selected.symbol);
+        const selectedTheme = underlyingMap.get(selected.symbol)?.themes?.[0] ?? null;
+        if (selectedSubsector) {
+            usedSubsectors.set(selectedSubsector, (usedSubsectors.get(selectedSubsector) ?? 0) + 1);
+        }
+        if (selectedCycleFamily) {
+            usedCycleFamilies.set(selectedCycleFamily, (usedCycleFamilies.get(selectedCycleFamily) ?? 0) + 1);
+        }
+        if (selectedTheme) {
+            usedThemes.set(selectedTheme, (usedThemes.get(selectedTheme) ?? 0) + 1);
+        }
+    }
 
     return showcase;
 }
@@ -2845,6 +2904,16 @@ function inferSymbolSubsector(symbol: string, companyName: string | null, newsIt
     if (text.includes('data center') || text.includes('cooling') || text.includes('power infrastructure')) return 'ai-infra';
     if (text.includes('dram') || text.includes('nand') || text.includes('memory')) return 'memory';
     if (text.includes('semiconductor') || text.includes('chip')) return 'semiconductor';
+    return null;
+}
+
+function inferMappedSubsector(symbol: string): string | null {
+    const upper = symbol.toUpperCase();
+    for (const entry of SYMBOL_SUBSECTOR_MAP) {
+        if (entry.symbols.includes(upper)) {
+            return entry.subsector;
+        }
+    }
     return null;
 }
 
