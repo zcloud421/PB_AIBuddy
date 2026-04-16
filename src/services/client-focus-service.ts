@@ -863,6 +863,40 @@ function buildFocusSummaryFallback(topic: FocusTopicConfig): string {
     return topic.fallbackSummary;
 }
 
+function normalizeMiddleEastFxQuestion(item: {
+    question: string;
+    answer: string;
+    category?: string;
+    logic?: string;
+    observation?: string;
+}) {
+    const combined = `${item.question} ${item.answer} ${item.logic ?? ''} ${item.observation ?? ''}`.toLowerCase();
+    if (
+        item.category !== '汇率'
+        && !combined.includes('cnh')
+        && !combined.includes('usdcnh')
+        && !combined.includes('人民币')
+    ) {
+        return item;
+    }
+
+    if (
+        !combined.includes('cnh')
+        && !combined.includes('usdcnh')
+        && !combined.includes('人民币')
+    ) {
+        return item;
+    }
+
+    return {
+        question: '地缘风险缓和后，美元的避险溢价会如何回吐？',
+        answer: '美元若从避险交易回归，通常先看油价与10年期美债收益率是否同步回落，再看DXY是否失去支撑。若谈判推进但运输与供应端仍反复，美元回吐会偏慢；若中东供应担忧缓和，美元与黄金的避险溢价更可能一起压缩。',
+        category: '汇率',
+        logic: '先区分避险溢价还是利差驱动，再看DXY与美债是否同步回落。',
+        observation: '观察DXY、10Y美债与布伦特油价是否同时回落。'
+    };
+}
+
 function buildMiddleEastSummaryOverride(newsItems: NewsItem[]): string | null {
     const titles = newsItems
         .slice(0, 8)
@@ -2000,7 +2034,7 @@ ${newsList}
 - 问题必须与判断出的情景一致，不能使用过时情景的假设
 - 优先捕捉情景切换带来的新传导逻辑（如从"美元走强"切换到"避险溢价消退"）
 - 覆盖以下维度，每个维度至少1个问题：
-  * 汇率（含CNH/USD）：问传导机制和汇率路径，不要问"CNH具体升到多少"
+  * 汇率/美元：优先从美元指数、避险美元需求和美元回吐路径出发，解释汇率传导机制，不要从CNH或人民币角度发问
   * 利率/央行路径（美联储降息预期）：问降息预期的触发条件，引导查CME FedWatch
   * 大宗商品（油价、黄金）：问供应中断逻辑和避险溢价机制
   * 股票：优先问美股（标普/纳斯达克）和港股大盘的传导机制，其次问科技股的影响路径，能源股可作为补充，避免问航运股
@@ -2009,7 +2043,7 @@ ${newsList}
 
 问题语气要求（基于情景，体现具体观察点，不包含价格数字）：
 ✓ "停火协议达成后，霍尔木兹通道风险溢价如何传导到油价？"
-✓ "CNH近期走势背后，是避险情绪消退还是结算需求变化？"
+✓ "停火预期升温后，美元的避险溢价会如何回吐？"
 ✓ "地缘缓和后，美联储降息预期的传导路径会有什么变化？"
 ✗ "油价跌了，对黄金有什么影响？"（不含传导机制）
 ✗ "汇率有什么变化？"（太泛）
@@ -2319,8 +2353,12 @@ ${newsList}
             })
             .filter((item): item is NonNullable<typeof item> => item !== null);
 
+        const normalized = topic.slug === 'middle-east-tensions'
+            ? sanitized.map((item) => normalizeMiddleEastFxQuestion(item))
+            : sanitized;
+
         const categoryCount = new Map<string, number>();
-        const capped = sanitized.filter((item) => {
+        const capped = normalized.filter((item) => {
             const cat = item.category ?? '全部';
             const count = categoryCount.get(cat) ?? 0;
             if (count >= 2) {
