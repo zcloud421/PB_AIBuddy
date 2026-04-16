@@ -331,6 +331,18 @@ export interface DrawdownEpisode {
     recovered: boolean;
 }
 
+export interface DrawdownAttribution {
+    peak_date: string;
+    peak_price: number;
+    trough_date: string;
+    max_drawdown_pct: number;
+    recovery_days: number | null;
+    total_duration_days: number | null;
+    recovered: boolean;
+    closed_by_partial_recovery: boolean;
+    reason_zh: string | null;
+}
+
 export interface TailRiskStats {
     history_start_date: string | null;
     history_end_date: string | null;
@@ -392,6 +404,7 @@ export interface SymbolPriceHistoryResponse {
     data_as_of_date: string | null;
     price_history: PriceHistoryPoint[];
     tail_risk: TailRiskStats | null;
+    drawdown_attributions?: DrawdownAttribution[];
 }
 
 export interface PairAnalysisResponse {

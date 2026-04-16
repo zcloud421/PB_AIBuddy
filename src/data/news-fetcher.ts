@@ -187,16 +187,18 @@ interface NewsDataLatestResponse {
     results?: NewsDataLatestItem[];
 }
 
-async function fetchNewsFromFinnhub(symbol: string): Promise<NewsItem[]> {
+async function fetchNewsFromFinnhub(symbol: string, from?: string, to?: string): Promise<NewsItem[]> {
     const apiKey = process.env.FINNHUB_API_KEY;
     if (!apiKey) {
         console.warn(`[news-fetcher] FINNHUB_API_KEY not set, skipping news fetch for ${symbol}`);
         return [];
     }
 
-    const toDate = new Date();
-    const fromDate = new Date();
-    fromDate.setDate(fromDate.getDate() - 14);
+    const toDate = to ? new Date(to) : new Date();
+    const fromDate = from ? new Date(from) : new Date();
+    if (!from) {
+        fromDate.setDate(fromDate.getDate() - 14);
+    }
 
     const url = new URL(`${FINNHUB_BASE_URL}/company-news`);
     url.searchParams.set('symbol', symbol);
@@ -232,14 +234,16 @@ async function fetchNewsFromFinnhub(symbol: string): Promise<NewsItem[]> {
     }
 }
 
-async function fetchNewsFromMassive(symbol: string): Promise<NewsItem[]> {
+async function fetchNewsFromMassive(symbol: string, from?: string, to?: string): Promise<NewsItem[]> {
     try {
         const client = new MassiveClient();
         const response = await client.get<MassiveNewsResponse>('/v2/reference/news', {
             ticker: symbol,
             limit: 20,
             order: 'desc',
-            sort: 'published_utc'
+            sort: 'published_utc',
+            'published_utc.gte': from,
+            'published_utc.lte': to
         });
 
         const items = Array.isArray(response.results) ? response.results : [];
@@ -316,6 +320,30 @@ export async function fetchStockNewsContext(
             sentimentProxy: null,
             hasMaterialNegativeNews: false
         };
+    }
+}
+
+export async function fetchHistoricalStockNewsWindow(
+    symbol: string,
+    from: string,
+    to: string,
+    companyName?: string
+): Promise<NewsItem[]> {
+    try {
+        const normalizedSymbol = symbol.toUpperCase();
+
+        let rawItems = await fetchNewsFromMassive(normalizedSymbol, from, to);
+        if (rawItems.length === 0) {
+            rawItems = await fetchNewsFromFinnhub(normalizedSymbol, from, to);
+        }
+
+        return filterRelevantNewsItems(
+            filterStaleEarningsHeadlines(dedupeNewsItems(rawItems), false),
+            normalizedSymbol,
+            companyName ?? getCompanyName(normalizedSymbol)
+        ).slice(0, 8);
+    } catch {
+        return [];
     }
 }
 

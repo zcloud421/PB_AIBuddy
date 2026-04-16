@@ -1,5 +1,5 @@
 import { fetchTickerMarketCap, fetchTickerReferenceSnapshot, MassiveDataFetcher } from '../data/massive-fetcher';
-import { fetchStockNews, fetchStockNewsContext, filterRelevantNewsItems, getCompanyName } from '../data/news-fetcher';
+import { fetchHistoricalStockNewsWindow, fetchStockNews, fetchStockNewsContext, filterRelevantNewsItems, getCompanyName } from '../data/news-fetcher';
 import {
     calculateHistoricalVolatility,
     approveStrikes,
@@ -57,6 +57,7 @@ import type {
     Flag,
     NarrativeOutput,
     NewsItem,
+    DrawdownAttribution,
     SignalColor,
     SignalRow,
     SymbolIdeaResponse,
@@ -85,6 +86,136 @@ const KNOWN_CONFERENCE_END_DATES: Partial<Record<string, string>> = {
 };
 
 const IDEA_OPTIONAL_QUERY_TIMEOUT_MS = 500;
+const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
+
+type AttributionAppliesTo = 'all' | 'us_tech' | 'china_tech' | 'symbols_only';
+
+interface AttributionMacroRule {
+    id: string;
+    start: string;
+    end: string;
+    reason_zh: string;
+    applies_to: AttributionAppliesTo;
+    symbols?: string[];
+    keywords?: string[];
+}
+
+const CHINA_TECH_ATTRIBUTION_SYMBOLS = new Set([
+    'BABA', 'JD', 'PDD', 'BIDU', 'NTES', 'TME', 'BILI', 'IQ', 'VIPS', 'TCEHY', 'BEKE'
+]);
+
+const US_TECH_ATTRIBUTION_SYMBOLS = new Set([
+    'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'META', 'AMZN', 'NVDA', 'AMD', 'TSLA', 'NFLX', 'COIN', 'PLTR',
+    'AVGO', 'MRVL', 'ANET', 'VRT', 'MU', 'SMCI', 'DELL', 'LITE', 'COHR', 'CIEN', 'ORCL', 'CRM',
+    'SNOW', 'WDAY', 'ADBE', 'NOW', 'TSM', 'INTC', 'ROKU', 'SNAP', 'RBLX', 'DOCU', 'ZM', 'PTON'
+]);
+
+const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
+    {
+        id: 'meta-platform-reset-2022',
+        start: '2021-09-01',
+        end: '2022-12-31',
+        reason_zh: 'Meta平台承压：苹果ATT隐私新政冲击广告定向、短视频竞争加剧，元宇宙高投入拖累利润',
+        applies_to: 'symbols_only',
+        symbols: ['META'],
+        keywords: ['att', 'privacy', 'ad', 'advertising', 'metaverse', 'reality labs', 'tiktok', 'daily users']
+    },
+    {
+        id: 'broad-semiconductor-downcycle-2022',
+        start: '2021-11-01',
+        end: '2023-01-31',
+        reason_zh: '半导体景气回落：PC需求转弱与渠道库存修正压制行业估值，叠加加息环境放大回撤',
+        applies_to: 'symbols_only',
+        symbols: ['AMD', 'INTC'],
+        keywords: ['pc', 'inventory', 'client', 'outlook', 'guidance', 'demand', 'slowdown']
+    },
+    {
+        id: 'memory-downcycle-2022',
+        start: '2022-01-01',
+        end: '2023-12-31',
+        reason_zh: '存储芯片周期下行：DRAM/NAND供需失衡与库存累积拖累盈利，行业进入下修阶段',
+        applies_to: 'symbols_only',
+        symbols: ['MU', 'WDC', 'STX'],
+        keywords: ['dram', 'nand', 'memory', 'inventory', 'pricing', 'oversupply']
+    },
+    {
+        id: 'fed-hike-2022',
+        start: '2022-01-01',
+        end: '2023-02-28',
+        reason_zh: '美联储激进加息叠加衰退担忧，高估值科技股整体估值被压缩',
+        applies_to: 'us_tech',
+        keywords: ['fed', 'rate', 'inflation', 'yield', 'hike']
+    },
+    {
+        id: 'svb-crisis-2023',
+        start: '2023-03-08',
+        end: '2023-03-31',
+        reason_zh: '硅谷银行挤兑倒闭，金融稳定担忧短暂蔓延至成长与科技板块',
+        applies_to: 'all',
+        keywords: ['svb', 'silicon valley bank', 'bank run', 'deposit', 'liquidity']
+    },
+    {
+        id: 'meta-ai-capex-reset-2025',
+        start: '2025-01-20',
+        end: '2025-03-31',
+        reason_zh: 'Meta AI资本开支与回报节奏再定价：广告主线稳健，但大规模AI投入拖累估值弹性',
+        applies_to: 'symbols_only',
+        symbols: ['META'],
+        keywords: ['capex', 'ai spending', 'ad revenue', 'reels', 'monetization']
+    },
+    {
+        id: 'deepseek-ai-reset-2025',
+        start: '2025-01-20',
+        end: '2025-03-31',
+        reason_zh: 'DeepSeek低成本模型冲击AI链条定价，算力需求与资本开支回报预期被重估',
+        applies_to: 'symbols_only',
+        symbols: ['NVDA', 'AMD', 'AVGO', 'MRVL', 'ANET'],
+        keywords: ['deepseek', 'ai', 'capex', 'gpu', 'inference', 'training']
+    },
+    {
+        id: 'unh-cost-guidance-reset-2025',
+        start: '2025-04-01',
+        end: '2026-12-31',
+        reason_zh: 'UnitedHealth经营承压：Medicare Advantage医疗成本超预期、指引撤回与监管调查压制估值',
+        applies_to: 'symbols_only',
+        symbols: ['UNH'],
+        keywords: ['medicare advantage', 'medical costs', 'guidance', 'doj', 'probe', 'billing', 'ceo']
+    },
+    {
+        id: 'tariff-shock-2025',
+        start: '2025-04-01',
+        end: '2025-12-31',
+        reason_zh: '美国对等关税冲击，全球股市与风险资产急剧下跌',
+        applies_to: 'us_tech',
+        keywords: ['tariff', 'trade', 'duties', 'levy']
+    },
+    {
+        id: 'china-macro-2025',
+        start: '2025-04-01',
+        end: '2025-12-31',
+        reason_zh: '中美关税博弈升级，中国科技股受外部需求收缩、汇率与地缘压力拖累',
+        applies_to: 'china_tech',
+        keywords: ['tariff', 'china', 'export', 'yuan', 'demand']
+    },
+    {
+        id: 'mag7-pullback-2026',
+        start: '2026-01-01',
+        end: '2026-02-27',
+        reason_zh: '科技巨头高位回撤：创新高后，AI投入回报与估值弹性阶段性回落',
+        applies_to: 'symbols_only',
+        symbols: ['META', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'AAPL', 'NVDA', 'TSLA'],
+        keywords: ['valuation', 'capex', 'ai', 'pullback']
+    },
+    {
+        id: 'us-iran-war-2026',
+        start: '2026-02-28',
+        end: '2026-12-31',
+        reason_zh: '中东局势急剧恶化，能源、利率与风险资产同步波动，科技股高位回撤放大',
+        applies_to: 'all',
+        keywords: ['iran', 'middle east', 'oil', 'hormuz', 'war', 'ceasefire']
+    }
+];
 
 async function withSoftTimeout<T>(promise: Promise<T>, fallback: T, timeoutMs = IDEA_OPTIONAL_QUERY_TIMEOUT_MS): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -721,11 +852,19 @@ export async function getSymbolPriceHistory(symbol: string): Promise<SymbolPrice
         }
     }
 
+    const underlying = await withSoftTimeout(getUnderlyingBySymbol(normalizedSymbol).catch(() => null), null, 300);
+    const drawdownAttributions = await buildDrawdownAttributions(
+        normalizedSymbol,
+        underlying?.company_name ?? getCompanyName(normalizedSymbol),
+        priceHistory
+    ).catch(() => []);
+
     return {
         symbol: normalizedSymbol,
         data_as_of_date: priceHistory[priceHistory.length - 1]?.date ?? latestExpectedMarketDate,
         price_history: priceHistory,
-        tail_risk: buildTailRiskStats(priceHistory)
+        tail_risk: buildTailRiskStats(priceHistory),
+        drawdown_attributions: drawdownAttributions
     };
 }
 
@@ -2175,6 +2314,338 @@ function adjustedShowcaseScore(
     const repeatPenalty = candidate.symbol === dailyBestSymbol ? 0 : (appearedYesterday ? 0.03 : 0) + (wasYesterdayHero ? 0.05 : 0);
 
     return candidate.composite_score - freshnessPenalty - repeatPenalty;
+}
+
+function buildInteractiveDrawdownEpisodesForAttribution(priceHistory: Array<{ date: string; close: number }>): Array<{
+    peak_date: string;
+    peak_price: number;
+    trough_date: string;
+    max_drawdown_pct: number;
+    recovery_days: number | null;
+    total_duration_days: number | null;
+    recovered: boolean;
+    closed_by_partial_recovery: boolean;
+}> {
+    const normalizedHistory = priceHistory
+        .map((point) => ({
+            date: point.date,
+            close: toFiniteNumber(point.close)
+        }))
+        .filter((point): point is { date: string; close: number } => point.close !== null);
+
+    if (normalizedHistory.length < 2) {
+        return [];
+    }
+
+    const episodes: Array<{
+        peak_date: string;
+        peak_price: number;
+        trough_date: string;
+        max_drawdown_pct: number;
+        recovery_days: number | null;
+        total_duration_days: number | null;
+        recovered: boolean;
+        closed_by_partial_recovery: boolean;
+    }> = [];
+
+    const PARTIAL_RECOVERY_THRESHOLD = 0.25;
+    let peakIndex = 0;
+    let peakPrice = normalizedHistory[0].close;
+    let activeEpisode:
+        | {
+            peakIndex: number;
+            troughIndex: number;
+            maxDrawdownPct: number;
+        }
+        | null = null;
+
+    for (let index = 1; index < normalizedHistory.length; index += 1) {
+        const point = normalizedHistory[index];
+
+        if (point.close >= peakPrice) {
+            if (activeEpisode) {
+                episodes.push({
+                    peak_date: normalizedHistory[activeEpisode.peakIndex].date,
+                    peak_price: roundPrice(peakPrice),
+                    trough_date: normalizedHistory[activeEpisode.troughIndex].date,
+                    max_drawdown_pct: roundPct(activeEpisode.maxDrawdownPct),
+                    recovery_days: index - activeEpisode.troughIndex,
+                    total_duration_days: index - activeEpisode.peakIndex,
+                    recovered: true,
+                    closed_by_partial_recovery: false
+                });
+                activeEpisode = null;
+            }
+
+            peakIndex = index;
+            peakPrice = point.close;
+            continue;
+        }
+
+        const drawdownPct = ((point.close / peakPrice) - 1) * 100;
+        if (!activeEpisode) {
+            activeEpisode = {
+                peakIndex,
+                troughIndex: index,
+                maxDrawdownPct: drawdownPct
+            };
+            continue;
+        }
+
+        if (drawdownPct < activeEpisode.maxDrawdownPct) {
+            activeEpisode.troughIndex = index;
+            activeEpisode.maxDrawdownPct = drawdownPct;
+            continue;
+        }
+
+        const troughPrice = normalizedHistory[activeEpisode.troughIndex].close;
+        const rallyFromTrough = (point.close / troughPrice) - 1;
+        if (rallyFromTrough >= PARTIAL_RECOVERY_THRESHOLD) {
+            episodes.push({
+                peak_date: normalizedHistory[activeEpisode.peakIndex].date,
+                peak_price: roundPrice(peakPrice),
+                trough_date: normalizedHistory[activeEpisode.troughIndex].date,
+                max_drawdown_pct: roundPct(activeEpisode.maxDrawdownPct),
+                recovery_days: index - activeEpisode.troughIndex,
+                total_duration_days: index - activeEpisode.peakIndex,
+                recovered: false,
+                closed_by_partial_recovery: true
+            });
+            activeEpisode = null;
+            peakIndex = index;
+            peakPrice = point.close;
+        }
+    }
+
+    if (activeEpisode) {
+        episodes.push({
+            peak_date: normalizedHistory[activeEpisode.peakIndex].date,
+            peak_price: roundPrice(peakPrice),
+            trough_date: normalizedHistory[activeEpisode.troughIndex].date,
+            max_drawdown_pct: roundPct(activeEpisode.maxDrawdownPct),
+            recovery_days: null,
+            total_duration_days: null,
+            recovered: false,
+            closed_by_partial_recovery: false
+        });
+    }
+
+    return episodes;
+}
+
+function buildHistoricalNewsWindow(troughDate: string): { from: string; to: string } {
+    const trough = new Date(`${troughDate}T00:00:00Z`);
+    const from = new Date(trough);
+    from.setUTCDate(from.getUTCDate() - 21);
+    const to = new Date(trough);
+    to.setUTCDate(to.getUTCDate() + 7);
+    return {
+        from: from.toISOString().slice(0, 10),
+        to: to.toISOString().slice(0, 10)
+    };
+}
+
+function eventOverlapsRule(
+    peakDate: string,
+    troughDate: string,
+    rule: AttributionMacroRule
+): boolean {
+    const peak = new Date(`${peakDate}T00:00:00Z`);
+    const trough = new Date(`${troughDate}T00:00:00Z`);
+    const start = new Date(`${rule.start}T00:00:00Z`);
+    const end = new Date(`${rule.end}T00:00:00Z`);
+    return !(peak > end || trough < start);
+}
+
+function isRuleApplicableToSymbol(rule: AttributionMacroRule, symbol: string): boolean {
+    const upper = symbol.toUpperCase();
+    if (rule.symbols?.includes(upper)) {
+        return true;
+    }
+    if (rule.applies_to === 'symbols_only') {
+        return false;
+    }
+    if (rule.applies_to === 'china_tech') {
+        return CHINA_TECH_ATTRIBUTION_SYMBOLS.has(upper);
+    }
+    if (rule.applies_to === 'us_tech') {
+        return US_TECH_ATTRIBUTION_SYMBOLS.has(upper);
+    }
+    return rule.applies_to === 'all';
+}
+
+function countKeywordHits(items: NewsItem[], keywords: string[] | undefined): number {
+    if (!keywords?.length || items.length === 0) {
+        return 0;
+    }
+
+    const text = items.map((item) => item.title.toLowerCase()).join(' ');
+    return keywords.reduce((count, keyword) => count + (text.includes(keyword.toLowerCase()) ? 1 : 0), 0);
+}
+
+function buildFallbackAttributionReason(symbol: string, companyName: string | null, peakDate: string): string {
+    const label = `${new Date(`${peakDate}T00:00:00Z`).getUTCFullYear()}年${new Date(`${peakDate}T00:00:00Z`).getUTCMonth() + 1}月`;
+    const issuer = companyName?.trim() || symbol.toUpperCase();
+    return `${label} ${issuer} 暂无明确单一宏观主因，回撤更可能由个股基本面、板块节奏或市场风险偏好共同驱动`;
+}
+
+function chooseHeuristicAttributionReason(
+    symbol: string,
+    companyName: string | null,
+    peakDate: string,
+    troughDate: string,
+    newsItems: NewsItem[]
+): string {
+    const candidates = DRAWDOWN_ATTRIBUTION_RULES
+        .filter((rule) => eventOverlapsRule(peakDate, troughDate, rule) && isRuleApplicableToSymbol(rule, symbol))
+        .map((rule) => {
+            const symbolScore = rule.symbols?.includes(symbol.toUpperCase()) ? 40 : 0;
+            const categoryScore = rule.applies_to === 'symbols_only' ? 0 : rule.applies_to === 'all' ? 10 : 20;
+            const keywordScore = countKeywordHits(newsItems, rule.keywords) * 8;
+            return {
+                rule,
+                score: symbolScore + categoryScore + keywordScore
+            };
+        })
+        .sort((left, right) => right.score - left.score);
+
+    return candidates[0]?.rule.reason_zh ?? buildFallbackAttributionReason(symbol, companyName, peakDate);
+}
+
+async function refineDrawdownAttributionsWithLLM(input: {
+    symbol: string;
+    companyName: string | null;
+    items: Array<{
+        peak_date: string;
+        trough_date: string;
+        max_drawdown_pct: number;
+        heuristic_reason: string;
+        news_titles: string[];
+    }>;
+}): Promise<Map<string, string>> {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey || input.items.length === 0) {
+        return new Map();
+    }
+
+    const prompt = `
+你是香港私人银行 IC，正在为个股历史回撤分析撰写归因短句。
+
+目标：
+- 对每段回撤给出 1 句中文主因归因，18-40 字
+- 优先识别公司/行业主因；只有证据不足时才用宏观主因
+- 不要机械重复“暂无明确宏观归因”
+- 不要写成长段分析，不要给投资建议
+
+个股：${input.companyName?.trim() || input.symbol}
+回撤清单：
+${input.items.map((item, index) => {
+    const newsBlock = item.news_titles.length > 0 ? item.news_titles.map((title) => `- ${title}`).join('\n') : '- 无明确新闻标题';
+    return `${index + 1}. peak=${item.peak_date}, trough=${item.trough_date}, drawdown=${item.max_drawdown_pct.toFixed(1)}%, heuristic=${item.heuristic_reason}\n${newsBlock}`;
+}).join('\n\n')}
+
+请返回纯 JSON 数组：
+[{"peak_date":"...","trough_date":"...","reason_zh":"..."}]
+`.trim();
+
+    try {
+        const response = await fetch('https://api.deepseek.com/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: 'deepseek-chat',
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.2,
+                response_format: { type: 'json_object' }
+            })
+        });
+
+        if (!response.ok) {
+            return new Map();
+        }
+
+        const payload = (await response.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+        };
+        const raw = payload.choices?.[0]?.message?.content?.trim() ?? '';
+        if (!raw) {
+            return new Map();
+        }
+
+        const parsed = JSON.parse(raw) as { items?: Array<{ peak_date?: string; trough_date?: string; reason_zh?: string }> } | Array<{ peak_date?: string; trough_date?: string; reason_zh?: string }>;
+        const items = Array.isArray(parsed) ? parsed : Array.isArray(parsed.items) ? parsed.items : [];
+        const map = new Map<string, string>();
+        for (const item of items) {
+            const peak = item.peak_date?.trim();
+            const trough = item.trough_date?.trim();
+            const reason = item.reason_zh?.trim();
+            if (peak && trough && reason) {
+                map.set(`${peak}::${trough}`, reason);
+            }
+        }
+        return map;
+    } catch {
+        return new Map();
+    }
+}
+
+async function buildDrawdownAttributions(
+    symbol: string,
+    companyName: string | null,
+    priceHistory: Array<{ date: string; close: number }>
+): Promise<DrawdownAttribution[]> {
+    const cacheKey = `${symbol.toUpperCase()}:${priceHistory[priceHistory.length - 1]?.date ?? 'na'}`;
+    const cached = drawdownAttributionCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+        return cached.value;
+    }
+
+    const episodes = buildInteractiveDrawdownEpisodesForAttribution(priceHistory);
+    const newsByEpisode = await Promise.all(
+        episodes.map(async (episode) => {
+            const window = buildHistoricalNewsWindow(episode.trough_date);
+            const newsItems = await fetchHistoricalStockNewsWindow(symbol, window.from, window.to, companyName ?? undefined);
+            const heuristicReason = chooseHeuristicAttributionReason(
+                symbol,
+                companyName,
+                episode.peak_date,
+                episode.trough_date,
+                newsItems
+            );
+            return {
+                episode,
+                newsItems,
+                heuristicReason
+            };
+        })
+    );
+
+    const llmReasons = await refineDrawdownAttributionsWithLLM({
+        symbol,
+        companyName,
+        items: newsByEpisode.map((item) => ({
+            peak_date: item.episode.peak_date,
+            trough_date: item.episode.trough_date,
+            max_drawdown_pct: item.episode.max_drawdown_pct,
+            heuristic_reason: item.heuristicReason,
+            news_titles: item.newsItems.map((news) => news.title)
+        }))
+    });
+
+    const value = newsByEpisode.map(({ episode, heuristicReason }) => ({
+        ...episode,
+        reason_zh: llmReasons.get(`${episode.peak_date}::${episode.trough_date}`) ?? heuristicReason
+    }));
+
+    drawdownAttributionCache.set(cacheKey, {
+        expiresAt: Date.now() + DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS,
+        value
+    });
+
+    return value;
 }
 
 function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>) {
