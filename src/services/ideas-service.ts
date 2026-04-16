@@ -144,6 +144,7 @@ const SYMBOL_SUBSECTOR_MAP: Array<{ subsector: string; symbols: string[] }> = [
     { subsector: 'optical-networking', symbols: ['LITE', 'CIEN', 'COHR', 'AAOI', 'INFN'] },
     { subsector: 'managed-care', symbols: ['UNH', 'HUM', 'ELV', 'CI', 'CVS'] },
     { subsector: 'ai-infra', symbols: ['VRT', 'SMCI', 'DELL', 'ANET', 'AVGO', 'MRVL', 'NVDA'] },
+    { subsector: 'crypto-platform', symbols: ['COIN', 'HOOD', 'MSTR'] },
     { subsector: 'memory', symbols: ['MU', 'WDC', 'STX'] },
     { subsector: 'semiconductor', symbols: ['AMD', 'INTC', 'AVGO', 'MRVL', 'NVDA', 'MU', 'TSM'] }
 ];
@@ -160,7 +161,9 @@ const NEWS_EVENT_SIGNAL_KEYWORDS: Array<{ tag: string; keywords: string[] }> = [
     { tag: 'ceo-change', keywords: ['ceo steps down', 'ceo resigns', 'management change'] },
     { tag: 'accounting-issue', keywords: ['accounting', 'auditor', 'short report', 'fraud', 'restatement'] },
     { tag: 'capex-reset', keywords: ['capex', 'capital expenditure', 'ai spending', 'spending plan'] },
-    { tag: 'orders-slowdown', keywords: ['orders', 'bookings', 'backlog', 'order slowdown'] }
+    { tag: 'orders-slowdown', keywords: ['orders', 'bookings', 'backlog', 'order slowdown'] },
+    { tag: 'crypto-drawdown', keywords: ['bitcoin falls', 'crypto prices', 'token prices', 'trading volumes', 'volumes plunged', 'ether falls'] },
+    { tag: 'crypto-banking-stress', keywords: ['silvergate', 'signature bank', 'crypto bank', 'banking rails'] }
 ];
 
 const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
@@ -271,6 +274,48 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['Tesla', '特朗普', '马斯克', '政策风险', '交付压力']
     },
     {
+        id: 'crypto-cycle-reset-2021',
+        start: '2021-04-01',
+        end: '2022-12-31',
+        reason_zh: '加密货币周期回落：币价下跌与交易量收缩压制加密平台收入与估值',
+        family: 'crypto-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['COIN', 'HOOD', 'MSTR'],
+        subsectors: ['crypto-platform'],
+        keywords: ['bitcoin', 'crypto', 'ether', 'trading volume', 'coinbase', 'token prices'],
+        event_signal_tags: ['crypto-drawdown'],
+        markers: ['加密货币', '比特币', '交易量', '币价']
+    },
+    {
+        id: 'crypto-banking-stress-2023',
+        start: '2023-03-01',
+        end: '2023-04-15',
+        reason_zh: '加密银行体系承压：Silvergate与Signature事件打击资金通道，放大加密平台风险溢价',
+        family: 'crypto-banking',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['COIN', 'HOOD', 'MSTR'],
+        subsectors: ['crypto-platform'],
+        keywords: ['silvergate', 'signature bank', 'crypto banking', 'usdc'],
+        event_signal_tags: ['crypto-banking-stress'],
+        markers: ['Silvergate', 'Signature', '加密银行', '资金通道']
+    },
+    {
+        id: 'crypto-post-rally-reset-2024',
+        start: '2023-11-01',
+        end: '2024-12-31',
+        reason_zh: '加密资产高波动回撤：ETF交易预期、币价波动与交易量起伏放大平台估值震荡',
+        family: 'crypto-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['COIN', 'HOOD', 'MSTR'],
+        subsectors: ['crypto-platform'],
+        keywords: ['etf', 'bitcoin', 'crypto', 'trading volume', 'flows'],
+        event_signal_tags: ['crypto-drawdown'],
+        markers: ['ETF', '比特币', '交易量', '加密资产']
+    },
+    {
         id: 'optical-networking-downcycle-2023',
         start: '2022-10-01',
         end: '2024-12-31',
@@ -297,6 +342,34 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         keywords: ['cloud', 'capex', 'ai spending', 'revenue miss', 'margin'],
         event_signal_tags: ['capex-reset', 'earnings-miss'],
         markers: ['Alphabet', 'Cloud', 'AI资本开支', '估值弹性']
+    },
+    {
+        id: 'tsmc-semiconductor-cycle-2023',
+        start: '2022-10-01',
+        end: '2024-12-31',
+        reason_zh: 'TSMC面临终端需求疲弱与库存调整，智能手机/PC下行周期压制晶圆代工估值',
+        family: 'semiconductor-downcycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['TSM'],
+        subsectors: ['semiconductor'],
+        keywords: ['inventory', 'smartphone', 'pc', 'chip demand', 'fab', 'wafer'],
+        event_signal_tags: ['inventory-correction', 'demand-slowdown'],
+        markers: ['TSMC', '晶圆代工', '库存调整', '终端需求']
+    },
+    {
+        id: 'tsmc-ai-chain-reset-2025',
+        start: '2025-01-01',
+        end: '2025-03-31',
+        reason_zh: 'TSMC受AI链条高位回撤与贸易政策不确定性拖累，先进制程需求预期阶段性降温',
+        family: 'tsmc-ai-trade',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['TSM'],
+        subsectors: ['semiconductor'],
+        keywords: ['ai demand', 'advanced packaging', 'tariff', 'export controls', 'foundry'],
+        event_signal_tags: ['capex-reset'],
+        markers: ['TSMC', '先进制程', 'AI链条', '贸易政策']
     },
     {
         id: 'meta-ai-capex-reset-2025',
@@ -2734,6 +2807,8 @@ function normalizeIssuerName(symbol: string, companyName: string | null): string
         GOOGL: 'Google',
         META: 'Meta',
         TSLA: 'Tesla',
+        TSM: 'TSMC',
+        COIN: 'Coinbase',
         MSFT: 'Microsoft',
         AAPL: 'Apple',
         AMZN: 'Amazon'
