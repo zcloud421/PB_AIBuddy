@@ -87,6 +87,8 @@ const KNOWN_CONFERENCE_END_DATES: Partial<Record<string, string>> = {
 
 const IDEA_OPTIONAL_QUERY_TIMEOUT_MS = 500;
 const DRAWDOWN_ATTRIBUTION_TIMEOUT_MS = 1500;
+const DRAWDOWN_NEWS_ENRICH_TIMEOUT_MS = 900;
+const DRAWDOWN_LLM_ENRICH_TIMEOUT_MS = 450;
 const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
 
@@ -2800,44 +2802,64 @@ async function buildDrawdownAttributions(
     }
 
     const episodes = buildInteractiveDrawdownEpisodesForAttribution(priceHistory);
-    const newsByEpisode = await Promise.all(
-        episodes.map(async (episode) => {
-            const window = buildHistoricalNewsWindow(episode.trough_date);
-            const newsItems = await fetchHistoricalStockNewsWindow(symbol, window.from, window.to, companyName ?? undefined);
-            const heuristicReason = chooseHeuristicAttributionReason(
-                symbol,
-                companyName,
-                episode.peak_date,
-                episode.trough_date,
-                newsItems
-            );
-            return {
-                episode,
-                newsItems,
-                heuristicReason
-            };
-        })
+    const heuristicBaseline = episodes.map((episode) => ({
+        episode,
+        newsItems: [] as NewsItem[],
+        heuristicReason: chooseHeuristicAttributionReason(
+            symbol,
+            companyName,
+            episode.peak_date,
+            episode.trough_date,
+            []
+        )
+    }));
+
+    const newsByEpisode = await withSoftTimeout(
+        Promise.all(
+            episodes.map(async (episode) => {
+                const window = buildHistoricalNewsWindow(episode.trough_date);
+                const newsItems = await fetchHistoricalStockNewsWindow(symbol, window.from, window.to, companyName ?? undefined);
+                const heuristicReason = chooseHeuristicAttributionReason(
+                    symbol,
+                    companyName,
+                    episode.peak_date,
+                    episode.trough_date,
+                    newsItems
+                );
+                return {
+                    episode,
+                    newsItems,
+                    heuristicReason
+                };
+            })
+        ),
+        heuristicBaseline,
+        DRAWDOWN_NEWS_ENRICH_TIMEOUT_MS
     );
 
-    const llmReasons = await refineDrawdownAttributionsWithLLM({
-        symbol,
-        companyName,
-        items: newsByEpisode.map((item) => ({
-            peak_date: item.episode.peak_date,
-            trough_date: item.episode.trough_date,
-            max_drawdown_pct: item.episode.max_drawdown_pct,
-            background_regime: item.heuristicReason.background_regime,
-            primary_driver_type: item.heuristicReason.primary_driver_type,
-            primary_driver: item.heuristicReason.primary_driver,
-            secondary_driver: item.heuristicReason.secondary_driver,
-            heuristic_reason: item.heuristicReason.reason_zh,
-            allowed_markers: collectRuleMarkers([
-                item.heuristicReason.primary_rule_id,
-                item.heuristicReason.background_rule_id
-            ]),
-            news_titles: item.newsItems.map((news) => news.title)
-        }))
-    });
+    const llmReasons = await withSoftTimeout(
+        refineDrawdownAttributionsWithLLM({
+            symbol,
+            companyName,
+            items: newsByEpisode.map((item) => ({
+                peak_date: item.episode.peak_date,
+                trough_date: item.episode.trough_date,
+                max_drawdown_pct: item.episode.max_drawdown_pct,
+                background_regime: item.heuristicReason.background_regime,
+                primary_driver_type: item.heuristicReason.primary_driver_type,
+                primary_driver: item.heuristicReason.primary_driver,
+                secondary_driver: item.heuristicReason.secondary_driver,
+                heuristic_reason: item.heuristicReason.reason_zh,
+                allowed_markers: collectRuleMarkers([
+                    item.heuristicReason.primary_rule_id,
+                    item.heuristicReason.background_rule_id
+                ]),
+                news_titles: item.newsItems.map((news) => news.title)
+            }))
+        }),
+        new Map<string, string>(),
+        DRAWDOWN_LLM_ENRICH_TIMEOUT_MS
+    );
 
     const value = newsByEpisode.map(({ episode, heuristicReason }) => {
         const llmReason = llmReasons.get(`${episode.peak_date}::${episode.trough_date}`);
