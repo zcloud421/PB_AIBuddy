@@ -163,6 +163,14 @@ interface EventSignalDetail {
     source_count: number;
 }
 
+interface NewsEventSignalRule {
+    tag: string;
+    keywords: string[];
+    archetypes?: AttributionBusinessArchetype[];
+    subsectors?: string[];
+    cycle_families?: AttributionCycleFamily[];
+}
+
 interface AttributionMacroRule {
     id: string;
     start: string;
@@ -302,7 +310,7 @@ const SYMBOL_CYCLE_FAMILY_MAP: Array<{ cycle_family: AttributionCycleFamily; sym
     }
 ];
 
-const NEWS_EVENT_SIGNAL_KEYWORDS: Array<{ tag: string; keywords: string[] }> = [
+const NEWS_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
     { tag: 'earnings-miss', keywords: ['earnings miss', 'missed estimates', 'misses estimates', 'results miss', 'revenue miss'] },
     { tag: 'guidance-cut', keywords: ['guidance cut', 'cuts forecast', 'withdraws guidance', 'outlook cut', 'lowers forecast', 'suspends guidance'] },
     {
@@ -336,6 +344,72 @@ const NEWS_EVENT_SIGNAL_KEYWORDS: Array<{ tag: string; keywords: string[] }> = [
     { tag: 'orders-slowdown', keywords: ['orders', 'bookings', 'backlog', 'order slowdown'] },
     { tag: 'crypto-drawdown', keywords: ['bitcoin falls', 'crypto prices', 'token prices', 'trading volumes', 'volumes plunged', 'ether falls'] },
     { tag: 'crypto-banking-stress', keywords: ['silvergate', 'signature bank', 'crypto bank', 'banking rails'] }
+];
+
+const ARCHETYPE_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
+    {
+        tag: 'de-minimis-change',
+        keywords: ['de minimis', 'trade loophole', 'low-value packages', 'tariff-free packages', 'tariff loophole'],
+        archetypes: ['china-ecommerce-platform']
+    },
+    {
+        tag: 'merchant-policy-backlash',
+        keywords: ['refunds only', 'refunds-first', 'merchant protests', 'merchant backlash', 'merchant policy', 'refund policy'],
+        archetypes: ['china-ecommerce-platform']
+    },
+    {
+        tag: 'global-expansion-slowdown',
+        keywords: ['global outlook', 'global business', 'expansion slows', 'external challenges', 'uncertain market'],
+        archetypes: ['china-ecommerce-platform']
+    },
+    {
+        tag: 'medical-cost-pressure',
+        keywords: ['medical costs', 'costs rise', 'utilization', 'medicare advantage', 'care ratio', 'cost trend'],
+        archetypes: ['managed-care'],
+        cycle_families: ['healthcare-cost-cycle']
+    },
+    {
+        tag: 'foundry-utilization-reset',
+        keywords: ['utilization', 'fab utilization', 'wafer demand', 'smartphone demand', 'pc demand', 'inventory digestion'],
+        archetypes: ['foundry'],
+        cycle_families: ['semiconductor-cycle']
+    },
+    {
+        tag: 'ad-demand-slowdown',
+        keywords: ['ad demand', 'advertising slowdown', 'search ad', 'search revenue', 'search volumes', 'default search deal'],
+        archetypes: ['ad-platform-internet']
+    },
+    {
+        tag: 'vehicle-delivery-miss',
+        keywords: ['deliveries miss', 'delivery expectations', 'vehicle registrations', 'europe sales', 'china-made ev sales'],
+        archetypes: ['ev-oem']
+    },
+    {
+        tag: 'bitcoin-treasury-pressure',
+        keywords: ['convertible notes', 'bitcoin treasury', 'leveraged bitcoin', 'btc holdings', 'digital asset holdings'],
+        archetypes: ['bitcoin-leverage-proxy']
+    },
+    {
+        tag: 'hashrate-profit-pressure',
+        keywords: ['hashrate', 'mining difficulty', 'mining margins', 'energy costs', 'bitcoin miner'],
+        archetypes: ['bitcoin-miner'],
+        cycle_families: ['crypto-cycle']
+    },
+    {
+        tag: 'cooling-power-order-reset',
+        keywords: ['cooling', 'power infrastructure', 'data center orders', 'hyperscaler spending', 'hyperscale customers'],
+        archetypes: ['ai-infrastructure']
+    },
+    {
+        tag: 'telecom-inventory-reset',
+        keywords: ['telecom spending', 'network inventory', 'optical demand', 'inventory digestion', 'carrier spending'],
+        archetypes: ['optical-networking']
+    },
+    {
+        tag: 'credit-loss-pressure',
+        keywords: ['credit losses', 'loan losses', 'net charge-offs', 'provisions', 'delinquencies'],
+        cycle_families: ['banking-credit-cycle']
+    }
 ];
 
 const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
@@ -3337,12 +3411,39 @@ function inferSymbolBusinessArchetype(
     return null;
 }
 
-function extractNewsEventSignalDetails(newsItems: NewsItem[]): EventSignalDetail[] {
+function doesSignalRuleApply(
+    rule: NewsEventSignalRule,
+    archetype: AttributionBusinessArchetype | null,
+    subsector: string | null,
+    cycleFamily: AttributionCycleFamily | null
+): boolean {
+    if (rule.archetypes?.length && (!archetype || !rule.archetypes.includes(archetype))) {
+        return false;
+    }
+    if (rule.subsectors?.length && (!subsector || !rule.subsectors.includes(subsector))) {
+        return false;
+    }
+    if (rule.cycle_families?.length && (!cycleFamily || !rule.cycle_families.includes(cycleFamily))) {
+        return false;
+    }
+    return true;
+}
+
+function extractNewsEventSignalDetails(
+    newsItems: NewsItem[],
+    archetype: AttributionBusinessArchetype | null = null,
+    subsector: string | null = null,
+    cycleFamily: AttributionCycleFamily | null = null
+): EventSignalDetail[] {
     if (newsItems.length === 0) {
         return [];
     }
 
-    return NEWS_EVENT_SIGNAL_KEYWORDS
+    const signalRules = [...NEWS_EVENT_SIGNAL_KEYWORDS, ...ARCHETYPE_EVENT_SIGNAL_KEYWORDS].filter((rule) =>
+        doesSignalRuleApply(rule, archetype, subsector, cycleFamily)
+    );
+
+    return signalRules
         .map((entry) => {
             const matchedKeywords = entry.keywords.filter((keyword) =>
                 newsItems.some((item) => item.title.toLowerCase().includes(keyword.toLowerCase()))
@@ -3362,8 +3463,13 @@ function extractNewsEventSignalDetails(newsItems: NewsItem[]): EventSignalDetail
         .filter((entry): entry is EventSignalDetail => entry !== null);
 }
 
-function extractNewsEventSignals(newsItems: NewsItem[]): string[] {
-    return extractNewsEventSignalDetails(newsItems).map((entry) => entry.tag);
+function extractNewsEventSignals(
+    newsItems: NewsItem[],
+    archetype: AttributionBusinessArchetype | null = null,
+    subsector: string | null = null,
+    cycleFamily: AttributionCycleFamily | null = null
+): string[] {
+    return extractNewsEventSignalDetails(newsItems, archetype, subsector, cycleFamily).map((entry) => entry.tag);
 }
 
 function normalizeIssuerName(symbol: string, companyName: string | null): string {
@@ -3419,11 +3525,32 @@ function buildCycleAwarePrimaryDriver(
     if (signalSet.has('ceo-change')) return `${issuer} 管理层变动引发执行不确定性`;
     if (signalSet.has('accounting-issue')) return `${issuer} 财务透明度与会计风险承压`;
     if (signalSet.has('regulatory-probe')) return `${issuer} 监管与法律风险升温`;
+    if (signalSet.has('de-minimis-change') && archetype === 'china-ecommerce-platform') {
+        return `${issuer} 跨境低价电商模式面临关税与 de minimis 政策冲击`;
+    }
+    if (signalSet.has('merchant-policy-backlash') && archetype === 'china-ecommerce-platform') {
+        return `${issuer} 商家政策与平台治理压力抬升盈利不确定性`;
+    }
+    if (signalSet.has('global-expansion-slowdown') && archetype === 'china-ecommerce-platform') {
+        return `${issuer} 全球扩张与增长可持续性预期转弱`;
+    }
+    if (signalSet.has('medical-cost-pressure') && archetype === 'managed-care') {
+        return `${issuer} 医疗赔付率与成本压力上行压制盈利预期`;
+    }
+    if (signalSet.has('foundry-utilization-reset') && archetype === 'foundry') {
+        return `${issuer} 终端需求与先进制程利用率预期走弱`;
+    }
+    if (signalSet.has('ad-demand-slowdown') && archetype === 'ad-platform-internet') {
+        return `${issuer} 搜索与广告变现预期走弱`;
+    }
     if (signalSet.has('search-disruption') && archetype === 'ad-platform-internet') {
         return `${issuer} 搜索与广告主业面临 AI 替代压力`;
     }
     if (signalSet.has('political-risk') && archetype === 'ev-oem') {
         return `${issuer} 品牌与政策风险抬升估值波动`;
+    }
+    if (signalSet.has('vehicle-delivery-miss') && archetype === 'ev-oem') {
+        return `${issuer} 交付与区域销量走弱压制需求预期`;
     }
     if (signalSet.has('pricing-pressure') && archetype === 'ev-oem') {
         return `${issuer} 需求放缓与价格竞争压缩盈利弹性`;
@@ -3446,6 +3573,21 @@ function buildCycleAwarePrimaryDriver(
     }
     if (signalSet.has('orders-slowdown') && cycleFamily === 'industrial-capex-cycle') {
         return `${issuer} 订单与资本开支节奏放缓`;
+    }
+    if (signalSet.has('cooling-power-order-reset') && archetype === 'ai-infrastructure') {
+        return `${issuer} AI 基建订单与 hyperscaler 资本开支节奏重估`;
+    }
+    if (signalSet.has('telecom-inventory-reset') && archetype === 'optical-networking') {
+        return `${issuer} 光通信客户去库存与运营商支出转弱`;
+    }
+    if (signalSet.has('credit-loss-pressure') && cycleFamily === 'banking-credit-cycle') {
+        return `${issuer} 信贷损失与拨备压力抬升估值折价`;
+    }
+    if (signalSet.has('bitcoin-treasury-pressure') && archetype === 'bitcoin-leverage-proxy') {
+        return `${issuer} 比特币杠杆敞口与融资结构放大波动`;
+    }
+    if (signalSet.has('hashrate-profit-pressure') && archetype === 'bitcoin-miner') {
+        return `${issuer} 挖矿难度与电力成本挤压盈利弹性`;
     }
 
     switch (cycleFamily) {
@@ -3572,7 +3714,9 @@ function rankAttributionRules(
     const inferredArchetype = inferSymbolBusinessArchetype(symbol, companyName, newsItems);
     const inferredSubsector = inferSymbolSubsector(symbol, companyName, newsItems);
     const inferredCycleFamily = inferSymbolCycleFamily(symbol);
-    const eventSignals = new Set(extractNewsEventSignals(newsItems));
+    const eventSignals = new Set(
+        extractNewsEventSignals(newsItems, inferredArchetype, inferredSubsector, inferredCycleFamily)
+    );
 
     return DRAWDOWN_ATTRIBUTION_RULES
         .filter((rule) => eventOverlapsRule(peakDate, troughDate, rule) && isRuleApplicableToSymbol(rule, symbol))
@@ -3651,7 +3795,12 @@ function chooseHeuristicAttributionReason(
     const inferredArchetype = inferSymbolBusinessArchetype(symbol, companyName, newsItems);
     const inferredSubsector = inferSymbolSubsector(symbol, companyName, newsItems);
     const inferredCycleFamily = inferSymbolCycleFamily(symbol);
-    const eventSignalDetails = extractNewsEventSignalDetails(newsItems);
+    const eventSignalDetails = extractNewsEventSignalDetails(
+        newsItems,
+        inferredArchetype,
+        inferredSubsector,
+        inferredCycleFamily
+    );
     const eventSignals = eventSignalDetails.map((item) => item.tag);
     const candidates = rankAttributionRules(symbol, companyName, peakDate, troughDate, newsItems);
     const primary = candidates[0]?.rule;
