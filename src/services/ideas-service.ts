@@ -97,7 +97,7 @@ const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
 const DRAWDOWN_PREWARM_COOLDOWN_MS = 30 * 60 * 1000;
 const DRAWDOWN_PREWARM_FRESHNESS_MS = 2 * 60 * 1000;
-const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 3;
+const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 5;
 const DRAWDOWN_TAIL_RISK_HISTORY_LIMIT = 1500;
 const DRAWDOWN_TAIL_RISK_LOOKBACK_DAYS = 365 * 5;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
@@ -123,6 +123,8 @@ type AttributionBusinessArchetype =
     | 'investment-bank-broker'
     | 'global-bank'
     | 'managed-care'
+    | 'large-pharma'
+    | 'large-biotech'
     | 'integrated-oil-major'
     | 'exploration-production'
     | 'oil-services'
@@ -142,7 +144,10 @@ type AttributionBusinessArchetype =
     | 'used-auto-retail'
     | 'china-ecommerce-platform'
     | 'ad-platform-internet'
+    | 'cloud-platform'
+    | 'consumer-tech-ecosystem'
     | 'ev-oem'
+    | 'fintech-payments'
     | 'crypto-exchange-broker'
     | 'bitcoin-leverage-proxy'
     | 'bitcoin-miner'
@@ -221,10 +226,15 @@ const US_TECH_ATTRIBUTION_SYMBOLS = new Set([
 
 const SYMBOL_SUBSECTOR_MAP: Array<{ subsector: string; symbols: string[] }> = [
     { subsector: 'china-ecommerce-platform', symbols: ['PDD', 'JD', 'BABA'] },
-    { subsector: 'ad-platform-internet', symbols: ['GOOG', 'GOOGL', 'META', 'SNAP', 'PINS'] },
+    { subsector: 'ad-platform-internet', symbols: ['GOOG', 'GOOGL', 'META', 'SNAP', 'PINS', 'BIDU'] },
+    { subsector: 'cloud-platform', symbols: ['MSFT', 'AMZN', 'ORCL'] },
+    { subsector: 'consumer-tech-ecosystem', symbols: ['AAPL'] },
     { subsector: 'ev-oem', symbols: ['TSLA', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI'] },
+    { subsector: 'fintech-payments', symbols: ['V', 'MA', 'SQ', 'PYPL'] },
     { subsector: 'optical-networking', symbols: ['LITE', 'CIEN', 'COHR', 'AAOI', 'INFN'] },
     { subsector: 'managed-care', symbols: ['UNH', 'HUM', 'ELV', 'CI', 'CVS'] },
+    { subsector: 'large-pharma', symbols: ['LLY', 'NVO'] },
+    { subsector: 'large-biotech', symbols: ['AMGN', 'GILD'] },
     { subsector: 'ai-infra', symbols: ['VRT', 'SMCI', 'DELL', 'ANET', 'AVGO', 'MRVL', 'NVDA'] },
     { subsector: 'crypto-platform', symbols: ['COIN', 'HOOD', 'MSTR'] },
     { subsector: 'memory', symbols: ['MU', 'WDC', 'STX'] },
@@ -236,6 +246,8 @@ const SYMBOL_ARCHETYPE_MAP: Array<{ archetype: AttributionBusinessArchetype; sym
     { archetype: 'investment-bank-broker', symbols: ['GS', 'MS', 'SCHW', 'IBKR'] },
     { archetype: 'global-bank', symbols: ['HSBC'] },
     { archetype: 'managed-care', symbols: ['UNH', 'HUM', 'ELV', 'CI', 'CVS'] },
+    { archetype: 'large-pharma', symbols: ['LLY', 'NVO'] },
+    { archetype: 'large-biotech', symbols: ['AMGN', 'GILD'] },
     { archetype: 'integrated-oil-major', symbols: ['XOM', 'CVX'] },
     { archetype: 'exploration-production', symbols: ['COP', 'EOG', 'OXY'] },
     { archetype: 'oil-services', symbols: ['SLB'] },
@@ -254,8 +266,11 @@ const SYMBOL_ARCHETYPE_MAP: Array<{ archetype: AttributionBusinessArchetype; sym
     { archetype: 'off-price-retail', symbols: ['TJX'] },
     { archetype: 'used-auto-retail', symbols: ['KMX'] },
     { archetype: 'china-ecommerce-platform', symbols: ['PDD', 'JD', 'BABA'] },
-    { archetype: 'ad-platform-internet', symbols: ['GOOG', 'GOOGL', 'META', 'SNAP', 'PINS'] },
+    { archetype: 'ad-platform-internet', symbols: ['GOOG', 'GOOGL', 'META', 'SNAP', 'PINS', 'BIDU'] },
+    { archetype: 'cloud-platform', symbols: ['MSFT', 'AMZN', 'ORCL'] },
+    { archetype: 'consumer-tech-ecosystem', symbols: ['AAPL'] },
     { archetype: 'ev-oem', symbols: ['TSLA', 'GM', 'F', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI'] },
+    { archetype: 'fintech-payments', symbols: ['V', 'MA', 'SQ', 'PYPL'] },
     { archetype: 'crypto-exchange-broker', symbols: ['COIN', 'HOOD'] },
     { archetype: 'bitcoin-leverage-proxy', symbols: ['MSTR'] },
     { archetype: 'bitcoin-miner', symbols: ['MARA', 'CLSK', 'RIOT'] },
@@ -348,6 +363,18 @@ const NEWS_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
 
 const ARCHETYPE_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
     {
+        tag: 'nii-pressure',
+        keywords: ['net interest income', 'nii', 'deposit betas', 'funding costs', 'deposit costs', 'margin compression'],
+        archetypes: ['money-center-bank', 'global-bank'],
+        cycle_families: ['banking-credit-cycle']
+    },
+    {
+        tag: 'capital-markets-slowdown',
+        keywords: ['investment banking fees', 'deal activity', 'capital markets', 'underwriting', 'trading revenue', 'advisory fees'],
+        archetypes: ['money-center-bank', 'investment-bank-broker', 'global-bank'],
+        cycle_families: ['banking-credit-cycle']
+    },
+    {
         tag: 'de-minimis-change',
         keywords: ['de minimis', 'trade loophole', 'low-value packages', 'tariff-free packages', 'tariff loophole'],
         archetypes: ['china-ecommerce-platform']
@@ -369,6 +396,16 @@ const ARCHETYPE_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
         cycle_families: ['healthcare-cost-cycle']
     },
     {
+        tag: 'drug-pricing-pressure',
+        keywords: ['drug pricing', 'price negotiations', 'medicare negotiations', 'rebate pressure', 'pricing scrutiny'],
+        archetypes: ['large-pharma', 'large-biotech']
+    },
+    {
+        tag: 'trial-setback',
+        keywords: ['clinical trial', 'trial setback', 'study failed', 'phase 3', 'phase iii', 'fda delay', 'pipeline setback'],
+        archetypes: ['large-pharma', 'large-biotech']
+    },
+    {
         tag: 'foundry-utilization-reset',
         keywords: ['utilization', 'fab utilization', 'wafer demand', 'smartphone demand', 'pc demand', 'inventory digestion'],
         archetypes: ['foundry'],
@@ -380,9 +417,29 @@ const ARCHETYPE_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
         archetypes: ['ad-platform-internet']
     },
     {
+        tag: 'cloud-spending-reset',
+        keywords: ['azure growth', 'aws growth', 'cloud growth', 'cloud spending', 'cloud slowdown', 'enterprise cloud'],
+        archetypes: ['cloud-platform']
+    },
+    {
+        tag: 'iphone-demand-reset',
+        keywords: ['iphone demand', 'iphone sales', 'app store growth', 'china smartphone demand', 'mac sales'],
+        archetypes: ['consumer-tech-ecosystem']
+    },
+    {
         tag: 'vehicle-delivery-miss',
         keywords: ['deliveries miss', 'delivery expectations', 'vehicle registrations', 'europe sales', 'china-made ev sales'],
         archetypes: ['ev-oem']
+    },
+    {
+        tag: 'payment-volume-slowdown',
+        keywords: ['payment volume', 'card spending', 'consumer spend', 'cross-border volume', 'merchant acquiring'],
+        archetypes: ['fintech-payments']
+    },
+    {
+        tag: 'take-rate-pressure',
+        keywords: ['take rate', 'merchant fees', 'pricing concessions', 'transaction margin', 'payment margins'],
+        archetypes: ['fintech-payments']
     },
     {
         tag: 'bitcoin-treasury-pressure',
@@ -409,6 +466,30 @@ const ARCHETYPE_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
         tag: 'credit-loss-pressure',
         keywords: ['credit losses', 'loan losses', 'net charge-offs', 'provisions', 'delinquencies'],
         cycle_families: ['banking-credit-cycle']
+    },
+    {
+        tag: 'oil-price-reset',
+        keywords: ['brent', 'wti', 'crude prices', 'oil prices', 'refining margins', 'downstream margins', 'demand outlook'],
+        archetypes: ['integrated-oil-major', 'exploration-production', 'oil-services'],
+        cycle_families: ['energy-oil-cycle']
+    },
+    {
+        tag: 'opec-supply-shift',
+        keywords: ['opec', 'opec+', 'production cuts', 'supply curbs', 'output increase', 'barrels per day'],
+        archetypes: ['integrated-oil-major', 'exploration-production', 'oil-services'],
+        cycle_families: ['energy-oil-cycle']
+    },
+    {
+        tag: 'dealer-destocking',
+        keywords: ['dealer inventory', 'dealer destocking', 'inventory normalization', 'destocking', 'backlog normalization'],
+        archetypes: ['industrial-machinery', 'diversified-industrial'],
+        cycle_families: ['industrial-capex-cycle']
+    },
+    {
+        tag: 'pmi-contraction',
+        keywords: ['pmi contraction', 'manufacturing pmi', 'factory activity', 'industrial production', 'construction demand', 'farm equipment demand'],
+        archetypes: ['industrial-machinery', 'diversified-industrial'],
+        cycle_families: ['industrial-capex-cycle']
     }
 ];
 
@@ -491,7 +572,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         id: 'svb-crisis-2023',
         start: '2023-03-08',
         end: '2023-03-31',
-        reason_zh: '硅谷银行挤兑倒闭，金融稳定担忧短暂蔓延至成长与科技板块',
+        reason_zh: '美国区域银行风波引发流动性与金融稳定担忧，跨资产风险偏好短暂恶化',
         family: 'financial-stability',
         driver_type: 'macro',
         applies_to: 'all',
@@ -768,6 +849,51 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['拼多多', 'Temu', '竞争加剧', '商家政策', '全球业务前景']
     },
     {
+        id: 'banking-profitability-reset-2024',
+        start: '2023-10-01',
+        end: '2025-12-31',
+        reason_zh: '大型银行盈利预期重估：净利息收入、资本市场活跃度与信贷成本前景变化压制估值',
+        family: 'banking-profitability',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['JPM', 'BAC', 'C', 'WFC', 'GS', 'MS', 'HSBC'],
+        archetypes: ['money-center-bank', 'investment-bank-broker', 'global-bank'],
+        cycle_families: ['banking-credit-cycle'],
+        keywords: ['net interest income', 'nii', 'deposit costs', 'provisions', 'capital markets', 'investment banking', 'credit losses'],
+        event_signal_tags: ['nii-pressure', 'capital-markets-slowdown', 'credit-loss-pressure'],
+        markers: ['大型银行', '净利息收入', '资本市场活跃度', '信贷成本']
+    },
+    {
+        id: 'oil-cycle-reset-2022',
+        start: '2021-10-01',
+        end: '2025-12-31',
+        reason_zh: '油气周期重估：油价、OPEC供给与全球需求预期波动，盈利弹性随商品周期回落',
+        family: 'oil-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['XOM', 'CVX', 'COP', 'EOG', 'OXY', 'SLB'],
+        archetypes: ['integrated-oil-major', 'exploration-production', 'oil-services'],
+        cycle_families: ['energy-oil-cycle'],
+        keywords: ['opec', 'crude', 'brent', 'refining margins', 'demand outlook', 'oil prices'],
+        event_signal_tags: ['oil-price-reset', 'opec-supply-shift'],
+        markers: ['油价', 'OPEC', '全球需求', '油气周期']
+    },
+    {
+        id: 'industrial-capex-reset-2023',
+        start: '2021-10-01',
+        end: '2025-12-31',
+        reason_zh: '工业资本开支周期转弱：制造业PMI、设备订单与经销商去库存拖累工业股估值',
+        family: 'industrial-capex',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['CAT', 'DE', 'CMI', 'DOV', 'GE', 'GEV', 'HON', 'MMM'],
+        archetypes: ['industrial-machinery', 'diversified-industrial'],
+        cycle_families: ['industrial-capex-cycle'],
+        keywords: ['pmi', 'orders', 'backlog', 'dealer inventory', 'destocking', 'construction demand', 'farm equipment'],
+        event_signal_tags: ['orders-slowdown', 'dealer-destocking', 'pmi-contraction'],
+        markers: ['工业资本开支', 'PMI', '设备订单', '经销商去库存']
+    },
+    {
         id: 'vrt-ai-infra-reset-2025',
         start: '2025-01-01',
         end: '2025-06-30',
@@ -846,7 +972,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         id: 'us-iran-war-2026',
         start: '2026-02-28',
         end: '2026-12-31',
-        reason_zh: '中东局势急剧恶化，能源、利率与风险资产同步波动，科技股高位回撤放大',
+        reason_zh: '中东局势急剧恶化，油价、利率与风险偏好同步波动，跨资产风险溢价上升',
         family: 'middle-east',
         driver_type: 'geopolitical',
         applies_to: 'all',
@@ -3347,10 +3473,21 @@ function inferSymbolSubsector(symbol: string, companyName: string | null, newsIt
 
     const text = `${companyName ?? ''} ${newsItems.map((item) => item.title).join(' ')}`.toLowerCase();
     if (text.includes('medicare advantage') || text.includes('health insurer')) return 'managed-care';
+    if (text.includes('glp-1') || text.includes('obesity drug') || text.includes('drug pricing')) return 'large-pharma';
+    if (text.includes('clinical trial') || text.includes('pipeline setback') || text.includes('fda delay')) return 'large-biotech';
     if (text.includes('temu') || text.includes('pinduoduo') || text.includes('e-commerce') || text.includes('ecommerce')) return 'china-ecommerce-platform';
+    if (text.includes('azure') || text.includes('aws') || text.includes('gcp') || text.includes('cloud growth')) return 'cloud-platform';
+    if (text.includes('iphone') || text.includes('app store') || text.includes('mac sales')) return 'consumer-tech-ecosystem';
     if (text.includes('optical') || text.includes('networking') || text.includes('telecom')) return 'optical-networking';
     if (text.includes('search') || text.includes('advertising') || text.includes('browser')) return 'ad-platform-internet';
-    if (text.includes('ev') || text.includes('electric vehicle') || text.includes('model y')) return 'ev-oem';
+    if (text.includes('payment volume') || text.includes('card spending') || text.includes('merchant acquiring')) return 'fintech-payments';
+    if (
+        text.includes('electric vehicle') ||
+        text.includes('model y') ||
+        text.includes('model 3') ||
+        text.includes('vehicle registrations') ||
+        text.includes('deliveries down')
+    ) return 'ev-oem';
     if (text.includes('data center') || text.includes('cooling') || text.includes('power infrastructure')) return 'ai-infra';
     if (text.includes('dram') || text.includes('nand') || text.includes('memory')) return 'memory';
     if (text.includes('semiconductor') || text.includes('chip')) return 'semiconductor';
@@ -3391,16 +3528,27 @@ function inferSymbolBusinessArchetype(
 
     const text = `${companyName ?? ''} ${newsItems.map((item) => item.title).join(' ')}`.toLowerCase();
     if (text.includes('medicare advantage') || text.includes('health insurer')) return 'managed-care';
+    if (text.includes('glp-1') || text.includes('obesity drug') || text.includes('drug pricing')) return 'large-pharma';
+    if (text.includes('clinical trial') || text.includes('pipeline setback') || text.includes('fda delay')) return 'large-biotech';
     if (text.includes('temu') || text.includes('pinduoduo') || text.includes('e-commerce') || text.includes('ecommerce')) return 'china-ecommerce-platform';
+    if (text.includes('azure') || text.includes('aws') || text.includes('gcp') || text.includes('cloud growth')) return 'cloud-platform';
+    if (text.includes('iphone') || text.includes('app store') || text.includes('mac sales')) return 'consumer-tech-ecosystem';
     if (text.includes('oil') || text.includes('opec') || text.includes('barrels')) return 'integrated-oil-major';
     if (text.includes('exploration') || text.includes('permian')) return 'exploration-production';
     if (text.includes('data center') || text.includes('cooling') || text.includes('power infrastructure')) return 'ai-infrastructure';
     if (text.includes('optical') || text.includes('networking') || text.includes('telecom')) return 'optical-networking';
     if (text.includes('search') || text.includes('browser') || text.includes('advertising')) return 'ad-platform-internet';
+    if (text.includes('payment volume') || text.includes('card spending') || text.includes('merchant acquiring')) return 'fintech-payments';
     if (text.includes('bitcoin miner') || text.includes('hashrate') || text.includes('mining rig')) return 'bitcoin-miner';
     if (text.includes('bitcoin treasury') || text.includes('microstrategy')) return 'bitcoin-leverage-proxy';
     if (text.includes('exchange') || text.includes('brokerage') || text.includes('trading volume')) return 'crypto-exchange-broker';
-    if (text.includes('ev') || text.includes('electric vehicle') || text.includes('model y')) return 'ev-oem';
+    if (
+        text.includes('electric vehicle') ||
+        text.includes('model y') ||
+        text.includes('model 3') ||
+        text.includes('vehicle registrations') ||
+        text.includes('deliveries down')
+    ) return 'ev-oem';
     if (text.includes('dram') || text.includes('nand') || text.includes('memory')) return 'memory';
     if (text.includes('foundry') || text.includes('wafer')) return 'foundry';
     if (text.includes('equipment') || text.includes('fab tool')) return 'chip-equipment';
@@ -3537,11 +3685,23 @@ function buildCycleAwarePrimaryDriver(
     if (signalSet.has('medical-cost-pressure') && archetype === 'managed-care') {
         return `${issuer} 医疗赔付率与成本压力上行压制盈利预期`;
     }
+    if (signalSet.has('drug-pricing-pressure') && (archetype === 'large-pharma' || archetype === 'large-biotech')) {
+        return `${issuer} 药品定价与医保谈判压力压缩盈利预期`;
+    }
+    if (signalSet.has('trial-setback') && (archetype === 'large-pharma' || archetype === 'large-biotech')) {
+        return `${issuer} 临床试验与管线进展受挫压制估值`;
+    }
     if (signalSet.has('foundry-utilization-reset') && archetype === 'foundry') {
         return `${issuer} 终端需求与先进制程利用率预期走弱`;
     }
     if (signalSet.has('ad-demand-slowdown') && archetype === 'ad-platform-internet') {
         return `${issuer} 搜索与广告变现预期走弱`;
+    }
+    if (signalSet.has('cloud-spending-reset') && archetype === 'cloud-platform') {
+        return `${issuer} 云业务增速与企业支出预期回落压制估值`;
+    }
+    if (signalSet.has('iphone-demand-reset') && archetype === 'consumer-tech-ecosystem') {
+        return `${issuer} iPhone 需求与生态变现预期走弱`;
     }
     if (signalSet.has('search-disruption') && archetype === 'ad-platform-internet') {
         return `${issuer} 搜索与广告主业面临 AI 替代压力`;
@@ -3551,6 +3711,9 @@ function buildCycleAwarePrimaryDriver(
     }
     if (signalSet.has('vehicle-delivery-miss') && archetype === 'ev-oem') {
         return `${issuer} 交付与区域销量走弱压制需求预期`;
+    }
+    if ((signalSet.has('payment-volume-slowdown') || signalSet.has('take-rate-pressure')) && archetype === 'fintech-payments') {
+        return `${issuer} 支付量与商户费率预期回落压制增长弹性`;
     }
     if (signalSet.has('pricing-pressure') && archetype === 'ev-oem') {
         return `${issuer} 需求放缓与价格竞争压缩盈利弹性`;
@@ -3583,11 +3746,23 @@ function buildCycleAwarePrimaryDriver(
     if (signalSet.has('credit-loss-pressure') && cycleFamily === 'banking-credit-cycle') {
         return `${issuer} 信贷损失与拨备压力抬升估值折价`;
     }
+    if (signalSet.has('nii-pressure') && cycleFamily === 'banking-credit-cycle') {
+        return `${issuer} 净利息收入与存款成本压力压制盈利预期`;
+    }
+    if (signalSet.has('capital-markets-slowdown') && cycleFamily === 'banking-credit-cycle') {
+        return `${issuer} 投行与资本市场业务活跃度回落拖累盈利弹性`;
+    }
     if (signalSet.has('bitcoin-treasury-pressure') && archetype === 'bitcoin-leverage-proxy') {
         return `${issuer} 比特币杠杆敞口与融资结构放大波动`;
     }
     if (signalSet.has('hashrate-profit-pressure') && archetype === 'bitcoin-miner') {
         return `${issuer} 挖矿难度与电力成本挤压盈利弹性`;
+    }
+    if ((signalSet.has('oil-price-reset') || signalSet.has('opec-supply-shift')) && cycleFamily === 'energy-oil-cycle') {
+        return `${issuer} 油价、OPEC供给与全球需求预期重估盈利弹性`;
+    }
+    if ((signalSet.has('dealer-destocking') || signalSet.has('pmi-contraction')) && cycleFamily === 'industrial-capex-cycle') {
+        return `${issuer} 经销商去库存与制造业订单走弱压制资本开支预期`;
     }
 
     switch (cycleFamily) {
@@ -3620,6 +3795,9 @@ function buildCycleAwarePrimaryDriver(
             return `${issuer} 资本市场与信贷周期变化压制估值`;
         case 'managed-care':
             return `${issuer} 医疗成本与赔付率上行压制盈利预期`;
+        case 'large-pharma':
+        case 'large-biotech':
+            return `${issuer} 管线进展、药品定价与医保政策变化重估增长预期`;
         case 'integrated-oil-major':
         case 'exploration-production':
         case 'oil-services':
@@ -3645,8 +3823,14 @@ function buildCycleAwarePrimaryDriver(
             return `${issuer} 平台电商竞争、商家生态与跨境业务预期承压`;
         case 'ad-platform-internet':
             return `${issuer} 广告、流量与平台主业预期承压`;
+        case 'cloud-platform':
+            return `${issuer} 云业务增速与企业 IT 支出节奏重估`;
+        case 'consumer-tech-ecosystem':
+            return `${issuer} 消费电子需求与生态变现预期波动`;
         case 'ev-oem':
             return `${issuer} 需求、价格与品牌因素共同压制盈利弹性`;
+        case 'fintech-payments':
+            return `${issuer} 支付量、商户费率与消费活动节奏变化压制估值`;
         case 'crypto-exchange-broker':
             return `${issuer} 交易量与加密资产价格回落拖累收入预期`;
         case 'bitcoin-leverage-proxy':

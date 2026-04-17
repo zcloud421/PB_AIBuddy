@@ -606,6 +606,35 @@ export async function upsertPriceHistory(input: UpsertPriceHistoryInput): Promis
     try {
         await client.query('BEGIN');
 
+        await client.query(
+            `
+            INSERT INTO underlyings (
+                symbol,
+                exchange,
+                name,
+                company_name,
+                sector,
+                currency,
+                themes,
+                tier,
+                active
+            )
+            VALUES (
+                $1,
+                'UNKNOWN',
+                $1,
+                NULL,
+                'Unknown',
+                'USD',
+                '{}'::text[],
+                2,
+                false
+            )
+            ON CONFLICT (symbol) DO NOTHING
+            `,
+            [input.symbol]
+        );
+
         for (const bar of input.bars) {
             await client.query(
                 `

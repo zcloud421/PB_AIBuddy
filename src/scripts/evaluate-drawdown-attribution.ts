@@ -1,31 +1,40 @@
 import dotenv from 'dotenv';
 
-import type { DrawdownAttribution } from '../types/api';
+import type { DrawdownAttribution, SymbolPriceHistoryResponse } from '../types/api';
 import { getSymbolPriceHistory } from '../services/ideas-service';
 
 dotenv.config();
 
 const DEFAULT_SYMBOLS = [
     'BABA',
+    'PDD',
     'JD',
+    'BIDU',
     'GOOG',
     'META',
+    'MSFT',
+    'AMZN',
+    'AAPL',
     'TSLA',
     'UNH',
+    'LLY',
+    'NVO',
     'TSM',
     'AMD',
     'MU',
+    'NVDA',
     'LITE',
     'VRT',
     'COIN',
     'HOOD',
     'MSTR',
     'JPM',
+    'GS',
+    'V',
+    'MA',
     'XOM',
     'CAT',
-    'FCX',
-    'ABNB',
-    'LVS'
+    'FCX'
 ];
 
 type SymbolEvaluation = {
@@ -43,6 +52,10 @@ type SymbolEvaluation = {
     geopoliticalPrimaryCount: number;
     mixedPrimaryCount: number;
 };
+
+const WARMUP_WAIT_MS = 8000;
+const EMPTY_ATTRIBUTION_RETRY_COUNT = 2;
+const EMPTY_ATTRIBUTION_RETRY_DELAY_MS = 3000;
 
 function parseSymbols(argv: string[]): string[] {
     const requested = argv
@@ -104,6 +117,25 @@ function renderPct(numerator: number, denominator: number): string {
     return `${Math.round((numerator / denominator) * 100)}%`;
 }
 
+function hasMaterialPriceHistory(response: SymbolPriceHistoryResponse): boolean {
+    return (response.price_history?.length ?? 0) > 30;
+}
+
+function shouldRetryEmptyAttribution(response: SymbolPriceHistoryResponse): boolean {
+    return hasMaterialPriceHistory(response) && (response.drawdown_attributions?.length ?? 0) === 0;
+}
+
+async function loadEvaluatedPriceHistory(symbol: string): Promise<SymbolPriceHistoryResponse> {
+    let response = await getSymbolPriceHistory(symbol);
+
+    for (let attempt = 0; attempt < EMPTY_ATTRIBUTION_RETRY_COUNT && shouldRetryEmptyAttribution(response); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, EMPTY_ATTRIBUTION_RETRY_DELAY_MS));
+        response = await getSymbolPriceHistory(symbol);
+    }
+
+    return response;
+}
+
 function printGroupSummary(label: string, evaluations: SymbolEvaluation[], selector: (item: SymbolEvaluation) => string | null) {
     const buckets = new Map<string, SymbolEvaluation[]>();
     for (const evaluation of evaluations) {
@@ -134,9 +166,14 @@ async function main(): Promise<void> {
 
     console.log(`Evaluating drawdown attribution coverage for ${symbols.length} symbols...\n`);
 
+    console.log(`Warm-up pass: triggering enrichment for ${symbols.length} symbols...`);
+    await Promise.allSettled(symbols.map((symbol) => getSymbolPriceHistory(symbol)));
+    console.log(`Waiting ${Math.round(WARMUP_WAIT_MS / 1000)}s for background enrichment to settle...\n`);
+    await new Promise((resolve) => setTimeout(resolve, WARMUP_WAIT_MS));
+
     for (const symbol of symbols) {
         try {
-            const response = await getSymbolPriceHistory(symbol);
+            const response = await loadEvaluatedPriceHistory(symbol);
             const attributions = response.drawdown_attributions ?? [];
             const evaluation = summarizeSymbol(symbol, attributions);
             evaluations.push(evaluation);
