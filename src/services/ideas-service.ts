@@ -483,6 +483,28 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['Alphabet', '搜索', 'Safari', 'AI搜索', '反垄断']
     },
     {
+        id: 'china-platform-rectification-2021',
+        start: '2021-04-01',
+        end: '2022-03-31',
+        reason_zh: '中国互联网平台监管整顿：反垄断整改、Ant整顿与平台经济监管压制估值',
+        family: 'china-regulation',
+        driver_type: 'policy',
+        applies_to: 'china_tech',
+        keywords: ['antitrust', 'ant group', 'rectification', 'platform economy', 'data security', 'regulation'],
+        markers: ['中国互联网', '反垄断', 'Ant', '平台经济监管']
+    },
+    {
+        id: 'china-growth-reset-2022',
+        start: '2022-04-01',
+        end: '2024-03-31',
+        reason_zh: '中国经济复苏不及预期：封控余波、消费与出口偏弱、地产压力及中概退市担忧压制估值',
+        family: 'china-growth',
+        driver_type: 'macro',
+        applies_to: 'china_tech',
+        keywords: ['lockdown', 'consumer', 'property', 'real estate', 'delisting', 'hfcaa', 'china growth', 'export'],
+        markers: ['中国经济', '复苏不及预期', '地产压力', '退市担忧']
+    },
+    {
         id: 'vrt-ai-infra-reset-2025',
         start: '2025-01-01',
         end: '2025-06-30',
@@ -507,6 +529,17 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'us_tech',
         keywords: ['tariff', 'trade', 'duties', 'levy'],
         markers: ['关税', 'tariff', '贸易']
+    },
+    {
+        id: 'china-macro-2025-early',
+        start: '2025-01-01',
+        end: '2025-03-31',
+        reason_zh: '中美贸易摩擦预期持续升温，外需收缩担忧加剧，中国科技股在关税落地前已提前承压',
+        family: 'china-policy',
+        driver_type: 'policy',
+        applies_to: 'china_tech',
+        keywords: ['trade friction', 'tariff', 'china', 'export', 'demand', 'yuan'],
+        markers: ['贸易摩擦预期', '中国科技股', '外需收缩', '关税落地前']
     },
     {
         id: 'china-macro-2025',
