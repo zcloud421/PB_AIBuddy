@@ -4048,6 +4048,7 @@ function buildStructuredFallbackAttribution(
     symbol: string,
     companyName: string | null,
     peakDate: string,
+    troughDate: string,
     businessArchetype: AttributionBusinessArchetype | null,
     subsector: string | null,
     eventSignalDetails: EventSignalDetail[]
@@ -4055,6 +4056,11 @@ function buildStructuredFallbackAttribution(
     const issuer = normalizeIssuerName(symbol, companyName);
     const cycleFamily = inferSymbolCycleFamily(symbol);
     const eventSignals = eventSignalDetails.map((item) => item.tag);
+    const fallbackRuleKey =
+        businessArchetype ??
+        subsector ??
+        cycleFamily ??
+        'generic';
     const structured: StructuredAttributionReason = {
         business_archetype: businessArchetype,
         subsector,
@@ -4067,7 +4073,7 @@ function buildStructuredFallbackAttribution(
         primary_driver: buildCycleAwarePrimaryDriver(issuer, businessArchetype, cycleFamily, eventSignals),
         secondary_driver: '市场风险偏好回落放大跌幅',
         reason_zh: buildFallbackAttributionReason(symbol, companyName, peakDate),
-        primary_rule_id: null,
+        primary_rule_id: `fallback:${fallbackRuleKey}:${peakDate}:${troughDate}`,
         background_rule_id: null
     };
     structured.reason_zh = renderStructuredAttributionReason(structured);
@@ -4114,6 +4120,7 @@ function chooseHeuristicAttributionReason(
             symbol,
             companyName,
             peakDate,
+            troughDate,
             inferredArchetype,
             inferredSubsector,
             eventSignalDetails
