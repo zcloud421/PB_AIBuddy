@@ -140,6 +140,7 @@ type AttributionBusinessArchetype =
     | 'online-travel'
     | 'off-price-retail'
     | 'used-auto-retail'
+    | 'china-ecommerce-platform'
     | 'ad-platform-internet'
     | 'ev-oem'
     | 'crypto-exchange-broker'
@@ -211,6 +212,7 @@ const US_TECH_ATTRIBUTION_SYMBOLS = new Set([
 ]);
 
 const SYMBOL_SUBSECTOR_MAP: Array<{ subsector: string; symbols: string[] }> = [
+    { subsector: 'china-ecommerce-platform', symbols: ['PDD', 'JD', 'BABA'] },
     { subsector: 'ad-platform-internet', symbols: ['GOOG', 'GOOGL', 'META', 'SNAP', 'PINS'] },
     { subsector: 'ev-oem', symbols: ['TSLA', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI'] },
     { subsector: 'optical-networking', symbols: ['LITE', 'CIEN', 'COHR', 'AAOI', 'INFN'] },
@@ -243,6 +245,7 @@ const SYMBOL_ARCHETYPE_MAP: Array<{ archetype: AttributionBusinessArchetype; sym
     { archetype: 'online-travel', symbols: ['ABNB', 'BKNG'] },
     { archetype: 'off-price-retail', symbols: ['TJX'] },
     { archetype: 'used-auto-retail', symbols: ['KMX'] },
+    { archetype: 'china-ecommerce-platform', symbols: ['PDD', 'JD', 'BABA'] },
     { archetype: 'ad-platform-internet', symbols: ['GOOG', 'GOOGL', 'META', 'SNAP', 'PINS'] },
     { archetype: 'ev-oem', symbols: ['TSLA', 'GM', 'F', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI'] },
     { archetype: 'crypto-exchange-broker', symbols: ['COIN', 'HOOD'] },
@@ -673,6 +676,22 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'china_tech',
         keywords: ['lockdown', 'consumer', 'property', 'real estate', 'delisting', 'hfcaa', 'china growth', 'export'],
         markers: ['中国经济', '复苏不及预期', '地产压力', '退市担忧']
+    },
+    {
+        id: 'pdd-temu-competition-reset-2024',
+        start: '2024-05-01',
+        end: '2024-12-31',
+        reason_zh: '拼多多增长与盈利预期重估：Temu与国内电商竞争加剧、商家政策与监管压力上升，管理层对全球业务前景转趋谨慎',
+        family: 'pdd-competition',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['PDD'],
+        archetypes: ['china-ecommerce-platform'],
+        subsectors: ['china-ecommerce-platform'],
+        cycle_families: ['consumer-discretionary-cycle'],
+        keywords: ['temu', 'competition', 'global business', 'refunds', 'merchant', 'revenue miss', 'uncertain market', 'de minimis'],
+        event_signal_tags: ['earnings-miss', 'pricing-pressure', 'regulatory-probe'],
+        markers: ['拼多多', 'Temu', '竞争加剧', '商家政策', '全球业务前景']
     },
     {
         id: 'vrt-ai-infra-reset-2025',
@@ -3254,6 +3273,7 @@ function inferSymbolSubsector(symbol: string, companyName: string | null, newsIt
 
     const text = `${companyName ?? ''} ${newsItems.map((item) => item.title).join(' ')}`.toLowerCase();
     if (text.includes('medicare advantage') || text.includes('health insurer')) return 'managed-care';
+    if (text.includes('temu') || text.includes('pinduoduo') || text.includes('e-commerce') || text.includes('ecommerce')) return 'china-ecommerce-platform';
     if (text.includes('optical') || text.includes('networking') || text.includes('telecom')) return 'optical-networking';
     if (text.includes('search') || text.includes('advertising') || text.includes('browser')) return 'ad-platform-internet';
     if (text.includes('ev') || text.includes('electric vehicle') || text.includes('model y')) return 'ev-oem';
@@ -3297,6 +3317,7 @@ function inferSymbolBusinessArchetype(
 
     const text = `${companyName ?? ''} ${newsItems.map((item) => item.title).join(' ')}`.toLowerCase();
     if (text.includes('medicare advantage') || text.includes('health insurer')) return 'managed-care';
+    if (text.includes('temu') || text.includes('pinduoduo') || text.includes('e-commerce') || text.includes('ecommerce')) return 'china-ecommerce-platform';
     if (text.includes('oil') || text.includes('opec') || text.includes('barrels')) return 'integrated-oil-major';
     if (text.includes('exploration') || text.includes('permian')) return 'exploration-production';
     if (text.includes('data center') || text.includes('cooling') || text.includes('power infrastructure')) return 'ai-infrastructure';
@@ -3353,6 +3374,7 @@ function normalizeIssuerName(symbol: string, companyName: string | null): string
         META: 'Meta',
         TSLA: 'Tesla',
         TSM: 'TSMC',
+        PDD: '拼多多',
         COIN: 'Coinbase',
         MSFT: 'Microsoft',
         AAPL: 'Apple',
@@ -3365,7 +3387,10 @@ function normalizeIssuerName(symbol: string, companyName: string | null): string
     }
 
     const raw = (companyName?.trim() || upper)
-        .replace(/\b(Class\s+[A-Z]\s+Capital\s+Stock|Class\s+[A-Z]\s+Common\s+Stock|Common\s+Stock)\b/gi, '')
+        .replace(
+            /\b(American Depositary Shares?(?:,\s*each\s*represent(?:s)?\s*[^,]+)?|Class\s+[A-Z]\s+Capital\s+Stock|Class\s+[A-Z]\s+Common\s+Stock|Common\s+Stock)\b/gi,
+            ''
+        )
         .replace(/\b(Inc\.?|Corporation|Corp\.?|Holdings?|Group|Ltd\.?|Limited|PLC|S\.A\.)\b/gi, '')
         .replace(/\s{2,}/g, ' ')
         .replace(/\s+,/g, ',')
@@ -3474,6 +3499,8 @@ function buildCycleAwarePrimaryDriver(
         case 'off-price-retail':
         case 'used-auto-retail':
             return `${issuer} 终端消费与可选支出需求走弱`;
+        case 'china-ecommerce-platform':
+            return `${issuer} 平台电商竞争、商家生态与跨境业务预期承压`;
         case 'ad-platform-internet':
             return `${issuer} 广告、流量与平台主业预期承压`;
         case 'ev-oem':
