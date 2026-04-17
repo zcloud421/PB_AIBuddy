@@ -97,7 +97,7 @@ const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
 const DRAWDOWN_PREWARM_COOLDOWN_MS = 30 * 60 * 1000;
 const DRAWDOWN_PREWARM_FRESHNESS_MS = 2 * 60 * 1000;
-const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 6;
+const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 8;
 const DRAWDOWN_TAIL_RISK_HISTORY_LIMIT = 1500;
 const DRAWDOWN_TAIL_RISK_LOOKBACK_DAYS = 365 * 5;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
@@ -442,13 +442,36 @@ const ARCHETYPE_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
         archetypes: ['fintech-payments']
     },
     {
+        tag: 'bitcoin-etf-flow-reset',
+        keywords: ['etf outflows', 'etf inflows slow', 'spot bitcoin etf', 'bitcoin etf flows', 'etf demand', 'fund flows'],
+        archetypes: ['crypto-exchange-broker', 'bitcoin-leverage-proxy'],
+        cycle_families: ['crypto-cycle']
+    },
+    {
+        tag: 'crypto-exchange-volume-reset',
+        keywords: ['trading volume', 'retail activity', 'transaction revenue', 'subscription revenue', 'crypto volumes'],
+        archetypes: ['crypto-exchange-broker'],
+        cycle_families: ['crypto-cycle']
+    },
+    {
         tag: 'bitcoin-treasury-pressure',
         keywords: ['convertible notes', 'convertible offering', 'preferred stock', 'at-the-market', 'share sale', 'bitcoin treasury', 'leveraged bitcoin', 'btc holdings', 'digital asset holdings'],
         archetypes: ['bitcoin-leverage-proxy']
     },
     {
+        tag: 'treasury-financing-overhang',
+        keywords: ['at-the-market', 'share sale', 'equity offering', 'preferred stock', 'convertible offering', 'funding plan'],
+        archetypes: ['bitcoin-leverage-proxy']
+    },
+    {
         tag: 'hashrate-profit-pressure',
-        keywords: ['hashrate', 'mining difficulty', 'mining margins', 'energy costs', 'bitcoin miner'],
+        keywords: ['hashrate', 'mining difficulty', 'mining margins', 'energy costs', 'bitcoin miner', 'bitcoin production', 'production update', 'eh/s', 'exahash', 'cost to mine', 'fleet energization'],
+        archetypes: ['bitcoin-miner'],
+        cycle_families: ['crypto-cycle']
+    },
+    {
+        tag: 'mining-economics-reset',
+        keywords: ['block reward', 'halving', 'hashprice', 'power costs', 'energy curtailment', 'mining profitability', 'block subsidy', 'hosting costs', 'self-mining', 'cost per bitcoin', 'mining revenue', 'power curtailment'],
         archetypes: ['bitcoin-miner'],
         cycle_families: ['crypto-cycle']
     },
@@ -691,6 +714,21 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['比特币', '杠杆持币', '融资压力', 'Strategy']
     },
     {
+        id: 'bitcoin-miner-bear-market-2021',
+        start: '2021-04-01',
+        end: '2023-10-31',
+        reason_zh: '比特币熊市与矿业盈利重估：币价回落、融资环境收紧、算力竞争与电力成本上升压缩矿企弹性',
+        family: 'crypto-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['MARA', 'RIOT', 'CLSK'],
+        archetypes: ['bitcoin-miner'],
+        cycle_families: ['crypto-cycle'],
+        keywords: ['bitcoin', 'btc', 'hashrate', 'mining difficulty', 'power costs', 'energy', 'production'],
+        event_signal_tags: ['crypto-drawdown', 'hashrate-profit-pressure'],
+        markers: ['比特币', '熊市', '算力', '矿业', '电力成本']
+    },
+    {
         id: 'crypto-post-rally-reset-2024',
         start: '2023-11-01',
         end: '2024-12-31',
@@ -721,6 +759,37 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         keywords: ['etf', 'bitcoin', 'btc', 'convertible', 'at-the-market', 'preferred stock', 'treasury'],
         event_signal_tags: ['crypto-drawdown', 'bitcoin-treasury-pressure'],
         markers: ['ETF', '比特币', '融资加仓', '高贝塔']
+    },
+    {
+        id: 'bitcoin-proxy-financing-reset-2025',
+        start: '2025-01-01',
+        end: '2025-12-31',
+        reason_zh: 'Strategy融资与持币结构重估：可转债、优先股与ATM融资安排放大对比特币回撤的高贝塔弹性',
+        family: 'crypto-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['MSTR'],
+        archetypes: ['bitcoin-leverage-proxy'],
+        subsectors: ['crypto-platform'],
+        cycle_families: ['crypto-cycle'],
+        keywords: ['convertible', 'preferred stock', 'at-the-market', 'share sale', 'treasury'],
+        event_signal_tags: ['bitcoin-treasury-pressure', 'treasury-financing-overhang'],
+        markers: ['可转债', '优先股', 'ATM', '融资']
+    },
+    {
+        id: 'bitcoin-miner-reset-2024',
+        start: '2023-11-01',
+        end: '2025-12-31',
+        reason_zh: '矿业 economics 重估：减半后区块奖励下降、算力竞争加剧与电力成本波动压缩矿企盈利弹性',
+        family: 'crypto-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['MARA', 'RIOT', 'CLSK'],
+        archetypes: ['bitcoin-miner'],
+        cycle_families: ['crypto-cycle'],
+        keywords: ['halving', 'hashrate', 'hashprice', 'power costs', 'energy curtailment', 'mining profitability'],
+        event_signal_tags: ['hashrate-profit-pressure', 'mining-economics-reset', 'crypto-drawdown'],
+        markers: ['减半', '算力', 'hashprice', '电力成本']
     },
     {
         id: 'optical-networking-downcycle-2023',
@@ -3757,8 +3826,20 @@ function buildCycleAwarePrimaryDriver(
     if (signalSet.has('crypto-banking-stress') && cycleFamily === 'crypto-cycle') {
         return `加密资金通道与流动性承压，放大 ${issuer} 风险溢价`;
     }
+    if (signalSet.has('bitcoin-etf-flow-reset') && archetype === 'bitcoin-leverage-proxy') {
+        return `${issuer} 现货ETF资金流变化重估其对比特币的高贝塔弹性`;
+    }
     if (signalSet.has('crypto-drawdown') && archetype === 'bitcoin-leverage-proxy') {
         return `${issuer} 比特币回撤与杠杆持币结构放大净值波动`;
+    }
+    if ((signalSet.has('bitcoin-treasury-pressure') || signalSet.has('treasury-financing-overhang')) && archetype === 'bitcoin-leverage-proxy') {
+        return `${issuer} 融资加仓与持币结构重估放大股价波动`;
+    }
+    if ((signalSet.has('crypto-drawdown') || signalSet.has('crypto-exchange-volume-reset')) && archetype === 'crypto-exchange-broker') {
+        return `${issuer} 交易量、币价与零售活跃度回落拖累收入预期`;
+    }
+    if (signalSet.has('crypto-drawdown') && archetype === 'bitcoin-miner') {
+        return `${issuer} 比特币回撤叠加 hashprice 走弱压缩挖矿盈利弹性`;
     }
     if (
         (signalSet.has('inventory-correction') || signalSet.has('pricing-pressure') || signalSet.has('demand-slowdown')) &&
@@ -3794,6 +3875,9 @@ function buildCycleAwarePrimaryDriver(
     if (signalSet.has('hashrate-profit-pressure') && archetype === 'bitcoin-miner') {
         return `${issuer} 挖矿难度与电力成本挤压盈利弹性`;
     }
+    if (signalSet.has('mining-economics-reset') && archetype === 'bitcoin-miner') {
+        return `${issuer} 减半后挖矿 economics 与 hashprice 走弱压制估值`;
+    }
     if ((signalSet.has('oil-price-reset') || signalSet.has('opec-supply-shift')) && cycleFamily === 'energy-oil-cycle') {
         return `${issuer} 油价、OPEC供给与全球需求预期重估盈利弹性`;
     }
@@ -3819,7 +3903,7 @@ function buildCycleAwarePrimaryDriver(
         case 'travel-leisure-cycle':
             return `${issuer} 出行与可选消费需求预期走弱`;
         case 'crypto-cycle':
-            return `${issuer} 加密资产价格与交易活跃度回落`;
+            return `${issuer} 加密资产价格、资金流与风险偏好回落`;
         default:
             break;
     }
@@ -3872,7 +3956,7 @@ function buildCycleAwarePrimaryDriver(
         case 'bitcoin-leverage-proxy':
             return `${issuer} 比特币价格波动与融资加仓结构放大股价弹性`;
         case 'bitcoin-miner':
-            return `${issuer} 比特币价格与风险偏好回落放大波动`;
+            return `${issuer} 比特币价格、算力 economics 与电力成本变化放大波动`;
         case 'memory':
             return `${issuer} 存储价格与库存周期下行压制盈利`;
         case 'foundry':
