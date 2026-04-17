@@ -4292,6 +4292,7 @@ function mapDrawdownAttributionRows(
                 primary_driver_type: heuristicReason.primary_driver_type,
                 primary_driver: heuristicReason.primary_driver,
                 secondary_driver: heuristicReason.secondary_driver,
+                primary_rule_id: heuristicReason.primary_rule_id,
                 reason_zh
             };
         })
