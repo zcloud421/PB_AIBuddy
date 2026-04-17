@@ -2941,8 +2941,8 @@ function extractNewsEventSignals(newsItems: NewsItem[]): string[] {
 function normalizeIssuerName(symbol: string, companyName: string | null): string {
     const upper = symbol.toUpperCase();
     const aliasMap: Partial<Record<string, string>> = {
-        GOOG: 'Google',
-        GOOGL: 'Google',
+        GOOG: 'Google (Class C)',
+        GOOGL: 'Google (Class A)',
         META: 'Meta',
         TSLA: 'Tesla',
         TSM: 'TSMC',
