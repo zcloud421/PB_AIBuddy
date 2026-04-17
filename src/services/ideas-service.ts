@@ -297,7 +297,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
     {
         id: 'tsla-demand-reset-2024',
         start: '2023-10-01',
-        end: '2025-12-31',
+        end: '2024-12-31',
         reason_zh: 'Tesla需求与利润率承压：价格战、交付放缓、欧洲销量疲弱与品牌扰动拖累估值',
         family: 'tesla-demand',
         driver_type: 'company',
@@ -308,6 +308,21 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         keywords: ['deliveries', 'registrations', 'europe', 'price cuts', 'margins', 'backlash', 'model y', 'sales plunge', 'demand slowdown'],
         event_signal_tags: ['demand-slowdown', 'pricing-pressure'],
         markers: ['Tesla', '销量', '价格战', '利润率', '欧洲']
+    },
+    {
+        id: 'tesla-europe-brand-reset-2025',
+        start: '2025-01-01',
+        end: '2025-05-31',
+        reason_zh: 'Tesla需求与利润率承压：欧洲销量走弱、中国价格战延续，品牌争议与交付放缓拖累估值',
+        family: 'tesla-demand',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['TSLA'],
+        subsectors: ['ev-oem'],
+        cycle_families: ['consumer-discretionary-cycle'],
+        keywords: ['europe', 'registrations', 'sales slump', 'brand damage', 'backlash', 'china-made', 'price war', 'deliveries'],
+        event_signal_tags: ['demand-slowdown', 'pricing-pressure', 'political-risk'],
+        markers: ['Tesla', '欧洲销量', '中国价格战', '品牌争议', '交付放缓']
     },
     {
         id: 'tesla-political-risk-2025',
@@ -323,6 +338,21 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         keywords: ['trump', 'musk', 'feud', 'government contracts', 'subsidies', 'deliveries'],
         event_signal_tags: ['political-risk', 'demand-slowdown'],
         markers: ['Tesla', '特朗普', '马斯克', '政策风险', '交付压力']
+    },
+    {
+        id: 'tesla-china-disruption-2022',
+        start: '2022-04-01',
+        end: '2022-12-31',
+        reason_zh: 'Tesla中国业务承压：上海封控扰动产能与交付，需求走弱及价格压力放大回撤',
+        family: 'tesla-demand',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['TSLA'],
+        subsectors: ['ev-oem'],
+        cycle_families: ['consumer-discretionary-cycle'],
+        keywords: ['shanghai', 'china', 'shutdown', 'deliveries', 'production', 'price cuts', 'demand worries'],
+        event_signal_tags: ['demand-slowdown', 'pricing-pressure'],
+        markers: ['Tesla', '上海', '封控', '交付', '价格压力']
     },
     {
         id: 'crypto-cycle-reset-2021',
