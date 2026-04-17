@@ -1,5 +1,5 @@
 import { fetchTickerMarketCap, fetchTickerReferenceSnapshot, MassiveDataFetcher } from '../data/massive-fetcher';
-import { fetchHistoricalStockNewsWindow, fetchStockNews, fetchStockNewsContext, filterRelevantNewsItems, getCompanyName } from '../data/news-fetcher';
+import { fetchHistoricalStockNewsBatch, fetchHistoricalStockNewsWindow, fetchStockNews, fetchStockNewsContext, filterRelevantNewsItems, getCompanyName } from '../data/news-fetcher';
 import {
     calculateHistoricalVolatility,
     approveStrikes,
@@ -90,7 +90,9 @@ const DRAWDOWN_ATTRIBUTION_TIMEOUT_MS = 1500;
 const DRAWDOWN_NEWS_ENRICH_TIMEOUT_MS = 900;
 const DRAWDOWN_LLM_ENRICH_TIMEOUT_MS = 450;
 const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
+const drawdownAttributionInFlight = new Map<string, Promise<DrawdownAttribution[]>>();
 
 type AttributionAppliesTo = 'all' | 'us_tech' | 'china_tech' | 'symbols_only';
 type AttributionDriverType = 'macro' | 'policy' | 'sector' | 'company' | 'geopolitical' | 'mixed';
@@ -289,11 +291,30 @@ const SYMBOL_CYCLE_FAMILY_MAP: Array<{ cycle_family: AttributionCycleFamily; sym
 const NEWS_EVENT_SIGNAL_KEYWORDS: Array<{ tag: string; keywords: string[] }> = [
     { tag: 'earnings-miss', keywords: ['earnings miss', 'missed estimates', 'misses estimates', 'results miss', 'revenue miss'] },
     { tag: 'guidance-cut', keywords: ['guidance cut', 'cuts forecast', 'withdraws guidance', 'outlook cut', 'lowers forecast', 'suspends guidance'] },
-    { tag: 'demand-slowdown', keywords: ['demand slowdown', 'weaker demand', 'demand weak', 'soft demand', 'sales plunge', 'registrations fell'] },
+    {
+        tag: 'demand-slowdown',
+        keywords: [
+            'demand slowdown',
+            'weaker demand',
+            'demand weak',
+            'soft demand',
+            'sales plunge',
+            'sales fall',
+            'sales fell',
+            'sales slump',
+            'registrations fell',
+            'deliveries down',
+            'deliveries are down',
+            'deliveries fall',
+            'deliveries fell',
+            'delivery miss',
+            'vehicle registrations'
+        ]
+    },
     { tag: 'inventory-correction', keywords: ['inventory correction', 'inventory', 'channel inventory', 'destocking'] },
-    { tag: 'pricing-pressure', keywords: ['price cuts', 'price war', 'margin pressure', 'pricing pressure'] },
+    { tag: 'pricing-pressure', keywords: ['price cuts', 'price cut', 'price war', 'margin pressure', 'pricing pressure', 'discounts'] },
     { tag: 'regulatory-probe', keywords: ['antitrust', 'doj', 'probe', 'investigation', 'lawsuit', 'regulatory'] },
-    { tag: 'search-disruption', keywords: ['ai search', 'safari', 'default search', 'search traffic', 'search queries'] },
+    { tag: 'search-disruption', keywords: ['ai search', 'safari', 'default search', 'search traffic', 'search queries', 'search declined', 'search volume declined'] },
     { tag: 'political-risk', keywords: ['trump', 'white house', 'subsidy', 'government contracts', 'political views', 'backlash'] },
     { tag: 'ceo-change', keywords: ['ceo steps down', 'ceo resigns', 'management change'] },
     { tag: 'accounting-issue', keywords: ['accounting', 'auditor', 'short report', 'fraud', 'restatement'] },
@@ -3599,52 +3620,99 @@ ${input.items.map((item, index) => {
     }
 }
 
-async function buildDrawdownAttributions(
+function mapDrawdownAttributionRows(
+    rows: Array<{
+        episode: ReturnType<typeof buildInteractiveDrawdownEpisodesForAttribution>[number];
+        heuristicReason: StructuredAttributionReason;
+    }>,
+    llmReasons = new Map<string, string>()
+): DrawdownAttribution[] {
+    return rows
+        .map(({ episode, heuristicReason }) => {
+            const llmReason = llmReasons.get(`${episode.peak_date}::${episode.trough_date}`);
+            const reason_zh =
+                llmReason && isRefinedReasonConsistent(llmReason, heuristicReason)
+                    ? llmReason
+                    : heuristicReason.reason_zh;
+
+            return {
+                ...episode,
+                business_archetype: heuristicReason.business_archetype,
+                subsector: heuristicReason.subsector,
+                cycle_family: heuristicReason.cycle_family,
+                event_signals: heuristicReason.event_signals,
+                event_signal_details: heuristicReason.event_signal_details,
+                reason_family: heuristicReason.reason_family,
+                background_regime: heuristicReason.background_regime,
+                primary_driver_type: heuristicReason.primary_driver_type,
+                primary_driver: heuristicReason.primary_driver,
+                secondary_driver: heuristicReason.secondary_driver,
+                reason_zh
+            };
+        })
+        .sort((left, right) => {
+            const leftPeakTime = new Date(left.peak_date).getTime();
+            const rightPeakTime = new Date(right.peak_date).getTime();
+            if (rightPeakTime !== leftPeakTime) {
+                return rightPeakTime - leftPeakTime;
+            }
+
+            const leftTroughTime = new Date(left.trough_date).getTime();
+            const rightTroughTime = new Date(right.trough_date).getTime();
+            if (rightTroughTime !== leftTroughTime) {
+                return rightTroughTime - leftTroughTime;
+            }
+
+            return left.max_drawdown_pct - right.max_drawdown_pct;
+        })
+        .map((item, index) => ({
+            ...item,
+            display_order: index
+        }));
+}
+
+async function buildEnrichedDrawdownAttributions(
+    cacheKey: string,
     symbol: string,
     companyName: string | null,
-    priceHistory: Array<{ date: string; close: number }>
+    episodes: ReturnType<typeof buildInteractiveDrawdownEpisodesForAttribution>
 ): Promise<DrawdownAttribution[]> {
-    const cacheKey = `${symbol.toUpperCase()}:${priceHistory[priceHistory.length - 1]?.date ?? 'na'}`;
-    const cached = drawdownAttributionCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-        return cached.value;
-    }
+    const enrichedKeys = new Set(
+        episodes
+            .slice(0, DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT)
+            .map((episode) => `${episode.peak_date}::${episode.trough_date}`)
+    );
+    const episodeWindows = episodes.map((episode) => ({
+        peak_date: episode.peak_date,
+        trough_date: episode.trough_date,
+        ...buildHistoricalNewsWindow(episode.trough_date)
+    }));
 
-    const episodes = buildInteractiveDrawdownEpisodesForAttribution(priceHistory);
-    const heuristicBaseline = episodes.map((episode) => ({
-        episode,
-        newsItems: [] as NewsItem[],
-        heuristicReason: chooseHeuristicAttributionReason(
+    const batchedNews = await fetchHistoricalStockNewsBatch(
+        symbol,
+        episodeWindows
+            .filter((window) => enrichedKeys.has(`${window.peak_date}::${window.trough_date}`))
+            .map(({ from, to }) => ({ from, to })),
+        companyName ?? undefined
+    );
+
+    const newsByEpisode = episodes.map((episode, index) => {
+        const window = episodeWindows[index];
+        const shouldEnrich = enrichedKeys.has(`${episode.peak_date}::${episode.trough_date}`);
+        const newsItems = shouldEnrich ? (batchedNews.get(`${window.from}:${window.to}`) ?? []) : [];
+        const heuristicReason = chooseHeuristicAttributionReason(
             symbol,
             companyName,
             episode.peak_date,
             episode.trough_date,
-            []
-        )
-    }));
-
-    const newsByEpisode = await withSoftTimeout(
-        Promise.all(
-            episodes.map(async (episode) => {
-                const window = buildHistoricalNewsWindow(episode.trough_date);
-                const newsItems = await fetchHistoricalStockNewsWindow(symbol, window.from, window.to, companyName ?? undefined);
-                const heuristicReason = chooseHeuristicAttributionReason(
-                    symbol,
-                    companyName,
-                    episode.peak_date,
-                    episode.trough_date,
-                    newsItems
-                );
-                return {
-                    episode,
-                    newsItems,
-                    heuristicReason
-                };
-            })
-        ),
-        heuristicBaseline,
-        DRAWDOWN_NEWS_ENRICH_TIMEOUT_MS
-    );
+            newsItems
+        );
+        return {
+            episode,
+            newsItems,
+            heuristicReason
+        };
+    });
 
     const llmReasons = await withSoftTimeout(
         refineDrawdownAttributionsWithLLM({
@@ -3670,54 +3738,77 @@ async function buildDrawdownAttributions(
         DRAWDOWN_LLM_ENRICH_TIMEOUT_MS
     );
 
-    const value = newsByEpisode.map(({ episode, heuristicReason }) => {
-        const llmReason = llmReasons.get(`${episode.peak_date}::${episode.trough_date}`);
-        const reason_zh =
-            llmReason && isRefinedReasonConsistent(llmReason, heuristicReason)
-                ? llmReason
-                : heuristicReason.reason_zh;
+    const value = mapDrawdownAttributionRows(
+        newsByEpisode.map(({ episode, heuristicReason }) => ({
+            episode,
+            heuristicReason
+        })),
+        llmReasons
+    );
 
-        return {
-            ...episode,
-            business_archetype: heuristicReason.business_archetype,
-            subsector: heuristicReason.subsector,
-            cycle_family: heuristicReason.cycle_family,
-            event_signals: heuristicReason.event_signals,
-            event_signal_details: heuristicReason.event_signal_details,
-            reason_family: heuristicReason.reason_family,
-            background_regime: heuristicReason.background_regime,
-            primary_driver_type: heuristicReason.primary_driver_type,
-            primary_driver: heuristicReason.primary_driver,
-            secondary_driver: heuristicReason.secondary_driver,
-            reason_zh
-        };
-    })
+    const hasEnrichedNews = newsByEpisode.some((item) => item.newsItems.length > 0);
+    if (hasEnrichedNews || llmReasons.size > 0) {
+        drawdownAttributionCache.set(cacheKey, {
+            expiresAt: Date.now() + DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS,
+            value
+        });
+    }
+
+    drawdownAttributionInFlight.delete(cacheKey);
+    return value;
+}
+
+async function buildDrawdownAttributions(
+    symbol: string,
+    companyName: string | null,
+    priceHistory: Array<{ date: string; close: number }>
+): Promise<DrawdownAttribution[]> {
+    const cacheKey = `${symbol.toUpperCase()}:${priceHistory[priceHistory.length - 1]?.date ?? 'na'}`;
+    const cached = drawdownAttributionCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+        return cached.value;
+    }
+
+    const episodes = buildInteractiveDrawdownEpisodesForAttribution(priceHistory)
+        .filter((episode) => Math.abs(episode.max_drawdown_pct) >= 10)
         .sort((left, right) => {
-            const leftPeakTime = new Date(left.peak_date).getTime();
             const rightPeakTime = new Date(right.peak_date).getTime();
+            const leftPeakTime = new Date(left.peak_date).getTime();
             if (rightPeakTime !== leftPeakTime) {
                 return rightPeakTime - leftPeakTime;
             }
 
-            const leftTroughTime = new Date(left.trough_date).getTime();
             const rightTroughTime = new Date(right.trough_date).getTime();
+            const leftTroughTime = new Date(left.trough_date).getTime();
             if (rightTroughTime !== leftTroughTime) {
                 return rightTroughTime - leftTroughTime;
             }
 
             return left.max_drawdown_pct - right.max_drawdown_pct;
-        })
-        .map((item, index) => ({
-            ...item,
-            display_order: index
-        }));
+        });
+    const heuristicBaseline = episodes.map((episode) => ({
+        episode,
+        heuristicReason: chooseHeuristicAttributionReason(
+            symbol,
+            companyName,
+            episode.peak_date,
+            episode.trough_date,
+            []
+        )
+    }));
+    const baselineValue = mapDrawdownAttributionRows(heuristicBaseline);
 
-    drawdownAttributionCache.set(cacheKey, {
-        expiresAt: Date.now() + DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS,
-        value
-    });
+    let inFlight = drawdownAttributionInFlight.get(cacheKey);
+    if (!inFlight) {
+        inFlight = buildEnrichedDrawdownAttributions(cacheKey, symbol, companyName, episodes)
+            .catch(() => baselineValue)
+            .finally(() => {
+                drawdownAttributionInFlight.delete(cacheKey);
+            });
+        drawdownAttributionInFlight.set(cacheKey, inFlight);
+    }
 
-    return value;
+    return withSoftTimeout(inFlight, baselineValue, DRAWDOWN_NEWS_ENRICH_TIMEOUT_MS);
 }
 
 function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>) {

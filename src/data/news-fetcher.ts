@@ -172,6 +172,7 @@ interface MassiveNewsItem {
 }
 
 interface MassiveNewsResponse {
+    next_url?: string;
     results?: MassiveNewsItem[];
 }
 
@@ -237,29 +238,59 @@ async function fetchNewsFromFinnhub(symbol: string, from?: string, to?: string):
 async function fetchNewsFromMassive(symbol: string, from?: string, to?: string): Promise<NewsItem[]> {
     try {
         const client = new MassiveClient();
-        const response = await client.get<MassiveNewsResponse>('/v2/reference/news', {
+        const collected: NewsItem[] = [];
+        let nextPath: string | null = '/v2/reference/news';
+        let nextParams: Record<string, string | number | boolean | undefined> | undefined = {
             ticker: symbol,
-            limit: 20,
+            limit: 50,
             order: 'desc',
             sort: 'published_utc',
             'published_utc.gte': from,
             'published_utc.lte': to
-        });
+        };
+        let pageCount = 0;
 
-        const items = Array.isArray(response.results) ? response.results : [];
-        return items
-            .filter((item) => typeof item.title === 'string' && typeof item.article_url === 'string' && typeof item.published_utc === 'string')
-            .map((item) => ({
-                title: item.title as string,
-                source: item.publisher?.name?.trim() || 'Massive',
-                url: item.article_url as string,
-                published_at: new Date(item.published_utc as string).toISOString()
-            }));
+        while (nextPath && pageCount < 2 && collected.length < 80) {
+            const response: MassiveNewsResponse = await client.get<MassiveNewsResponse>(nextPath, nextParams);
+            const items: MassiveNewsItem[] = Array.isArray(response.results) ? response.results : [];
+            collected.push(
+                ...items
+                    .filter((item: MassiveNewsItem) => typeof item.title === 'string' && typeof item.article_url === 'string' && typeof item.published_utc === 'string')
+                    .map((item: MassiveNewsItem) => ({
+                        title: item.title as string,
+                        source: item.publisher?.name?.trim() || 'Massive',
+                        url: item.article_url as string,
+                        published_at: new Date(item.published_utc as string).toISOString()
+                    }))
+            );
+
+            pageCount += 1;
+            if (!response.next_url) {
+                nextPath = null;
+                continue;
+            }
+
+            const nextUrl: URL = new URL(response.next_url);
+            nextPath = `${nextUrl.pathname}${nextUrl.search}`;
+            nextParams = undefined;
+        }
+
+        return collected;
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.warn(`[news-fetcher] Massive news fetch failed for ${symbol} (${message})`);
         return [];
     }
+}
+
+const HISTORICAL_NEWS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const HISTORICAL_NEWS_WINDOW_MERGE_GAP_DAYS = 45;
+const historicalNewsCache = new Map<string, { expiresAt: number; value: NewsItem[] }>();
+const historicalNewsInFlight = new Map<string, Promise<NewsItem[]>>();
+
+interface HistoricalNewsWindow {
+    from: string;
+    to: string;
 }
 
 export async function fetchStockNewsContext(
@@ -345,6 +376,86 @@ export async function fetchHistoricalStockNewsWindow(
     } catch {
         return [];
     }
+}
+
+export async function fetchHistoricalStockNewsBatch(
+    symbol: string,
+    windows: HistoricalNewsWindow[],
+    companyName?: string
+): Promise<Map<string, NewsItem[]>> {
+    const normalizedSymbol = symbol.toUpperCase();
+    const normalizedWindows = windows
+        .filter((window) => Boolean(window.from) && Boolean(window.to))
+        .map((window) => ({
+            from: window.from,
+            to: window.to
+        }))
+        .sort((left, right) => left.from.localeCompare(right.from));
+
+    if (normalizedWindows.length === 0) {
+        return new Map();
+    }
+
+    const mergedWindows = mergeHistoricalNewsWindows(normalizedWindows);
+    const mergedResults = new Map<string, NewsItem[]>();
+
+    for (const window of mergedWindows) {
+        const cacheKey = `${normalizedSymbol}:${window.from}:${window.to}`;
+        const cached = historicalNewsCache.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) {
+            mergedResults.set(cacheKey, cached.value);
+            continue;
+        }
+
+        let inFlight = historicalNewsInFlight.get(cacheKey);
+        if (!inFlight) {
+            inFlight = (async () => {
+                let rawItems = await fetchNewsFromMassive(normalizedSymbol, window.from, window.to);
+                if (rawItems.length === 0) {
+                    rawItems = await fetchNewsFromFinnhub(normalizedSymbol, window.from, window.to);
+                }
+
+                return sortHistoricalNewsItems(
+                    filterRelevantNewsItems(
+                        filterStaleEarningsHeadlines(dedupeNewsItems(rawItems), false),
+                        normalizedSymbol,
+                        companyName ?? getCompanyName(normalizedSymbol)
+                    )
+                );
+            })()
+                .finally(() => {
+                    historicalNewsInFlight.delete(cacheKey);
+                });
+            historicalNewsInFlight.set(cacheKey, inFlight);
+        }
+
+        const filteredItems = await inFlight;
+
+        mergedResults.set(cacheKey, filteredItems);
+        historicalNewsCache.set(cacheKey, {
+            expiresAt: Date.now() + HISTORICAL_NEWS_CACHE_TTL_MS,
+            value: filteredItems
+        });
+    }
+
+    const slicedResults = new Map<string, NewsItem[]>();
+    for (const window of normalizedWindows) {
+        const coveringWindow = mergedWindows.find((candidate) => candidate.from <= window.from && candidate.to >= window.to);
+        if (!coveringWindow) {
+            slicedResults.set(`${window.from}:${window.to}`, []);
+            continue;
+        }
+
+        const sourceItems = mergedResults.get(`${normalizedSymbol}:${coveringWindow.from}:${coveringWindow.to}`) ?? [];
+        slicedResults.set(
+            `${window.from}:${window.to}`,
+            sourceItems
+                .filter((item) => isNewsItemWithinWindow(item, window.from, window.to))
+                .slice(0, 8)
+        );
+    }
+
+    return slicedResults;
 }
 
 export async function fetchStockNews(symbol: string, companyName?: string): Promise<NewsItem[]> {
@@ -485,6 +596,57 @@ function dedupeNewsItems(items: NewsItem[]): NewsItem[] {
     }
 
     return deduped;
+}
+
+function mergeHistoricalNewsWindows(windows: HistoricalNewsWindow[]): HistoricalNewsWindow[] {
+    const merged: HistoricalNewsWindow[] = [];
+
+    for (const window of windows) {
+        const last = merged[merged.length - 1];
+        if (!last) {
+            merged.push({ ...window });
+            continue;
+        }
+
+        if (window.from <= addDaysIso(last.to, HISTORICAL_NEWS_WINDOW_MERGE_GAP_DAYS)) {
+            if (window.to > last.to) {
+                last.to = window.to;
+            }
+            continue;
+        }
+
+        merged.push({ ...window });
+    }
+
+    return merged;
+}
+
+function addDaysIso(dateIso: string, days: number): string {
+    const date = new Date(`${dateIso}T00:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + days);
+    return date.toISOString().slice(0, 10);
+}
+
+function isNewsItemWithinWindow(item: NewsItem, from: string, to: string): boolean {
+    const publishedDate = normalizePublishedDate(item.published_at);
+    if (!publishedDate) {
+        return false;
+    }
+
+    return publishedDate >= from && publishedDate <= to;
+}
+
+function normalizePublishedDate(value: string): string | null {
+    const parsed = Date.parse(value);
+    if (Number.isNaN(parsed)) {
+        return null;
+    }
+
+    return new Date(parsed).toISOString().slice(0, 10);
+}
+
+function sortHistoricalNewsItems(items: NewsItem[]): NewsItem[] {
+    return [...items].sort((left, right) => right.published_at.localeCompare(left.published_at));
 }
 
 export function filterRelevantNewsItems(items: NewsItem[], symbol: string, companyName?: string): NewsItem[] {
