@@ -97,7 +97,7 @@ const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
 const DRAWDOWN_PREWARM_COOLDOWN_MS = 30 * 60 * 1000;
 const DRAWDOWN_PREWARM_FRESHNESS_MS = 2 * 60 * 1000;
-const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 5;
+const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 6;
 const DRAWDOWN_TAIL_RISK_HISTORY_LIMIT = 1500;
 const DRAWDOWN_TAIL_RISK_LOOKBACK_DAYS = 365 * 5;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
@@ -357,7 +357,7 @@ const NEWS_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
     { tag: 'accounting-issue', keywords: ['accounting', 'auditor', 'short report', 'fraud', 'restatement'] },
     { tag: 'capex-reset', keywords: ['capex', 'capital expenditure', 'ai spending', 'spending plan'] },
     { tag: 'orders-slowdown', keywords: ['orders', 'bookings', 'backlog', 'order slowdown'] },
-    { tag: 'crypto-drawdown', keywords: ['bitcoin falls', 'crypto prices', 'token prices', 'trading volumes', 'volumes plunged', 'ether falls'] },
+    { tag: 'crypto-drawdown', keywords: ['bitcoin falls', 'bitcoin drops', 'btc falls', 'btc drops', 'crypto prices', 'token prices', 'trading volumes', 'volumes plunged', 'ether falls'] },
     { tag: 'crypto-banking-stress', keywords: ['silvergate', 'signature bank', 'crypto bank', 'banking rails'] }
 ];
 
@@ -443,7 +443,7 @@ const ARCHETYPE_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
     },
     {
         tag: 'bitcoin-treasury-pressure',
-        keywords: ['convertible notes', 'bitcoin treasury', 'leveraged bitcoin', 'btc holdings', 'digital asset holdings'],
+        keywords: ['convertible notes', 'convertible offering', 'preferred stock', 'at-the-market', 'share sale', 'bitcoin treasury', 'leveraged bitcoin', 'btc holdings', 'digital asset holdings'],
         archetypes: ['bitcoin-leverage-proxy']
     },
     {
@@ -650,8 +650,8 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         family: 'crypto-cycle',
         driver_type: 'sector',
         applies_to: 'symbols_only',
-        symbols: ['COIN', 'HOOD', 'MSTR'],
-        archetypes: ['crypto-exchange-broker', 'bitcoin-leverage-proxy'],
+        symbols: ['COIN', 'HOOD'],
+        archetypes: ['crypto-exchange-broker'],
         subsectors: ['crypto-platform'],
         cycle_families: ['crypto-cycle'],
         keywords: ['bitcoin', 'crypto', 'ether', 'trading volume', 'coinbase', 'token prices'],
@@ -675,6 +675,22 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['Silvergate', 'Signature', '加密银行', '资金通道']
     },
     {
+        id: 'bitcoin-proxy-reset-2021',
+        start: '2021-04-01',
+        end: '2022-12-31',
+        reason_zh: '比特币熊市与杠杆持币结构放大波动：币价下跌、风险偏好回落与融资压力压制Strategy估值',
+        family: 'crypto-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['MSTR'],
+        archetypes: ['bitcoin-leverage-proxy'],
+        subsectors: ['crypto-platform'],
+        cycle_families: ['crypto-cycle'],
+        keywords: ['bitcoin', 'btc', 'convertible', 'holdings', 'crypto'],
+        event_signal_tags: ['crypto-drawdown', 'bitcoin-treasury-pressure'],
+        markers: ['比特币', '杠杆持币', '融资压力', 'Strategy']
+    },
+    {
         id: 'crypto-post-rally-reset-2024',
         start: '2023-11-01',
         end: '2024-12-31',
@@ -682,13 +698,29 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         family: 'crypto-cycle',
         driver_type: 'sector',
         applies_to: 'symbols_only',
-        symbols: ['COIN', 'HOOD', 'MSTR'],
-        archetypes: ['crypto-exchange-broker', 'bitcoin-leverage-proxy'],
+        symbols: ['COIN', 'HOOD'],
+        archetypes: ['crypto-exchange-broker'],
         subsectors: ['crypto-platform'],
         cycle_families: ['crypto-cycle'],
         keywords: ['etf', 'bitcoin', 'crypto', 'trading volume', 'flows'],
         event_signal_tags: ['crypto-drawdown'],
         markers: ['ETF', '比特币', '交易量', '加密资产']
+    },
+    {
+        id: 'bitcoin-proxy-post-etf-volatility-2024',
+        start: '2023-11-01',
+        end: '2025-12-31',
+        reason_zh: '比特币杠杆代理高波动回撤：现货ETF资金流、融资加仓与持币结构放大Strategy对币价的高贝塔弹性',
+        family: 'crypto-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['MSTR'],
+        archetypes: ['bitcoin-leverage-proxy'],
+        subsectors: ['crypto-platform'],
+        cycle_families: ['crypto-cycle'],
+        keywords: ['etf', 'bitcoin', 'btc', 'convertible', 'at-the-market', 'preferred stock', 'treasury'],
+        event_signal_tags: ['crypto-drawdown', 'bitcoin-treasury-pressure'],
+        markers: ['ETF', '比特币', '融资加仓', '高贝塔']
     },
     {
         id: 'optical-networking-downcycle-2023',
@@ -3630,6 +3662,7 @@ function normalizeIssuerName(symbol: string, companyName: string | null): string
         TSM: 'TSMC',
         PDD: '拼多多',
         COIN: 'Coinbase',
+        MSTR: 'Strategy',
         MSFT: 'Microsoft',
         AAPL: 'Apple',
         AMZN: 'Amazon'
@@ -3723,6 +3756,9 @@ function buildCycleAwarePrimaryDriver(
     }
     if (signalSet.has('crypto-banking-stress') && cycleFamily === 'crypto-cycle') {
         return `加密资金通道与流动性承压，放大 ${issuer} 风险溢价`;
+    }
+    if (signalSet.has('crypto-drawdown') && archetype === 'bitcoin-leverage-proxy') {
+        return `${issuer} 比特币回撤与杠杆持币结构放大净值波动`;
     }
     if (
         (signalSet.has('inventory-correction') || signalSet.has('pricing-pressure') || signalSet.has('demand-slowdown')) &&
@@ -3834,6 +3870,7 @@ function buildCycleAwarePrimaryDriver(
         case 'crypto-exchange-broker':
             return `${issuer} 交易量与加密资产价格回落拖累收入预期`;
         case 'bitcoin-leverage-proxy':
+            return `${issuer} 比特币价格波动与融资加仓结构放大股价弹性`;
         case 'bitcoin-miner':
             return `${issuer} 比特币价格与风险偏好回落放大波动`;
         case 'memory':
