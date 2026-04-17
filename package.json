@@ -15,7 +15,8 @@
     "migrate": "ts-node src/scripts/migrate-add-narrative-columns.ts",
     "migrate:price": "ts-node src/scripts/migrate-price-context.ts",
     "backfill:risk-reward": "ts-node src/scripts/backfill-risk-reward-score.ts",
-    "debug:drawdown": "ts-node src/scripts/debug-drawdown-threshold.ts"
+    "debug:drawdown": "ts-node src/scripts/debug-drawdown-threshold.ts",
+    "attrib:eval": "ts-node src/scripts/evaluate-drawdown-attribution.ts"
   },
   "dependencies": {
     "axios": "^1.13.6",
