@@ -3358,7 +3358,26 @@ async function buildDrawdownAttributions(
             secondary_driver: heuristicReason.secondary_driver,
             reason_zh
         };
-    });
+    })
+        .sort((left, right) => {
+            const leftPeakTime = new Date(left.peak_date).getTime();
+            const rightPeakTime = new Date(right.peak_date).getTime();
+            if (rightPeakTime !== leftPeakTime) {
+                return rightPeakTime - leftPeakTime;
+            }
+
+            const leftTroughTime = new Date(left.trough_date).getTime();
+            const rightTroughTime = new Date(right.trough_date).getTime();
+            if (rightTroughTime !== leftTroughTime) {
+                return rightTroughTime - leftTroughTime;
+            }
+
+            return left.max_drawdown_pct - right.max_drawdown_pct;
+        })
+        .map((item, index) => ({
+            ...item,
+            display_order: index
+        }));
 
     drawdownAttributionCache.set(cacheKey, {
         expiresAt: Date.now() + DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS,
