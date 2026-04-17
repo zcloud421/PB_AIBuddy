@@ -97,12 +97,57 @@ type AttributionDriverType = 'macro' | 'policy' | 'sector' | 'company' | 'geopol
 type AttributionCycleFamily =
     | 'banking-credit-cycle'
     | 'energy-oil-cycle'
+    | 'healthcare-cost-cycle'
     | 'industrial-capex-cycle'
     | 'materials-cycle'
     | 'consumer-discretionary-cycle'
     | 'semiconductor-cycle'
     | 'travel-leisure-cycle'
     | 'crypto-cycle';
+
+type AttributionBusinessArchetype =
+    | 'money-center-bank'
+    | 'investment-bank-broker'
+    | 'global-bank'
+    | 'managed-care'
+    | 'integrated-oil-major'
+    | 'exploration-production'
+    | 'oil-services'
+    | 'industrial-machinery'
+    | 'diversified-industrial'
+    | 'airline'
+    | 'aerospace'
+    | 'metals-mining'
+    | 'chemicals-materials'
+    | 'construction-aggregates'
+    | 'home-improvement-retail'
+    | 'consumer-brand'
+    | 'restaurant-franchise'
+    | 'media-parks'
+    | 'online-travel'
+    | 'off-price-retail'
+    | 'used-auto-retail'
+    | 'ad-platform-internet'
+    | 'ev-oem'
+    | 'crypto-exchange-broker'
+    | 'bitcoin-leverage-proxy'
+    | 'bitcoin-miner'
+    | 'memory'
+    | 'foundry'
+    | 'analog-chip'
+    | 'chip-equipment'
+    | 'broad-semiconductor'
+    | 'ai-infrastructure'
+    | 'optical-networking'
+    | 'casino-leisure'
+    | 'cruise-line'
+    | 'experiential-reit';
+
+interface EventSignalDetail {
+    tag: string;
+    matched_keywords: string[];
+    source_count: number;
+}
 
 interface AttributionMacroRule {
     id: string;
@@ -113,6 +158,7 @@ interface AttributionMacroRule {
     driver_type: AttributionDriverType;
     applies_to: AttributionAppliesTo;
     symbols?: string[];
+    archetypes?: AttributionBusinessArchetype[];
     subsectors?: string[];
     cycle_families?: AttributionCycleFamily[];
     keywords?: string[];
@@ -126,9 +172,11 @@ interface RankedAttributionRule {
 }
 
 interface StructuredAttributionReason {
+    business_archetype: AttributionBusinessArchetype | null;
     subsector: string | null;
     cycle_family: AttributionCycleFamily | null;
     event_signals: string[];
+    event_signal_details: EventSignalDetail[];
     reason_family: string | null;
     background_regime: string | null;
     primary_driver_type: AttributionDriverType | null;
@@ -160,10 +208,53 @@ const SYMBOL_SUBSECTOR_MAP: Array<{ subsector: string; symbols: string[] }> = [
     { subsector: 'semiconductor', symbols: ['AMD', 'INTC', 'AVGO', 'MRVL', 'NVDA', 'MU', 'TSM'] }
 ];
 
+const SYMBOL_ARCHETYPE_MAP: Array<{ archetype: AttributionBusinessArchetype; symbols: string[] }> = [
+    { archetype: 'money-center-bank', symbols: ['JPM', 'BAC', 'C', 'WFC'] },
+    { archetype: 'investment-bank-broker', symbols: ['GS', 'MS', 'SCHW', 'IBKR'] },
+    { archetype: 'global-bank', symbols: ['HSBC'] },
+    { archetype: 'managed-care', symbols: ['UNH', 'HUM', 'ELV', 'CI', 'CVS'] },
+    { archetype: 'integrated-oil-major', symbols: ['XOM', 'CVX'] },
+    { archetype: 'exploration-production', symbols: ['COP', 'EOG', 'OXY'] },
+    { archetype: 'oil-services', symbols: ['SLB'] },
+    { archetype: 'industrial-machinery', symbols: ['CAT', 'DE', 'CMI', 'DOV'] },
+    { archetype: 'diversified-industrial', symbols: ['GE', 'GEV', 'HON', 'MMM'] },
+    { archetype: 'airline', symbols: ['UAL', 'DAL'] },
+    { archetype: 'aerospace', symbols: ['BA'] },
+    { archetype: 'metals-mining', symbols: ['FCX', 'AA', 'NUE'] },
+    { archetype: 'chemicals-materials', symbols: ['DOW'] },
+    { archetype: 'construction-aggregates', symbols: ['VMC'] },
+    { archetype: 'home-improvement-retail', symbols: ['HD', 'LOW'] },
+    { archetype: 'restaurant-franchise', symbols: ['MCD'] },
+    { archetype: 'consumer-brand', symbols: ['NKE', 'BBWI'] },
+    { archetype: 'media-parks', symbols: ['DIS'] },
+    { archetype: 'online-travel', symbols: ['ABNB', 'BKNG'] },
+    { archetype: 'off-price-retail', symbols: ['TJX'] },
+    { archetype: 'used-auto-retail', symbols: ['KMX'] },
+    { archetype: 'ad-platform-internet', symbols: ['GOOG', 'GOOGL', 'META', 'SNAP', 'PINS'] },
+    { archetype: 'ev-oem', symbols: ['TSLA', 'GM', 'F', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI'] },
+    { archetype: 'crypto-exchange-broker', symbols: ['COIN', 'HOOD'] },
+    { archetype: 'bitcoin-leverage-proxy', symbols: ['MSTR'] },
+    { archetype: 'bitcoin-miner', symbols: ['MARA', 'CLSK', 'RIOT'] },
+    { archetype: 'memory', symbols: ['MU', 'WDC', 'STX'] },
+    { archetype: 'foundry', symbols: ['TSM'] },
+    { archetype: 'analog-chip', symbols: ['TXN', 'QCOM'] },
+    { archetype: 'chip-equipment', symbols: ['AMAT', 'LRCX'] },
+    { archetype: 'broad-semiconductor', symbols: ['AMD', 'INTC', 'AVGO', 'MRVL', 'NVDA'] },
+    { archetype: 'ai-infrastructure', symbols: ['VRT', 'SMCI', 'DELL', 'ANET'] },
+    { archetype: 'optical-networking', symbols: ['LITE', 'CIEN', 'COHR', 'AAOI', 'INFN'] },
+    { archetype: 'casino-leisure', symbols: ['LVS', 'MGM'] },
+    { archetype: 'cruise-line', symbols: ['NCLH'] },
+    { archetype: 'experiential-reit', symbols: ['EPR'] }
+];
+
 const SYMBOL_CYCLE_FAMILY_MAP: Array<{ cycle_family: AttributionCycleFamily; symbols: string[] }> = [
     {
         cycle_family: 'banking-credit-cycle',
-        symbols: ['JPM', 'BAC', 'C', 'WFC', 'GS', 'MS', 'HSBC', 'UNH', 'HUM', 'ELV', 'CI', 'CVS']
+        symbols: ['JPM', 'BAC', 'C', 'WFC', 'GS', 'MS', 'HSBC']
+    },
+    {
+        cycle_family: 'healthcare-cost-cycle',
+        symbols: ['UNH', 'HUM', 'ELV', 'CI', 'CVS']
     },
     {
         cycle_family: 'energy-oil-cycle',
@@ -222,6 +313,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['META'],
+        archetypes: ['ad-platform-internet'],
         subsectors: ['ad-platform-internet'],
         keywords: ['att', 'privacy', 'ad', 'advertising', 'metaverse', 'reality labs', 'tiktok', 'daily users'],
         event_signal_tags: ['regulatory-probe'],
@@ -236,6 +328,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'sector',
         applies_to: 'symbols_only',
         symbols: ['AMD', 'INTC'],
+        archetypes: ['broad-semiconductor'],
         subsectors: ['semiconductor'],
         cycle_families: ['semiconductor-cycle'],
         keywords: ['pc', 'inventory', 'client', 'outlook', 'guidance', 'demand', 'slowdown'],
@@ -251,6 +344,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'sector',
         applies_to: 'symbols_only',
         symbols: ['MU', 'WDC', 'STX'],
+        archetypes: ['memory'],
         subsectors: ['memory'],
         cycle_families: ['semiconductor-cycle'],
         keywords: ['dram', 'nand', 'memory', 'inventory', 'pricing', 'oversupply'],
@@ -266,6 +360,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['TSLA'],
+        archetypes: ['ev-oem'],
         subsectors: ['ev-oem'],
         cycle_families: ['consumer-discretionary-cycle'],
         keywords: ['musk', 'sell', 'share sale', 'twitter poll', 'valuation', 'delivery'],
@@ -303,6 +398,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['TSLA'],
+        archetypes: ['ev-oem'],
         subsectors: ['ev-oem'],
         cycle_families: ['consumer-discretionary-cycle'],
         keywords: ['deliveries', 'registrations', 'europe', 'price cuts', 'margins', 'backlash', 'model y', 'sales plunge', 'demand slowdown'],
@@ -318,6 +414,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['TSLA'],
+        archetypes: ['ev-oem'],
         subsectors: ['ev-oem'],
         cycle_families: ['consumer-discretionary-cycle'],
         keywords: ['europe', 'registrations', 'sales slump', 'brand damage', 'backlash', 'china-made', 'price war', 'deliveries'],
@@ -333,6 +430,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['TSLA'],
+        archetypes: ['ev-oem'],
         subsectors: ['ev-oem'],
         cycle_families: ['consumer-discretionary-cycle'],
         keywords: ['trump', 'musk', 'feud', 'government contracts', 'subsidies', 'deliveries'],
@@ -363,6 +461,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'sector',
         applies_to: 'symbols_only',
         symbols: ['COIN', 'HOOD', 'MSTR'],
+        archetypes: ['crypto-exchange-broker', 'bitcoin-leverage-proxy'],
         subsectors: ['crypto-platform'],
         cycle_families: ['crypto-cycle'],
         keywords: ['bitcoin', 'crypto', 'ether', 'trading volume', 'coinbase', 'token prices'],
@@ -378,6 +477,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'sector',
         applies_to: 'symbols_only',
         symbols: ['COIN', 'HOOD', 'MSTR'],
+        archetypes: ['crypto-exchange-broker', 'bitcoin-leverage-proxy'],
         subsectors: ['crypto-platform'],
         cycle_families: ['crypto-cycle'],
         keywords: ['silvergate', 'signature bank', 'crypto banking', 'usdc'],
@@ -393,6 +493,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'sector',
         applies_to: 'symbols_only',
         symbols: ['COIN', 'HOOD', 'MSTR'],
+        archetypes: ['crypto-exchange-broker', 'bitcoin-leverage-proxy'],
         subsectors: ['crypto-platform'],
         cycle_families: ['crypto-cycle'],
         keywords: ['etf', 'bitcoin', 'crypto', 'trading volume', 'flows'],
@@ -408,6 +509,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'sector',
         applies_to: 'symbols_only',
         symbols: ['LITE', 'CIEN', 'COHR', 'AAOI', 'INFN'],
+        archetypes: ['optical-networking'],
         subsectors: ['optical-networking'],
         cycle_families: ['semiconductor-cycle'],
         keywords: ['inventory correction', 'telecom', 'networking', 'datacom', 'optical', 'carrier'],
@@ -423,6 +525,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['GOOG', 'GOOGL'],
+        archetypes: ['ad-platform-internet'],
         subsectors: ['ad-platform-internet'],
         keywords: ['cloud', 'capex', 'ai spending', 'revenue miss', 'margin'],
         event_signal_tags: ['capex-reset', 'earnings-miss'],
@@ -437,6 +540,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'sector',
         applies_to: 'symbols_only',
         symbols: ['TSM'],
+        archetypes: ['foundry'],
         subsectors: ['semiconductor'],
         cycle_families: ['semiconductor-cycle'],
         keywords: ['inventory', 'smartphone', 'pc', 'chip demand', 'fab', 'wafer'],
@@ -452,6 +556,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'sector',
         applies_to: 'symbols_only',
         symbols: ['TSM'],
+        archetypes: ['foundry'],
         subsectors: ['semiconductor'],
         cycle_families: ['semiconductor-cycle'],
         keywords: ['ai demand', 'advanced packaging', 'tariff', 'export controls', 'foundry'],
@@ -467,6 +572,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['META'],
+        archetypes: ['ad-platform-internet'],
         subsectors: ['ad-platform-internet'],
         keywords: ['capex', 'ai spending', 'ad revenue', 'reels', 'monetization'],
         event_signal_tags: ['capex-reset'],
@@ -493,6 +599,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['UNH'],
+        archetypes: ['managed-care'],
         subsectors: ['managed-care'],
         keywords: ['medicare advantage', 'medical costs', 'guidance', 'doj', 'probe', 'billing', 'ceo'],
         event_signal_tags: ['guidance-cut', 'regulatory-probe', 'ceo-change'],
@@ -507,6 +614,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['GOOG', 'GOOGL'],
+        archetypes: ['ad-platform-internet'],
         subsectors: ['ad-platform-internet'],
         keywords: ['search', 'safari', 'apple', 'eddie cue', 'antitrust', 'ai search', 'default'],
         event_signal_tags: ['search-disruption', 'regulatory-probe'],
@@ -2990,15 +3098,66 @@ function inferSymbolCycleFamily(symbol: string): AttributionCycleFamily | null {
     return null;
 }
 
-function extractNewsEventSignals(newsItems: NewsItem[]): string[] {
+function inferSymbolBusinessArchetype(
+    symbol: string,
+    companyName: string | null,
+    newsItems: NewsItem[]
+): AttributionBusinessArchetype | null {
+    const upper = symbol.toUpperCase();
+    for (const entry of SYMBOL_ARCHETYPE_MAP) {
+        if (entry.symbols.includes(upper)) {
+            return entry.archetype;
+        }
+    }
+
+    const text = `${companyName ?? ''} ${newsItems.map((item) => item.title).join(' ')}`.toLowerCase();
+    if (text.includes('medicare advantage') || text.includes('health insurer')) return 'managed-care';
+    if (text.includes('oil') || text.includes('opec') || text.includes('barrels')) return 'integrated-oil-major';
+    if (text.includes('exploration') || text.includes('permian')) return 'exploration-production';
+    if (text.includes('data center') || text.includes('cooling') || text.includes('power infrastructure')) return 'ai-infrastructure';
+    if (text.includes('optical') || text.includes('networking') || text.includes('telecom')) return 'optical-networking';
+    if (text.includes('search') || text.includes('browser') || text.includes('advertising')) return 'ad-platform-internet';
+    if (text.includes('bitcoin miner') || text.includes('hashrate') || text.includes('mining rig')) return 'bitcoin-miner';
+    if (text.includes('bitcoin treasury') || text.includes('microstrategy')) return 'bitcoin-leverage-proxy';
+    if (text.includes('exchange') || text.includes('brokerage') || text.includes('trading volume')) return 'crypto-exchange-broker';
+    if (text.includes('ev') || text.includes('electric vehicle') || text.includes('model y')) return 'ev-oem';
+    if (text.includes('dram') || text.includes('nand') || text.includes('memory')) return 'memory';
+    if (text.includes('foundry') || text.includes('wafer')) return 'foundry';
+    if (text.includes('equipment') || text.includes('fab tool')) return 'chip-equipment';
+    if (text.includes('semiconductor') || text.includes('chip')) return 'broad-semiconductor';
+    if (text.includes('bank') || text.includes('deposit')) return 'money-center-bank';
+    if (text.includes('airline') || text.includes('air travel')) return 'airline';
+    if (text.includes('cruise')) return 'cruise-line';
+    return null;
+}
+
+function extractNewsEventSignalDetails(newsItems: NewsItem[]): EventSignalDetail[] {
     if (newsItems.length === 0) {
         return [];
     }
 
-    const text = newsItems.map((item) => item.title.toLowerCase()).join(' ');
     return NEWS_EVENT_SIGNAL_KEYWORDS
-        .filter((entry) => entry.keywords.some((keyword) => text.includes(keyword.toLowerCase())))
-        .map((entry) => entry.tag);
+        .map((entry) => {
+            const matchedKeywords = entry.keywords.filter((keyword) =>
+                newsItems.some((item) => item.title.toLowerCase().includes(keyword.toLowerCase()))
+            );
+            if (matchedKeywords.length === 0) {
+                return null;
+            }
+            const sourceCount = newsItems.filter((item) =>
+                matchedKeywords.some((keyword) => item.title.toLowerCase().includes(keyword.toLowerCase()))
+            ).length;
+            return {
+                tag: entry.tag,
+                matched_keywords: matchedKeywords,
+                source_count: sourceCount
+            } satisfies EventSignalDetail;
+        })
+        .filter((entry): entry is EventSignalDetail => entry !== null);
+}
+
+function extractNewsEventSignals(newsItems: NewsItem[]): string[] {
+    return extractNewsEventSignalDetails(newsItems).map((entry) => entry.tag);
 }
 
 function normalizeIssuerName(symbol: string, companyName: string | null): string {
@@ -3035,6 +3194,129 @@ function buildFallbackAttributionReason(symbol: string, companyName: string | nu
     const label = `${new Date(`${peakDate}T00:00:00Z`).getUTCFullYear()}年${new Date(`${peakDate}T00:00:00Z`).getUTCMonth() + 1}月`;
     const issuer = normalizeIssuerName(symbol, companyName);
     return `${label} ${issuer} 暂无明确单一宏观主因，回撤更可能由个股基本面、板块节奏或市场风险偏好共同驱动`;
+}
+
+function buildCycleAwarePrimaryDriver(
+    issuer: string,
+    archetype: AttributionBusinessArchetype | null,
+    cycleFamily: AttributionCycleFamily | null,
+    eventSignals: string[]
+): string {
+    const signalSet = new Set(eventSignals);
+
+    if (signalSet.has('guidance-cut')) return `${issuer} 指引与增长预期转弱`;
+    if (signalSet.has('earnings-miss')) return `${issuer} 财报表现低于预期`;
+    if (signalSet.has('ceo-change')) return `${issuer} 管理层变动引发执行不确定性`;
+    if (signalSet.has('accounting-issue')) return `${issuer} 财务透明度与会计风险承压`;
+    if (signalSet.has('regulatory-probe')) return `${issuer} 监管与法律风险升温`;
+    if (signalSet.has('search-disruption') && archetype === 'ad-platform-internet') {
+        return `${issuer} 搜索与广告主业面临 AI 替代压力`;
+    }
+    if (signalSet.has('political-risk') && archetype === 'ev-oem') {
+        return `${issuer} 品牌与政策风险抬升估值波动`;
+    }
+    if (signalSet.has('pricing-pressure') && archetype === 'ev-oem') {
+        return `${issuer} 需求放缓与价格竞争压缩盈利弹性`;
+    }
+    if (signalSet.has('demand-slowdown') && archetype === 'ev-oem') {
+        return `${issuer} 交付放缓与终端需求疲弱拖累估值`;
+    }
+    if (signalSet.has('crypto-banking-stress') && cycleFamily === 'crypto-cycle') {
+        return `加密资金通道与流动性承压，放大 ${issuer} 风险溢价`;
+    }
+    if (
+        (signalSet.has('inventory-correction') || signalSet.has('pricing-pressure') || signalSet.has('demand-slowdown')) &&
+        cycleFamily === 'semiconductor-cycle'
+    ) {
+        if (archetype === 'memory') return '存储芯片价格与库存周期下行拖累盈利预期';
+        if (archetype === 'foundry') return `${issuer} 终端需求疲弱与库存调整压制先进制程预期`;
+        if (archetype === 'chip-equipment') return `${issuer} 晶圆厂资本开支与设备订单节奏走弱`;
+        if (archetype === 'optical-networking') return `${issuer} 光通信与网络客户去库存压制需求预期`;
+        return `${issuer} 半导体景气与库存周期回落压制估值`;
+    }
+    if (signalSet.has('orders-slowdown') && cycleFamily === 'industrial-capex-cycle') {
+        return `${issuer} 订单与资本开支节奏放缓`;
+    }
+
+    switch (cycleFamily) {
+        case 'banking-credit-cycle':
+            return `${issuer} 利率、信贷质量与资本市场活跃度变化压制估值`;
+        case 'healthcare-cost-cycle':
+            return `${issuer} 医疗赔付率与成本趋势上行压制盈利预期`;
+        case 'energy-oil-cycle':
+            return `${issuer} 油价与全球需求预期波动重定价盈利`;
+        case 'industrial-capex-cycle':
+            return `${issuer} 制造业与资本开支周期转弱`;
+        case 'materials-cycle':
+            return `${issuer} 大宗商品与工业需求预期走弱`;
+        case 'consumer-discretionary-cycle':
+            return `${issuer} 终端需求与价格竞争压制估值`;
+        case 'semiconductor-cycle':
+            return `${issuer} 半导体景气与科技资本开支周期波动`;
+        case 'travel-leisure-cycle':
+            return `${issuer} 出行与可选消费需求预期走弱`;
+        case 'crypto-cycle':
+            return `${issuer} 加密资产价格与交易活跃度回落`;
+        default:
+            break;
+    }
+
+    switch (archetype) {
+        case 'money-center-bank':
+        case 'investment-bank-broker':
+        case 'global-bank':
+            return `${issuer} 资本市场与信贷周期变化压制估值`;
+        case 'managed-care':
+            return `${issuer} 医疗成本与赔付率上行压制盈利预期`;
+        case 'integrated-oil-major':
+        case 'exploration-production':
+        case 'oil-services':
+            return `${issuer} 油气价格与投资周期波动重定价盈利`;
+        case 'industrial-machinery':
+        case 'diversified-industrial':
+        case 'aerospace':
+        case 'airline':
+            return `${issuer} 工业订单与出行需求节奏走弱`;
+        case 'metals-mining':
+        case 'chemicals-materials':
+        case 'construction-aggregates':
+            return `${issuer} 工业需求与商品价格预期回落`;
+        case 'home-improvement-retail':
+        case 'consumer-brand':
+        case 'restaurant-franchise':
+        case 'media-parks':
+        case 'online-travel':
+        case 'off-price-retail':
+        case 'used-auto-retail':
+            return `${issuer} 终端消费与可选支出需求走弱`;
+        case 'ad-platform-internet':
+            return `${issuer} 广告、流量与平台主业预期承压`;
+        case 'ev-oem':
+            return `${issuer} 需求、价格与品牌因素共同压制盈利弹性`;
+        case 'crypto-exchange-broker':
+            return `${issuer} 交易量与加密资产价格回落拖累收入预期`;
+        case 'bitcoin-leverage-proxy':
+        case 'bitcoin-miner':
+            return `${issuer} 比特币价格与风险偏好回落放大波动`;
+        case 'memory':
+            return `${issuer} 存储价格与库存周期下行压制盈利`;
+        case 'foundry':
+            return `${issuer} 终端需求与制程利用率预期波动`;
+        case 'analog-chip':
+        case 'chip-equipment':
+        case 'broad-semiconductor':
+            return `${issuer} 半导体需求与资本开支周期波动`;
+        case 'ai-infrastructure':
+            return `${issuer} AI 基建订单与资本开支节奏重估`;
+        case 'optical-networking':
+            return `${issuer} 光通信需求与客户库存调整承压`;
+        case 'casino-leisure':
+        case 'cruise-line':
+        case 'experiential-reit':
+            return `${issuer} 旅游与休闲消费需求预期波动`;
+        default:
+            return `${issuer} 基本面或板块节奏承压`;
+    }
 }
 
 function getRuleSpecificityScore(rule: AttributionMacroRule, symbol: string): number {
@@ -3075,6 +3357,7 @@ function rankAttributionRules(
     troughDate: string,
     newsItems: NewsItem[]
 ): RankedAttributionRule[] {
+    const inferredArchetype = inferSymbolBusinessArchetype(symbol, companyName, newsItems);
     const inferredSubsector = inferSymbolSubsector(symbol, companyName, newsItems);
     const inferredCycleFamily = inferSymbolCycleFamily(symbol);
     const eventSignals = new Set(extractNewsEventSignals(newsItems));
@@ -3085,6 +3368,7 @@ function rankAttributionRules(
             const specificityScore = getRuleSpecificityScore(rule, symbol);
             const keywordScore = countKeywordHits(newsItems, rule.keywords) * 8;
             const driverScore = getDriverPriority(rule);
+            const archetypeScore = inferredArchetype && rule.archetypes?.includes(inferredArchetype) ? 16 : 0;
             const subsectorScore = inferredSubsector && rule.subsectors?.includes(inferredSubsector) ? 18 : 0;
             const cycleScore = inferredCycleFamily && rule.cycle_families?.includes(inferredCycleFamily) ? 14 : 0;
             const signalScore = (rule.event_signal_tags ?? []).reduce(
@@ -3093,7 +3377,7 @@ function rankAttributionRules(
             );
             return {
                 rule,
-                score: specificityScore + keywordScore + driverScore + subsectorScore + cycleScore + signalScore
+                score: specificityScore + keywordScore + driverScore + archetypeScore + subsectorScore + cycleScore + signalScore
             };
         })
         .sort((left, right) => right.score - left.score);
@@ -3103,24 +3387,30 @@ function buildStructuredFallbackAttribution(
     symbol: string,
     companyName: string | null,
     peakDate: string,
+    businessArchetype: AttributionBusinessArchetype | null,
     subsector: string | null,
-    eventSignals: string[]
+    eventSignalDetails: EventSignalDetail[]
 ): StructuredAttributionReason {
     const issuer = normalizeIssuerName(symbol, companyName);
     const cycleFamily = inferSymbolCycleFamily(symbol);
-    return {
+    const eventSignals = eventSignalDetails.map((item) => item.tag);
+    const structured: StructuredAttributionReason = {
+        business_archetype: businessArchetype,
         subsector,
         cycle_family: cycleFamily,
         event_signals: eventSignals,
+        event_signal_details: eventSignalDetails,
         reason_family: 'company-fundamental',
         background_regime: null,
         primary_driver_type: 'company',
-        primary_driver: `${issuer} 基本面或板块节奏承压`,
+        primary_driver: buildCycleAwarePrimaryDriver(issuer, businessArchetype, cycleFamily, eventSignals),
         secondary_driver: '市场风险偏好回落放大跌幅',
         reason_zh: buildFallbackAttributionReason(symbol, companyName, peakDate),
         primary_rule_id: null,
         background_rule_id: null
     };
+    structured.reason_zh = renderStructuredAttributionReason(structured);
+    return structured;
 }
 
 function renderStructuredAttributionReason(reason: StructuredAttributionReason): string {
@@ -3146,13 +3436,22 @@ function chooseHeuristicAttributionReason(
     troughDate: string,
     newsItems: NewsItem[]
 ): StructuredAttributionReason {
+    const inferredArchetype = inferSymbolBusinessArchetype(symbol, companyName, newsItems);
     const inferredSubsector = inferSymbolSubsector(symbol, companyName, newsItems);
     const inferredCycleFamily = inferSymbolCycleFamily(symbol);
-    const eventSignals = extractNewsEventSignals(newsItems);
+    const eventSignalDetails = extractNewsEventSignalDetails(newsItems);
+    const eventSignals = eventSignalDetails.map((item) => item.tag);
     const candidates = rankAttributionRules(symbol, companyName, peakDate, troughDate, newsItems);
     const primary = candidates[0]?.rule;
     if (!primary) {
-        return buildStructuredFallbackAttribution(symbol, companyName, peakDate, inferredSubsector, eventSignals);
+        return buildStructuredFallbackAttribution(
+            symbol,
+            companyName,
+            peakDate,
+            inferredArchetype,
+            inferredSubsector,
+            eventSignalDetails
+        );
     }
 
     const background = candidates.find(
@@ -3162,9 +3461,11 @@ function chooseHeuristicAttributionReason(
     )?.rule;
 
     const structured: StructuredAttributionReason = {
+        business_archetype: inferredArchetype,
         subsector: inferredSubsector,
         cycle_family: inferredCycleFamily,
         event_signals: eventSignals,
+        event_signal_details: eventSignalDetails,
         reason_family: primary.family,
         background_regime:
             ['macro', 'policy', 'geopolitical'].includes(primary.driver_type) ? primary.reason_zh : background?.reason_zh ?? null,
@@ -3378,9 +3679,11 @@ async function buildDrawdownAttributions(
 
         return {
             ...episode,
+            business_archetype: heuristicReason.business_archetype,
             subsector: heuristicReason.subsector,
             cycle_family: heuristicReason.cycle_family,
             event_signals: heuristicReason.event_signals,
+            event_signal_details: heuristicReason.event_signal_details,
             reason_family: heuristicReason.reason_family,
             background_regime: heuristicReason.background_regime,
             primary_driver_type: heuristicReason.primary_driver_type,
