@@ -1,5 +1,5 @@
 import { fetchTickerMarketCap, fetchTickerReferenceSnapshot, MassiveDataFetcher } from '../data/massive-fetcher';
-import { fetchHistoricalStockNewsBatch, fetchHistoricalStockNewsWindow, fetchStockNews, fetchStockNewsContext, filterRelevantNewsItems, getCompanyName } from '../data/news-fetcher';
+import { fetchHistoricalStockNewsBatch, fetchStockNews, fetchStockNewsContext, filterRelevantNewsItems, getCompanyName } from '../data/news-fetcher';
 import {
     calculateHistoricalVolatility,
     approveStrikes,
@@ -16,6 +16,7 @@ import {
     createIdeaRun,
     deleteTodayIdeaCandidate,
     getDailyBestByDate,
+    getDrawdownAttributionsBySymbolAndDate,
     getIdeaBySymbolAndRunId,
     getIdeaBySymbolAndDate,
     getIdeasByRunId,
@@ -35,6 +36,7 @@ import {
     saveRiskFlags,
     upsertPriceHistory,
     upsertUnderlyingReference,
+    upsertDrawdownAttributions,
     updateIdeaRunStatus
 } from '../db/queries/ideas';
 import { HttpError } from '../lib/http-error';
@@ -87,12 +89,21 @@ const KNOWN_CONFERENCE_END_DATES: Partial<Record<string, string>> = {
 
 const IDEA_OPTIONAL_QUERY_TIMEOUT_MS = 500;
 const DRAWDOWN_ATTRIBUTION_TIMEOUT_MS = 1500;
+const DRAWDOWN_ATTRIBUTION_WARM_TIMEOUT_MS = 3200;
 const DRAWDOWN_NEWS_ENRICH_TIMEOUT_MS = 900;
+const DRAWDOWN_NEWS_ENRICH_WARM_TIMEOUT_MS = 2800;
 const DRAWDOWN_LLM_ENRICH_TIMEOUT_MS = 450;
 const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
+const DRAWDOWN_PREWARM_COOLDOWN_MS = 30 * 60 * 1000;
+const DRAWDOWN_PREWARM_FRESHNESS_MS = 2 * 60 * 1000;
+const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 2;
+const DRAWDOWN_TAIL_RISK_HISTORY_LIMIT = 1500;
+const DRAWDOWN_TAIL_RISK_LOOKBACK_DAYS = 365 * 5;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
 const drawdownAttributionInFlight = new Map<string, Promise<DrawdownAttribution[]>>();
+const drawdownPrewarmInFlight = new Map<string, Promise<void>>();
+const drawdownPrewarmTriggeredAt = new Map<string, number>();
 
 type AttributionAppliesTo = 'all' | 'us_tech' | 'china_tech' | 'symbols_only';
 type AttributionDriverType = 'macro' | 'policy' | 'sector' | 'company' | 'geopolitical' | 'mixed';
@@ -768,6 +779,174 @@ async function withSoftTimeout<T>(promise: Promise<T>, fallback: T, timeoutMs = 
     }
 }
 
+async function loadTailRiskPriceHistory(symbol: string): Promise<Array<{ date: string; close: number }>> {
+    const normalizedSymbol = symbol.toUpperCase();
+    let priceHistory = await getRecentPriceHistoryBySymbol(normalizedSymbol, DRAWDOWN_TAIL_RISK_HISTORY_LIMIT).catch(() => []);
+    const latestExpectedMarketDate = latestUsTradingDate();
+    const latestStoredPriceHistoryDate = priceHistory[priceHistory.length - 1]?.date ?? null;
+    const shouldRefreshPriceHistory =
+        priceHistory.length < Math.min(750, DRAWDOWN_TAIL_RISK_HISTORY_LIMIT) ||
+        latestStoredPriceHistoryDate === null ||
+        latestStoredPriceHistoryDate < latestExpectedMarketDate;
+
+    if (!shouldRefreshPriceHistory) {
+        return priceHistory;
+    }
+
+    try {
+        const fallbackFetcher = new MassiveDataFetcher();
+        const fetchedBars = await fallbackFetcher.fetchPriceHistory(normalizedSymbol, DRAWDOWN_TAIL_RISK_LOOKBACK_DAYS);
+
+        if (fetchedBars.length > 0) {
+            priceHistory = fetchedBars.map((bar) => ({
+                date: bar.date,
+                close: bar.close
+            }));
+
+            void upsertPriceHistory({
+                symbol: normalizedSymbol,
+                bars: fetchedBars
+            }).catch((error: unknown) => {
+                console.warn(
+                    `[ideas] failed to persist fallback price history for ${normalizedSymbol}: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`
+                );
+            });
+        }
+    } catch (error) {
+        console.warn(
+            `[ideas] failed to fetch fallback price history for ${normalizedSymbol}: ${
+                error instanceof Error ? error.message : String(error)
+            }`
+        );
+    }
+
+    return priceHistory;
+}
+
+function isReusablePersistedDrawdownAttribution(
+    persisted: Awaited<ReturnType<typeof getDrawdownAttributionsBySymbolAndDate>>
+): persisted is NonNullable<Awaited<ReturnType<typeof getDrawdownAttributionsBySymbolAndDate>>> {
+    return Boolean(
+        persisted &&
+            (
+                (persisted.schema_version ?? 0) >= DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION &&
+                persisted.is_enriched
+            ||
+                persisted.attributions_json.length === 0
+            )
+    );
+}
+
+async function prewarmDrawdownAttributionForSymbol(symbol: string): Promise<void> {
+    const normalizedSymbol = symbol.toUpperCase();
+    const priceHistory = await loadTailRiskPriceHistory(normalizedSymbol);
+    if (priceHistory.length < 2) {
+        return;
+    }
+
+    const dataDate = priceHistory[priceHistory.length - 1]?.date ?? null;
+    const cacheKey = `${normalizedSymbol}:${dataDate ?? 'na'}`;
+    const cached = drawdownAttributionCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+        return;
+    }
+
+    if (dataDate) {
+        const persisted = await getDrawdownAttributionsBySymbolAndDate(normalizedSymbol, dataDate).catch(() => null);
+        if (isReusablePersistedDrawdownAttribution(persisted)) {
+            drawdownAttributionCache.set(cacheKey, {
+                expiresAt: Date.now() + DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS,
+                value: persisted.attributions_json
+            });
+            return;
+        }
+    }
+
+    const existingInFlight = drawdownAttributionInFlight.get(cacheKey);
+    if (existingInFlight) {
+        await existingInFlight;
+        return;
+    }
+
+    const underlying = await withSoftTimeout(getUnderlyingBySymbol(normalizedSymbol).catch(() => null), null, 300);
+    const episodes = buildInteractiveDrawdownEpisodesForAttribution(priceHistory)
+        .filter((episode) => Math.abs(episode.max_drawdown_pct) >= 10)
+        .sort((left, right) => {
+            const rightPeakTime = new Date(right.peak_date).getTime();
+            const leftPeakTime = new Date(left.peak_date).getTime();
+            if (rightPeakTime !== leftPeakTime) {
+                return rightPeakTime - leftPeakTime;
+            }
+
+            const rightTroughTime = new Date(right.trough_date).getTime();
+            const leftTroughTime = new Date(left.trough_date).getTime();
+            if (rightTroughTime !== leftTroughTime) {
+                return rightTroughTime - leftTroughTime;
+            }
+
+            return left.max_drawdown_pct - right.max_drawdown_pct;
+        });
+
+    if (episodes.length === 0) {
+        drawdownAttributionCache.set(cacheKey, {
+            expiresAt: Date.now() + DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS,
+            value: []
+        });
+        if (dataDate) {
+            void upsertDrawdownAttributions(normalizedSymbol, dataDate, [], {
+                isEnriched: true,
+                schemaVersion: DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION
+            }).catch(() => {});
+        }
+        return;
+    }
+
+    const inFlight = buildEnrichedDrawdownAttributions(
+        cacheKey,
+        normalizedSymbol,
+        underlying?.company_name ?? getCompanyName(normalizedSymbol),
+        episodes
+    )
+        .catch(() => [])
+        .finally(() => {
+            drawdownAttributionInFlight.delete(cacheKey);
+        });
+    drawdownAttributionInFlight.set(cacheKey, inFlight);
+    await inFlight;
+}
+
+function scheduleDrawdownAttributionPrewarm(symbols: string[]) {
+    const now = Date.now();
+    const uniqueSymbols = [...new Set(symbols.map((symbol) => symbol.toUpperCase()).filter(Boolean))];
+
+    for (const symbol of uniqueSymbols) {
+        if (drawdownPrewarmInFlight.has(symbol)) {
+            continue;
+        }
+
+        const lastTriggeredAt = drawdownPrewarmTriggeredAt.get(symbol) ?? 0;
+        if (now - lastTriggeredAt < DRAWDOWN_PREWARM_COOLDOWN_MS) {
+            continue;
+        }
+
+        drawdownPrewarmTriggeredAt.set(symbol, now);
+        const inFlight = prewarmDrawdownAttributionForSymbol(symbol)
+            .catch((error) => {
+                console.warn(
+                    `[ideas] failed to prewarm drawdown attribution for ${symbol}: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`
+                );
+            })
+            .finally(() => {
+                drawdownPrewarmInFlight.delete(symbol);
+            });
+        drawdownPrewarmInFlight.set(symbol, inFlight);
+    }
+}
+
 const COMMODITY_BETA_SYMBOLS = new Set(['GDX', 'USO']);
 const MACRO_SENSITIVITY_MAP: Array<{
     focusSlug: string;
@@ -1052,6 +1231,16 @@ export async function getTodayIdeas(): Promise<TodayIdeasResponse> {
         ? await mapDailyBestCard(dailyBestRow.symbol, dailyBestRow.theme ?? 'Featured', normalizedIdeas, flagsBySymbol)
         : null;
 
+    const prewarmSymbols = normalizedIdeas
+        .filter((idea) => idea.overall_grade === 'GO')
+        .sort((left, right) => (Number(right.composite_score ?? 0) - Number(left.composite_score ?? 0)))
+        .slice(0, 6)
+        .map((idea) => idea.symbol);
+    if (dailyBest?.symbol) {
+        prewarmSymbols.unshift(dailyBest.symbol);
+    }
+    scheduleDrawdownAttributionPrewarm(prewarmSymbols);
+
     return mapTodayIdeasResponse(latestRun, normalizedIdeas, riskFlags, dailyBest);
 }
 
@@ -1327,6 +1516,8 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             void refreshNarrativeInBackground(normalizedSymbol, cachedRow, priceContext, effectiveFlags).catch(() => {});
         }
 
+        scheduleDrawdownAttributionPrewarm([normalizedSymbol]);
+
         return {
             symbol: cachedRow.symbol,
             exchange: cachedRow.exchange,
@@ -1404,46 +1595,13 @@ export { deleteTodayIdeaCandidate };
 
 export async function getSymbolPriceHistory(symbol: string): Promise<SymbolPriceHistoryResponse> {
     const normalizedSymbol = symbol.toUpperCase();
-    const tailRiskLookbackDays = 365 * 5;
-    const tailRiskHistoryLimit = 1500;
-    let priceHistory = await getRecentPriceHistoryBySymbol(normalizedSymbol, tailRiskHistoryLimit).catch(() => []);
-    const latestExpectedMarketDate = latestUsTradingDate();
-    const latestStoredPriceHistoryDate = priceHistory[priceHistory.length - 1]?.date ?? null;
-    const shouldRefreshPriceHistory =
-        priceHistory.length < Math.min(750, tailRiskHistoryLimit) ||
-        latestStoredPriceHistoryDate === null ||
-        latestStoredPriceHistoryDate < latestExpectedMarketDate;
-
-    if (shouldRefreshPriceHistory) {
-        try {
-            const fallbackFetcher = new MassiveDataFetcher();
-            const fetchedBars = await fallbackFetcher.fetchPriceHistory(normalizedSymbol, tailRiskLookbackDays);
-
-            if (fetchedBars.length > 0) {
-                priceHistory = fetchedBars.map((bar) => ({
-                    date: bar.date,
-                    close: bar.close
-                }));
-
-                void upsertPriceHistory({
-                    symbol: normalizedSymbol,
-                    bars: fetchedBars
-                }).catch((error: unknown) => {
-                    console.warn(
-                        `[ideas] failed to persist fallback price history for ${normalizedSymbol}: ${
-                            error instanceof Error ? error.message : String(error)
-                        }`
-                    );
-                });
-            }
-        } catch (error) {
-            console.warn(
-                `[ideas] failed to fetch fallback price history for ${normalizedSymbol}: ${
-                    error instanceof Error ? error.message : String(error)
-                }`
-            );
-        }
+    const prewarmInFlight = drawdownPrewarmInFlight.get(normalizedSymbol);
+    const recentlyPrewarmed = (Date.now() - (drawdownPrewarmTriggeredAt.get(normalizedSymbol) ?? 0)) < DRAWDOWN_PREWARM_FRESHNESS_MS;
+    if (prewarmInFlight) {
+        await withSoftTimeout(prewarmInFlight, undefined, DRAWDOWN_NEWS_ENRICH_WARM_TIMEOUT_MS);
     }
+
+    const priceHistory = await loadTailRiskPriceHistory(normalizedSymbol);
 
     const underlying = await withSoftTimeout(getUnderlyingBySymbol(normalizedSymbol).catch(() => null), null, 300);
     const drawdownAttributions = await withSoftTimeout(
@@ -1453,12 +1611,14 @@ export async function getSymbolPriceHistory(symbol: string): Promise<SymbolPrice
             priceHistory
         ).catch(() => []),
         [],
-        DRAWDOWN_ATTRIBUTION_TIMEOUT_MS
+        prewarmInFlight || recentlyPrewarmed
+            ? DRAWDOWN_ATTRIBUTION_WARM_TIMEOUT_MS
+            : DRAWDOWN_ATTRIBUTION_TIMEOUT_MS
     );
 
     return {
         symbol: normalizedSymbol,
-        data_as_of_date: priceHistory[priceHistory.length - 1]?.date ?? latestExpectedMarketDate,
+        data_as_of_date: priceHistory[priceHistory.length - 1]?.date ?? latestUsTradingDate(),
         price_history: priceHistory,
         tail_risk: buildTailRiskStats(priceHistory),
         drawdown_attributions: drawdownAttributions
@@ -3030,10 +3190,14 @@ function buildInteractiveDrawdownEpisodesForAttribution(priceHistory: Array<{ da
     return episodes;
 }
 
-function buildHistoricalNewsWindow(troughDate: string): { from: string; to: string } {
+function buildHistoricalNewsWindow(peakDate: string, troughDate: string): { from: string; to: string } {
+    const peak = new Date(`${peakDate}T00:00:00Z`);
     const trough = new Date(`${troughDate}T00:00:00Z`);
-    const from = new Date(trough);
-    from.setUTCDate(from.getUTCDate() - 21);
+    const fromByPeak = new Date(peak);
+    fromByPeak.setUTCDate(fromByPeak.getUTCDate() - 14);
+    const fromByTrough = new Date(trough);
+    fromByTrough.setUTCDate(fromByTrough.getUTCDate() - 21);
+    const from = fromByPeak < fromByTrough ? fromByPeak : fromByTrough;
     const to = new Date(trough);
     to.setUTCDate(to.getUTCDate() + 7);
     return {
@@ -3677,6 +3841,7 @@ async function buildEnrichedDrawdownAttributions(
     companyName: string | null,
     episodes: ReturnType<typeof buildInteractiveDrawdownEpisodesForAttribution>
 ): Promise<DrawdownAttribution[]> {
+    const dataDate = cacheKey.split(':').slice(1).join(':');
     const enrichedKeys = new Set(
         episodes
             .slice(0, DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT)
@@ -3685,7 +3850,7 @@ async function buildEnrichedDrawdownAttributions(
     const episodeWindows = episodes.map((episode) => ({
         peak_date: episode.peak_date,
         trough_date: episode.trough_date,
-        ...buildHistoricalNewsWindow(episode.trough_date)
+        ...buildHistoricalNewsWindow(episode.peak_date, episode.trough_date)
     }));
 
     const batchedNews = await fetchHistoricalStockNewsBatch(
@@ -3752,6 +3917,18 @@ async function buildEnrichedDrawdownAttributions(
             expiresAt: Date.now() + DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS,
             value
         });
+        if (dataDate && dataDate !== 'na') {
+            void upsertDrawdownAttributions(symbol.toUpperCase(), dataDate, value, {
+                isEnriched: true,
+                schemaVersion: DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION
+            }).catch((error) => {
+                console.warn(
+                    `[ideas] failed to persist drawdown attributions for ${symbol}: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`
+                );
+            });
+        }
     }
 
     drawdownAttributionInFlight.delete(cacheKey);
@@ -3763,10 +3940,23 @@ async function buildDrawdownAttributions(
     companyName: string | null,
     priceHistory: Array<{ date: string; close: number }>
 ): Promise<DrawdownAttribution[]> {
-    const cacheKey = `${symbol.toUpperCase()}:${priceHistory[priceHistory.length - 1]?.date ?? 'na'}`;
+    const normalizedSymbol = symbol.toUpperCase();
+    const dataDate = priceHistory[priceHistory.length - 1]?.date ?? null;
+    const cacheKey = `${normalizedSymbol}:${dataDate ?? 'na'}`;
     const cached = drawdownAttributionCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
         return cached.value;
+    }
+
+    if (dataDate) {
+        const persisted = await getDrawdownAttributionsBySymbolAndDate(normalizedSymbol, dataDate).catch(() => null);
+        if (isReusablePersistedDrawdownAttribution(persisted)) {
+            drawdownAttributionCache.set(cacheKey, {
+                expiresAt: Date.now() + DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS,
+                value: persisted.attributions_json
+            });
+            return persisted.attributions_json;
+        }
     }
 
     const episodes = buildInteractiveDrawdownEpisodesForAttribution(priceHistory)
@@ -3789,7 +3979,7 @@ async function buildDrawdownAttributions(
     const heuristicBaseline = episodes.map((episode) => ({
         episode,
         heuristicReason: chooseHeuristicAttributionReason(
-            symbol,
+            normalizedSymbol,
             companyName,
             episode.peak_date,
             episode.trough_date,
@@ -3798,9 +3988,10 @@ async function buildDrawdownAttributions(
     }));
     const baselineValue = mapDrawdownAttributionRows(heuristicBaseline);
 
-    let inFlight = drawdownAttributionInFlight.get(cacheKey);
+    const existingInFlight = drawdownAttributionInFlight.get(cacheKey);
+    let inFlight = existingInFlight;
     if (!inFlight) {
-        inFlight = buildEnrichedDrawdownAttributions(cacheKey, symbol, companyName, episodes)
+        inFlight = buildEnrichedDrawdownAttributions(cacheKey, normalizedSymbol, companyName, episodes)
             .catch(() => baselineValue)
             .finally(() => {
                 drawdownAttributionInFlight.delete(cacheKey);
@@ -3808,7 +3999,13 @@ async function buildDrawdownAttributions(
         drawdownAttributionInFlight.set(cacheKey, inFlight);
     }
 
-    return withSoftTimeout(inFlight, baselineValue, DRAWDOWN_NEWS_ENRICH_TIMEOUT_MS);
+    const recentlyPrewarmed = (Date.now() - (drawdownPrewarmTriggeredAt.get(normalizedSymbol) ?? 0)) < DRAWDOWN_PREWARM_FRESHNESS_MS;
+    const timeoutMs =
+        existingInFlight || recentlyPrewarmed
+            ? DRAWDOWN_NEWS_ENRICH_WARM_TIMEOUT_MS
+            : DRAWDOWN_NEWS_ENRICH_TIMEOUT_MS;
+
+    return withSoftTimeout(inFlight, baselineValue, timeoutMs);
 }
 
 function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>) {

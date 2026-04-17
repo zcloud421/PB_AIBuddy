@@ -1,5 +1,5 @@
 import { pool } from '../client';
-import type { DailyBestCard, Flag, NewsItem, SymbolIdeaResponse, TodayIdeasResponse } from '../../types/api';
+import type { DailyBestCard, DrawdownAttribution, Flag, NewsItem, SymbolIdeaResponse, TodayIdeasResponse } from '../../types/api';
 import type { DailyPriceBar } from '../../data/massive-fetcher';
 
 export interface LatestCompletedRun {
@@ -37,6 +37,15 @@ export interface PriceContextRow {
 export interface PriceHistoryPointRow {
     date: string;
     close: number;
+}
+
+export interface PersistedDrawdownAttributionsRow {
+    symbol: string;
+    data_date: string;
+    attributions_json: DrawdownAttribution[];
+    is_enriched: boolean;
+    schema_version: number;
+    created_at: string;
 }
 
 export interface UpsertPriceHistoryInput {
@@ -1633,6 +1642,86 @@ export async function ensureClientFocusDailyVerdictsTable(): Promise<void> {
             PRIMARY KEY (slug, run_date)
         )
     `);
+}
+
+export async function ensureDrawdownAttributionsTable(): Promise<void> {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS drawdown_attributions (
+            symbol           TEXT NOT NULL,
+            data_date        DATE NOT NULL,
+            attributions_json JSONB NOT NULL,
+            is_enriched      BOOLEAN NOT NULL DEFAULT FALSE,
+            schema_version   INTEGER NOT NULL DEFAULT 1,
+            created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (symbol, data_date)
+        )
+    `);
+    await pool.query(`
+        ALTER TABLE drawdown_attributions
+        ADD COLUMN IF NOT EXISTS is_enriched BOOLEAN NOT NULL DEFAULT FALSE
+    `);
+    await pool.query(`
+        ALTER TABLE drawdown_attributions
+        ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 1
+    `);
+}
+
+export async function upsertDrawdownAttributions(
+    symbol: string,
+    dataDate: string,
+    attributions: DrawdownAttribution[],
+    options?: {
+        isEnriched?: boolean;
+        schemaVersion?: number;
+    }
+): Promise<void> {
+    await ensureDrawdownAttributionsTable();
+    const isEnriched = options?.isEnriched ?? false;
+    const schemaVersion = options?.schemaVersion ?? 1;
+    await pool.query(
+        `
+        INSERT INTO drawdown_attributions (
+            symbol,
+            data_date,
+            attributions_json,
+            is_enriched,
+            schema_version
+        )
+        VALUES ($1, $2::date, $3::jsonb, $4::boolean, $5::integer)
+        ON CONFLICT (symbol, data_date)
+        DO UPDATE SET
+            attributions_json = EXCLUDED.attributions_json,
+            is_enriched = EXCLUDED.is_enriched,
+            schema_version = EXCLUDED.schema_version,
+            created_at = NOW()
+        `,
+        [symbol, dataDate, JSON.stringify(attributions), isEnriched, schemaVersion]
+    );
+}
+
+export async function getDrawdownAttributionsBySymbolAndDate(
+    symbol: string,
+    dataDate: string
+): Promise<PersistedDrawdownAttributionsRow | null> {
+    await ensureDrawdownAttributionsTable();
+    const result = await pool.query<PersistedDrawdownAttributionsRow>(
+        `
+        SELECT
+            symbol,
+            data_date::text AS data_date,
+            attributions_json,
+            is_enriched,
+            schema_version,
+            created_at::text AS created_at
+        FROM drawdown_attributions
+        WHERE symbol = $1
+          AND data_date = $2::date
+        LIMIT 1
+        `,
+        [symbol, dataDate]
+    );
+
+    return result.rows[0] ?? null;
 }
 
 export async function getLatestClientFocusDailyVerdict(
