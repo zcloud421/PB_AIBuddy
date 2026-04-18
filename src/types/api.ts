@@ -345,6 +345,7 @@ export interface DrawdownAttribution {
     business_archetype?: string | null;
     subsector?: string | null;
     cycle_family?: string | null;
+    drawdown_type?: 'liquidity-driven' | 'crypto-cycle' | 'event-driven' | null;
     event_signals?: string[] | null;
     event_signal_details?: Array<{
         tag: string;

@@ -97,7 +97,7 @@ const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
 const DRAWDOWN_PREWARM_COOLDOWN_MS = 30 * 60 * 1000;
 const DRAWDOWN_PREWARM_FRESHNESS_MS = 2 * 60 * 1000;
-const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 18;
+const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 19;
 const DRAWDOWN_TAIL_RISK_HISTORY_LIMIT = 1500;
 const DRAWDOWN_TAIL_RISK_LOOKBACK_DAYS = 365 * 5;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
@@ -209,6 +209,7 @@ interface StructuredAttributionReason {
     business_archetype: AttributionBusinessArchetype | null;
     subsector: string | null;
     cycle_family: AttributionCycleFamily | null;
+    drawdown_type: 'liquidity-driven' | 'crypto-cycle' | 'event-driven' | null;
     event_signals: string[];
     event_signal_details: EventSignalDetail[];
     reason_family: string | null;
@@ -910,7 +911,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         id: 'crypto-banking-stress-2023',
         start: '2023-03-01',
         end: '2023-04-15',
-        reason_zh: '银行体系风险引发短期流动性冲击：USDC波动与资金通道担忧令加密平台短暂承压，随后随crypto修复',
+        reason_zh: '银行体系风险引发短期流动性冲击：stablecoin波动与资金通道担忧扰动交易活跃度，令平台短暂承压',
         family: 'crypto-banking',
         driver_type: 'sector',
         applies_to: 'symbols_only',
@@ -1037,7 +1038,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         id: 'crypto-mt-gox-reset-2024',
         start: '2024-07-01',
         end: '2024-09-30',
-        reason_zh: 'Mt. Gox赔付预期与全球去杠杆引发币价回调，拖累加密平台交易活跃度与估值',
+        reason_zh: '套息交易平仓与Mt. Gox赔付预期引发去杠杆：crypto回调、交易活跃度降温，放大平台高贝塔下跌',
         family: 'crypto-cycle',
         driver_type: 'sector',
         applies_to: 'symbols_only',
@@ -1101,7 +1102,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         id: 'crypto-geopolitical-risk-off-2026',
         start: '2026-02-15',
         end: '2026-03-31',
-        reason_zh: '地缘风险触发risk-off：crypto短期回调与交易活跃度降温拖累平台盈利预期',
+        reason_zh: '地缘冲突升级引发风险偏好下降：crypto短期回调、交易活跃度回落，压制平台盈利预期',
         family: 'crypto-cycle',
         driver_type: 'sector',
         applies_to: 'symbols_only',
@@ -4879,6 +4880,7 @@ function buildStructuredFallbackAttribution(
         business_archetype: businessArchetype,
         subsector,
         cycle_family: cycleFamily,
+        drawdown_type: cycleFamily === 'crypto-cycle' ? 'crypto-cycle' : null,
         event_signals: eventSignals,
         event_signal_details: eventSignalDetails,
         reason_family: 'company-fundamental',
@@ -4892,6 +4894,35 @@ function buildStructuredFallbackAttribution(
     };
     structured.reason_zh = renderStructuredAttributionReason(structured);
     return structured;
+}
+
+function inferDrawdownType(
+    primary: AttributionMacroRule | null,
+    cycleFamily: AttributionCycleFamily | null,
+    archetype: AttributionBusinessArchetype | null
+): 'liquidity-driven' | 'crypto-cycle' | 'event-driven' | null {
+    if (cycleFamily !== 'crypto-cycle') {
+        return null;
+    }
+
+    const ruleId = primary?.id ?? '';
+    if (ruleId === 'crypto-cycle-reset-2021' || ruleId === 'crypto-liquidity-bear-market-2022') {
+        return 'liquidity-driven';
+    }
+
+    if (ruleId === 'crypto-banking-stress-2023' || ruleId === 'crypto-mt-gox-reset-2024' || ruleId === 'crypto-geopolitical-risk-off-2026') {
+        return 'event-driven';
+    }
+
+    if (
+        archetype === 'crypto-exchange-broker' ||
+        archetype === 'bitcoin-leverage-proxy' ||
+        archetype === 'bitcoin-miner'
+    ) {
+        return 'crypto-cycle';
+    }
+
+    return null;
 }
 
 function renderStructuredAttributionReason(reason: StructuredAttributionReason): string {
@@ -4957,6 +4988,7 @@ function chooseHeuristicAttributionReason(
         business_archetype: inferredArchetype,
         subsector: inferredSubsector,
         cycle_family: inferredCycleFamily,
+        drawdown_type: inferDrawdownType(primary, inferredCycleFamily, inferredArchetype),
         event_signals: eventSignals,
         event_signal_details: eventSignalDetails,
         reason_family: primary.family,
@@ -5118,6 +5150,7 @@ function mapDrawdownAttributionRows(
                 business_archetype: heuristicReason.business_archetype,
                 subsector: heuristicReason.subsector,
                 cycle_family: heuristicReason.cycle_family,
+                drawdown_type: heuristicReason.drawdown_type,
                 event_signals: heuristicReason.event_signals,
                 event_signal_details: heuristicReason.event_signal_details,
                 reason_family: heuristicReason.reason_family,
