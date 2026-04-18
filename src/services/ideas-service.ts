@@ -97,7 +97,7 @@ const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
 const DRAWDOWN_PREWARM_COOLDOWN_MS = 30 * 60 * 1000;
 const DRAWDOWN_PREWARM_FRESHNESS_MS = 2 * 60 * 1000;
-const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 12;
+const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 16;
 const DRAWDOWN_TAIL_RISK_HISTORY_LIMIT = 1500;
 const DRAWDOWN_TAIL_RISK_LOOKBACK_DAYS = 365 * 5;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
@@ -411,6 +411,26 @@ const ARCHETYPE_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
         tag: 'global-expansion-slowdown',
         keywords: ['global outlook', 'global business', 'expansion slows', 'external challenges', 'uncertain market'],
         archetypes: ['china-ecommerce-platform']
+    },
+    {
+        tag: 'hfcaa-delisting-risk',
+        keywords: ['hfcaa', 'delisting', 'watchlist', 'audit inspections', 'sec list', 'holding foreign companies accountable act'],
+        cycle_families: ['china-platform-cycle']
+    },
+    {
+        tag: 'ant-rectification-overhang',
+        keywords: ['ant group', 'rectification', 'financial holding company', 'jack ma', 'platform crackdown', 'platform economy'],
+        cycle_families: ['china-platform-cycle']
+    },
+    {
+        tag: 'china-consumption-reset',
+        keywords: ['consumer confidence', 'consumer spending', 'weak consumption', 'domestic demand', 'china growth', 'property weakness'],
+        cycle_families: ['china-platform-cycle']
+    },
+    {
+        tag: 'platform-pricing-regulation',
+        keywords: ['pricing rules', 'merchant fees', 'search-ranking', 'platform operators', 'price-war tactics', 'platform pricing'],
+        cycle_families: ['china-platform-cycle']
     },
     {
         tag: 'china-ad-spending-reset',
@@ -1176,6 +1196,20 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['Alphabet', '搜索', 'Safari', 'AI搜索', '反垄断']
     },
     {
+        id: 'china-platform-rectification-early-2021',
+        start: '2021-04-01',
+        end: '2021-07-31',
+        reason_zh: '中国平台早期整顿冲击：反垄断罚款、Ant整改与平台经济强监管初期重压估值',
+        family: 'china-regulation',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['BABA', 'JD', 'PDD', 'BIDU', 'NTES', 'TME', 'BILI', 'IQ', 'VIPS', 'TCEHY', 'BEKE'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['antitrust', 'ant group', 'fine', 'rectification', 'platform economy', 'crackdown'],
+        event_signal_tags: ['ant-rectification-overhang'],
+        markers: ['反垄断罚款', 'Ant整改', '平台经济强监管']
+    },
+    {
         id: 'china-platform-rectification-2021',
         start: '2021-04-01',
         end: '2022-03-31',
@@ -1196,6 +1230,63 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'china_tech',
         keywords: ['lockdown', 'consumer', 'property', 'real estate', 'delisting', 'hfcaa', 'china growth', 'export'],
         markers: ['中国经济', '复苏不及预期', '地产压力', '退市担忧']
+    },
+    {
+        id: 'china-adr-delisting-reset-2022',
+        start: '2022-07-01',
+        end: '2022-09-30',
+        reason_zh: '中概股退市风险重估：HFCAA与SEC观察名单压力抬升，叠加Ant整改余波压制平台估值',
+        family: 'china-delisting',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['BABA', 'JD', 'PDD', 'BIDU', 'NTES', 'TME', 'BILI', 'IQ', 'VIPS', 'TCEHY', 'BEKE'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['hfcaa', 'delisting', 'watchlist', 'sec', 'audit inspections', 'ant group'],
+        event_signal_tags: ['hfcaa-delisting-risk', 'ant-rectification-overhang'],
+        markers: ['HFCAA', 'SEC观察名单', '退市风险', 'Ant整改']
+    },
+    {
+        id: 'china-platform-overhang-2021',
+        start: '2021-08-01',
+        end: '2021-12-31',
+        reason_zh: '中国平台监管余波延续：数据安全、Ant整改与平台经济政策不确定性持续压制估值',
+        family: 'china-regulation',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['BABA', 'JD', 'PDD', 'BIDU', 'NTES', 'TME', 'BILI', 'IQ', 'VIPS', 'TCEHY', 'BEKE'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['data security', 'ant group', 'rectification', 'platform economy', 'common prosperity', 'regulation'],
+        event_signal_tags: ['ant-rectification-overhang'],
+        markers: ['数据安全', 'Ant整改', '平台经济', '政策不确定性']
+    },
+    {
+        id: 'china-consumption-reset-2023',
+        start: '2022-10-01',
+        end: '2024-12-31',
+        reason_zh: '中国消费与平台需求偏弱：消费信心、地产链与商家经营预期承压，平台股估值持续受限',
+        family: 'china-growth',
+        driver_type: 'macro',
+        applies_to: 'symbols_only',
+        symbols: ['BABA', 'JD', 'PDD', 'VIPS', 'BEKE', 'BILI', 'IQ', 'TME'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['consumer confidence', 'consumer spending', 'property weakness', 'domestic demand', 'merchant'],
+        event_signal_tags: ['china-consumption-reset'],
+        markers: ['消费信心', '地产链', '商家经营', '平台需求']
+    },
+    {
+        id: 'china-platform-pricing-reset-2025',
+        start: '2025-09-01',
+        end: '2026-12-31',
+        reason_zh: '中国平台竞争与价格规则重估：商家治理、价格战约束与平台盈利模式预期波动压制估值',
+        family: 'china-platform-fundamental',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['BABA', 'JD', 'PDD', 'VIPS'],
+        archetypes: ['china-ecommerce-platform', 'china-value-retail'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['pricing rules', 'merchant fees', 'search-ranking', 'price-war tactics', 'platform pricing'],
+        event_signal_tags: ['platform-pricing-regulation', 'merchant-policy-backlash'],
+        markers: ['平台价格规则', '商家治理', '价格战', '盈利模式']
     },
     {
         id: 'china-search-ai-reset-2022',
@@ -4166,6 +4257,18 @@ function buildCycleAwarePrimaryDriver(
     if (signalSet.has('global-expansion-slowdown') && archetype === 'china-ecommerce-platform') {
         return `${issuer} 全球扩张与增长可持续性预期转弱`;
     }
+    if (signalSet.has('hfcaa-delisting-risk') && cycleFamily === 'china-platform-cycle') {
+        return `${issuer} HFCAA与中概退市风险抬升估值折价`;
+    }
+    if (signalSet.has('ant-rectification-overhang') && cycleFamily === 'china-platform-cycle') {
+        return `${issuer} 平台整改与Ant余波延续压制风险偏好`;
+    }
+    if (signalSet.has('china-consumption-reset') && cycleFamily === 'china-platform-cycle') {
+        return `${issuer} 消费信心、商家经营与平台需求预期走弱`;
+    }
+    if (signalSet.has('platform-pricing-regulation') && cycleFamily === 'china-platform-cycle') {
+        return `${issuer} 平台价格规则与商家治理变化重估盈利模式`;
+    }
     if (signalSet.has('china-ad-spending-reset') && archetype === 'china-search-ai-platform') {
         return `${issuer} 在线营销需求、搜索流量与AI投入回报预期走弱`;
     }
@@ -4463,6 +4566,41 @@ function getRuleWindowSpecificityScore(rule: AttributionMacroRule): number {
     return 0;
 }
 
+function getRulePeakAlignmentScore(rule: AttributionMacroRule, peakDate: string, troughDate: string): number {
+    const start = new Date(`${rule.start}T00:00:00Z`).getTime();
+    const end = new Date(`${rule.end}T00:00:00Z`).getTime();
+    const peak = new Date(`${peakDate}T00:00:00Z`).getTime();
+    const trough = new Date(`${troughDate}T00:00:00Z`).getTime();
+
+    if (peak >= start && peak <= end) {
+        return 14;
+    }
+
+    if (peak < start && trough >= start && trough <= end) {
+        return -26;
+    }
+
+    if (peak <= end && trough > end) {
+        return 4;
+    }
+
+    return 0;
+}
+
+function isChinaPlatformSpecificRule(rule: AttributionMacroRule): boolean {
+    return (
+        rule.cycle_families?.includes('china-platform-cycle') === true &&
+        (rule.applies_to === 'symbols_only' ||
+            Boolean(rule.archetypes?.length) ||
+            Boolean(rule.subsectors?.length) ||
+            Boolean(rule.event_signal_tags?.length))
+    );
+}
+
+function isChinaPlatformBroadFrameworkRule(rule: AttributionMacroRule): boolean {
+    return rule.id === 'china-growth-reset-2022' || rule.id === 'china-platform-rectification-2021';
+}
+
 function rankAttributionRules(
     symbol: string,
     companyName: string | null,
@@ -4477,12 +4615,18 @@ function rankAttributionRules(
         extractNewsEventSignals(newsItems, inferredArchetype, inferredSubsector, inferredCycleFamily)
     );
     const isCryptoArchetype = inferredCycleFamily === 'crypto-cycle';
+    const isChinaPlatformArchetype = inferredCycleFamily === 'china-platform-cycle';
+    const candidateRules = DRAWDOWN_ATTRIBUTION_RULES.filter(
+        (rule) => eventOverlapsRule(peakDate, troughDate, rule) && isRuleApplicableToSymbol(rule, symbol)
+    );
+    const hasChinaPlatformSpecificCandidate =
+        isChinaPlatformArchetype && candidateRules.some((rule) => isChinaPlatformSpecificRule(rule));
 
-    return DRAWDOWN_ATTRIBUTION_RULES
-        .filter((rule) => eventOverlapsRule(peakDate, troughDate, rule) && isRuleApplicableToSymbol(rule, symbol))
+    return candidateRules
         .map((rule) => {
             const specificityScore = getRuleSpecificityScore(rule, symbol);
             const windowSpecificityScore = getRuleWindowSpecificityScore(rule);
+            const peakAlignmentScore = getRulePeakAlignmentScore(rule, peakDate, troughDate);
             const keywordScore = countKeywordHits(newsItems, rule.keywords) * 8;
             const driverScore = getDriverPriority(rule);
             const archetypeScore = inferredArchetype && rule.archetypes?.includes(inferredArchetype) ? 16 : 0;
@@ -4503,11 +4647,23 @@ function rankAttributionRules(
                 (total, tag) => total + (eventSignals.has(tag) ? 10 : 0),
                 0
             );
+            const chinaPlatformSpecificityBonus =
+                hasChinaPlatformSpecificCandidate && isChinaPlatformSpecificRule(rule) && peakAlignmentScore >= 0 ? 24 : 0;
+            const chinaPlatformBroadPenalty =
+                hasChinaPlatformSpecificCandidate && isChinaPlatformBroadFrameworkRule(rule) ? -28 : 0;
+            const chinaPlatformSignalBonus =
+                isChinaPlatformArchetype && peakAlignmentScore >= 0 && (rule.event_signal_tags ?? []).length > 0
+                    ? (rule.event_signal_tags ?? []).reduce(
+                          (total, tag) => total + (eventSignals.has(tag) ? 14 : 0),
+                          0
+                      )
+                    : 0;
             return {
                 rule,
                 score:
                     specificityScore +
                     windowSpecificityScore +
+                    peakAlignmentScore +
                     keywordScore +
                     driverScore +
                     archetypeScore +
@@ -4515,7 +4671,10 @@ function rankAttributionRules(
                     cycleScore +
                     cryptoSpecificityBonus +
                     cryptoMacroPenalty +
-                    signalScore
+                    signalScore +
+                    chinaPlatformSpecificityBonus +
+                    chinaPlatformBroadPenalty +
+                    chinaPlatformSignalBonus
             };
         })
         .sort((left, right) => right.score - left.score);
