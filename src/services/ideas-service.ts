@@ -97,7 +97,7 @@ const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
 const DRAWDOWN_PREWARM_COOLDOWN_MS = 30 * 60 * 1000;
 const DRAWDOWN_PREWARM_FRESHNESS_MS = 2 * 60 * 1000;
-const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 16;
+const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 18;
 const DRAWDOWN_TAIL_RISK_HISTORY_LIMIT = 1500;
 const DRAWDOWN_TAIL_RISK_LOOKBACK_DAYS = 365 * 5;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
@@ -522,7 +522,60 @@ const ARCHETYPE_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
     },
     {
         tag: 'crypto-exchange-volume-reset',
-        keywords: ['trading volume', 'retail activity', 'transaction revenue', 'subscription revenue', 'crypto volumes'],
+        keywords: [
+            'trading volume',
+            'retail activity',
+            'transaction revenue',
+            'subscription revenue',
+            'crypto volumes',
+            'trading activity',
+            'monthly transacting users',
+            'transaction revenue fell',
+            'transaction revenue miss',
+            'lower trading volume'
+        ],
+        archetypes: ['crypto-exchange-broker'],
+        cycle_families: ['crypto-cycle']
+    },
+    {
+        tag: 'crypto-low-volatility-reset',
+        keywords: [
+            'low volatility',
+            'volatility remained low',
+            'market volatility stayed low',
+            'volatility declined',
+            'quieter trading environment',
+            'lower volatility'
+        ],
+        archetypes: ['crypto-exchange-broker'],
+        cycle_families: ['crypto-cycle']
+    },
+    {
+        tag: 'crypto-earnings-reset',
+        keywords: [
+            'q2 earnings miss',
+            'q3 earnings miss',
+            'q4 earnings miss',
+            'weaker-than-expected earnings',
+            'missed quarterly estimates',
+            'transaction revenue miss',
+            'subscription and services revenue',
+            'monthly transacting users'
+        ],
+        archetypes: ['crypto-exchange-broker'],
+        cycle_families: ['crypto-cycle']
+    },
+    {
+        tag: 'crypto-etf-disintermediation',
+        keywords: [
+            'etf competition',
+            'investors bypass exchanges',
+            'spot bitcoin etf',
+            'spot ether etf',
+            'etf flows',
+            'flows into etfs',
+            'etf disintermediation'
+        ],
         archetypes: ['crypto-exchange-broker'],
         cycle_families: ['crypto-cycle']
     },
@@ -792,8 +845,8 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
     {
         id: 'crypto-cycle-reset-2021',
         start: '2021-04-01',
-        end: '2022-12-31',
-        reason_zh: '加密货币周期回落：币价下跌与交易量收缩压制加密平台收入与估值',
+        end: '2021-12-31',
+        reason_zh: '流动性预期转向与crypto见顶回落：高贝塔平台估值与盈利预期同步下修',
         family: 'crypto-cycle',
         driver_type: 'sector',
         applies_to: 'symbols_only',
@@ -801,9 +854,25 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         archetypes: ['crypto-exchange-broker'],
         subsectors: ['crypto-platform'],
         cycle_families: ['crypto-cycle'],
-        keywords: ['bitcoin', 'crypto', 'ether', 'trading volume', 'coinbase', 'token prices'],
+        keywords: ['bitcoin', 'crypto', 'ether', 'trading volume', 'coinbase', 'token prices', 'taper', 'fed', 'risk appetite'],
         event_signal_tags: ['crypto-drawdown'],
         markers: ['加密货币', '比特币', '交易量', '币价']
+    },
+    {
+        id: 'crypto-liquidity-bear-market-2022',
+        start: '2022-01-01',
+        end: '2022-10-31',
+        reason_zh: '流动性收紧驱动crypto进入结构性熊市：币价、波动率与交易量同步下滑，拖累加密平台收入与估值',
+        family: 'crypto-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['COIN', 'HOOD'],
+        archetypes: ['crypto-exchange-broker'],
+        subsectors: ['crypto-platform'],
+        cycle_families: ['crypto-cycle'],
+        keywords: ['fed', 'rate hikes', 'qt', 'tightening', 'trading volume', 'transaction revenue', 'crypto bear market'],
+        event_signal_tags: ['crypto-drawdown', 'crypto-exchange-volume-reset'],
+        markers: ['流动性收紧', '加密熊市', '交易量', '收入承压']
     },
     {
         id: 'crypto-terra-contagion-2022',
@@ -822,10 +891,26 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['Terra', 'LUNA', '信用去杠杆', '交易量收缩']
     },
     {
+        id: 'crypto-low-volatility-reset-2023',
+        start: '2023-01-01',
+        end: '2023-02-28',
+        reason_zh: 'crypto波动率回落与交易活跃度不足：币价反弹未转化为交易收入，压制平台盈利预期',
+        family: 'crypto-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['COIN', 'HOOD'],
+        archetypes: ['crypto-exchange-broker'],
+        subsectors: ['crypto-platform'],
+        cycle_families: ['crypto-cycle'],
+        keywords: ['low volatility', 'trading activity', 'transaction revenue', 'monthly transacting users', 'crypto volumes'],
+        event_signal_tags: ['crypto-low-volatility-reset', 'crypto-exchange-volume-reset'],
+        markers: ['低波动', '交易活跃度', '收入预期']
+    },
+    {
         id: 'crypto-banking-stress-2023',
         start: '2023-03-01',
         end: '2023-04-15',
-        reason_zh: '加密银行体系承压：Silvergate与Signature事件打击资金通道，放大加密平台风险溢价',
+        reason_zh: '银行体系风险引发短期流动性冲击：USDC波动与资金通道担忧令加密平台短暂承压，随后随crypto修复',
         family: 'crypto-banking',
         driver_type: 'sector',
         applies_to: 'symbols_only',
@@ -836,6 +921,22 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         keywords: ['silvergate', 'signature bank', 'crypto banking', 'usdc'],
         event_signal_tags: ['crypto-banking-stress'],
         markers: ['Silvergate', 'Signature', '加密银行', '资金通道']
+    },
+    {
+        id: 'crypto-internal-rotation-2023',
+        start: '2023-06-15',
+        end: '2023-09-30',
+        reason_zh: 'crypto板块内部轮动与情绪切换：监管噪音、山寨币波动与交易活跃度降温压制平台收入预期',
+        family: 'crypto-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['COIN', 'HOOD'],
+        archetypes: ['crypto-exchange-broker'],
+        subsectors: ['crypto-platform'],
+        cycle_families: ['crypto-cycle'],
+        keywords: ['altcoin', 'rotation', 'crypto sentiment', 'trading activity', 'regulatory overhang', 'volume'],
+        event_signal_tags: ['crypto-exchange-volume-reset', 'crypto-low-volatility-reset'],
+        markers: ['板块轮动', '情绪切换', '交易活跃度', '收入预期']
     },
     {
         id: 'crypto-ftx-contagion-2022',
@@ -920,7 +1021,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         id: 'crypto-post-rally-reset-2024',
         start: '2024-01-01',
         end: '2024-04-30',
-        reason_zh: '现货ETF落地后交易热度降温：币价与零售活跃度波动重估平台收入与估值弹性',
+        reason_zh: '现货ETF落地后的仓位与交易热度重估：上涨后获利回吐、交易活跃度降温与估值弹性回落',
         family: 'crypto-cycle',
         driver_type: 'sector',
         applies_to: 'symbols_only',
@@ -928,15 +1029,15 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         archetypes: ['crypto-exchange-broker'],
         subsectors: ['crypto-platform'],
         cycle_families: ['crypto-cycle'],
-        keywords: ['etf', 'bitcoin', 'crypto', 'trading volume', 'flows', 'retail activity'],
-        event_signal_tags: ['bitcoin-etf-flow-reset', 'crypto-exchange-volume-reset'],
+        keywords: ['etf', 'bitcoin', 'crypto', 'trading volume', 'flows', 'retail activity', 'positioning unwind', 'profit taking'],
+        event_signal_tags: ['bitcoin-etf-flow-reset', 'crypto-exchange-volume-reset', 'crypto-etf-disintermediation'],
         markers: ['ETF', '交易热度降温', '零售活跃度', '加密平台']
     },
     {
         id: 'crypto-mt-gox-reset-2024',
         start: '2024-07-01',
         end: '2024-09-30',
-        reason_zh: 'Mt. Gox赔付与风险资产去杠杆引发币价回调，拖累加密平台交易活跃度与估值',
+        reason_zh: 'Mt. Gox赔付预期与全球去杠杆引发币价回调，拖累加密平台交易活跃度与估值',
         family: 'crypto-cycle',
         driver_type: 'sector',
         applies_to: 'symbols_only',
@@ -952,7 +1053,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         id: 'crypto-post-election-reset-2025',
         start: '2024-12-01',
         end: '2025-04-30',
-        reason_zh: '加密平台热度回落：post-election后币价与零售交易热度降温，交易量、费率与平台估值弹性回吐',
+        reason_zh: 'post-election后仓位回吐与交易热度降温：crypto回调、ETF分流与费率压力拖累平台估值弹性',
         family: 'crypto-cycle',
         driver_type: 'sector',
         applies_to: 'symbols_only',
@@ -960,15 +1061,31 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         archetypes: ['crypto-exchange-broker'],
         subsectors: ['crypto-platform'],
         cycle_families: ['crypto-cycle'],
-        keywords: ['post-election rally', 'crypto rally cools', 'retail activity', 'trading volume', 'fee pressure', 'altcoin slump'],
-        event_signal_tags: ['crypto-post-election-reset', 'crypto-exchange-volume-reset', 'retail-crypto-activity-reset', 'fee-compression'],
+        keywords: ['post-election rally', 'crypto rally cools', 'retail activity', 'trading volume', 'fee pressure', 'altcoin slump', 'positioning unwind', 'spot bitcoin etf'],
+        event_signal_tags: ['crypto-post-election-reset', 'crypto-exchange-volume-reset', 'retail-crypto-activity-reset', 'fee-compression', 'crypto-etf-disintermediation'],
         markers: ['post-election', '交易热度回落', '零售活跃度', '费率压力']
+    },
+    {
+        id: 'crypto-earnings-reset-2025',
+        start: '2025-05-01',
+        end: '2025-09-30',
+        reason_zh: '交易量与波动率下行拖累收入：crypto活跃度回落、交易收入承压并压低平台业绩预期',
+        family: 'crypto-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['COIN', 'HOOD'],
+        archetypes: ['crypto-exchange-broker'],
+        subsectors: ['crypto-platform'],
+        cycle_families: ['crypto-cycle'],
+        keywords: ['earnings miss', 'transaction revenue', 'monthly transacting users', 'low volatility', 'trading volume', 'subscription revenue'],
+        event_signal_tags: ['earnings-miss', 'crypto-earnings-reset', 'crypto-exchange-volume-reset', 'crypto-low-volatility-reset', 'fee-compression'],
+        markers: ['业绩不及预期', '交易量', '低波动', '收入承压']
     },
     {
         id: 'crypto-risk-reset-2025-2026',
         start: '2025-10-01',
         end: '2026-03-31',
-        reason_zh: '加密平台风险偏好重估：币价回调、零售交易降温与监管/稳定币不确定性压制平台收入与估值弹性',
+        reason_zh: '加密交易所结构性走弱：币价回调、交易量降温、ETF分流与稳定币/监管不确定性压制收入与估值',
         family: 'crypto-cycle',
         driver_type: 'sector',
         applies_to: 'symbols_only',
@@ -976,9 +1093,25 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         archetypes: ['crypto-exchange-broker'],
         subsectors: ['crypto-platform'],
         cycle_families: ['crypto-cycle'],
-        keywords: ['crypto slump', 'bitcoin falls', 'ether drops', 'stablecoin regulation', 'retail trading slowdown', 'volatility spike'],
-        event_signal_tags: ['crypto-risk-off-2025', 'crypto-exchange-volume-reset', 'stablecoin-regulatory-overhang', 'retail-crypto-activity-reset'],
+        keywords: ['crypto slump', 'bitcoin falls', 'ether drops', 'stablecoin regulation', 'retail trading slowdown', 'volatility spike', 'etf competition', 'transaction revenue'],
+        event_signal_tags: ['crypto-risk-off-2025', 'crypto-exchange-volume-reset', 'stablecoin-regulatory-overhang', 'retail-crypto-activity-reset', 'crypto-etf-disintermediation'],
         markers: ['币价回调', '零售交易降温', '稳定币监管', '平台估值弹性']
+    },
+    {
+        id: 'crypto-geopolitical-risk-off-2026',
+        start: '2026-02-15',
+        end: '2026-03-31',
+        reason_zh: '地缘风险触发risk-off：crypto短期回调与交易活跃度降温拖累平台盈利预期',
+        family: 'crypto-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['COIN', 'HOOD'],
+        archetypes: ['crypto-exchange-broker'],
+        subsectors: ['crypto-platform'],
+        cycle_families: ['crypto-cycle'],
+        keywords: ['risk-off', 'middle east', 'war risk', 'bitcoin falls', 'ether drops', 'trading activity'],
+        event_signal_tags: ['crypto-risk-off-2025', 'crypto-exchange-volume-reset'],
+        markers: ['risk-off', '地缘风险', '交易活跃度', '平台盈利']
     },
     {
         id: 'bitcoin-proxy-post-etf-volatility-2024',
@@ -4243,6 +4376,21 @@ function buildCycleAwarePrimaryDriver(
 ): string {
     const signalSet = new Set(eventSignals);
 
+    if (archetype === 'crypto-exchange-broker') {
+        if (signalSet.has('crypto-earnings-reset') || signalSet.has('earnings-miss')) {
+            return `${issuer} 交易收入与盈利预期低于市场预期`;
+        }
+        if (signalSet.has('guidance-cut')) {
+            return `${issuer} 交易活跃度与平台收入指引转弱`;
+        }
+        if (signalSet.has('crypto-low-volatility-reset')) {
+            return `${issuer} crypto波动率回落与交易活跃度降温压制收入弹性`;
+        }
+        if (signalSet.has('crypto-etf-disintermediation')) {
+            return `${issuer} ETF分流与交易场景迁移削弱平台收入预期`;
+        }
+    }
+
     if (signalSet.has('guidance-cut')) return `${issuer} 指引与增长预期转弱`;
     if (signalSet.has('earnings-miss')) return `${issuer} 财报表现低于预期`;
     if (signalSet.has('ceo-change')) return `${issuer} 管理层变动引发执行不确定性`;
@@ -4327,7 +4475,7 @@ function buildCycleAwarePrimaryDriver(
         return `${issuer} 交付放缓与终端需求疲弱拖累估值`;
     }
     if (signalSet.has('crypto-banking-stress') && cycleFamily === 'crypto-cycle') {
-        return `加密资金通道与流动性承压，放大 ${issuer} 风险溢价`;
+        return `稳定币与资金通道波动引发短期流动性冲击，放大 ${issuer} 风险溢价`;
     }
     if (signalSet.has('crypto-short-report') && archetype === 'bitcoin-leverage-proxy') {
         return `${issuer} 估值溢价过高与做空质疑触发重估`;
@@ -4351,7 +4499,7 @@ function buildCycleAwarePrimaryDriver(
         return `${issuer} 融资加仓与持币结构重估放大股价波动`;
     }
     if ((signalSet.has('crypto-drawdown') || signalSet.has('crypto-exchange-volume-reset')) && archetype === 'crypto-exchange-broker') {
-        return `${issuer} 交易量、币价与零售活跃度回落拖累收入预期`;
+        return `${issuer} 币价、波动率与交易量回落拖累收入预期`;
     }
     if (signalSet.has('stablecoin-regulatory-overhang') && archetype === 'crypto-exchange-broker') {
         return `${issuer} 稳定币与加密监管不确定性抬升平台估值折价`;
@@ -4363,10 +4511,10 @@ function buildCycleAwarePrimaryDriver(
         return `${issuer} 费率与交易收入弹性回吐压制估值`;
     }
     if (signalSet.has('crypto-post-election-reset') && archetype === 'crypto-exchange-broker') {
-        return `${issuer} post-election 后币价与平台交易热度降温，估值溢价回吐`;
+        return `${issuer} post-election 后仓位回吐与交易热度降温压制估值弹性`;
     }
     if (signalSet.has('crypto-risk-off-2025') && archetype === 'crypto-exchange-broker') {
-        return `${issuer} 币价回调、交易活跃度降温与监管不确定性共同压制平台估值`;
+        return `${issuer} crypto回调、交易活跃度降温与监管不确定性共同压制平台估值`;
     }
     if (signalSet.has('crypto-drawdown') && archetype === 'bitcoin-miner') {
         return `${issuer} 比特币回撤叠加 hashprice 走弱压缩挖矿盈利弹性`;
@@ -4435,7 +4583,7 @@ function buildCycleAwarePrimaryDriver(
         case 'travel-leisure-cycle':
             return `${issuer} 出行与可选消费需求预期走弱`;
         case 'crypto-cycle':
-            return `${issuer} 加密资产价格、资金流与风险偏好回落`;
+            return `${issuer} 加密资产价格、波动率与交易活跃度回落`;
         default:
             break;
     }
@@ -4496,7 +4644,7 @@ function buildCycleAwarePrimaryDriver(
         case 'fintech-payments':
             return `${issuer} 支付量、商户费率与消费活动节奏变化压制估值`;
         case 'crypto-exchange-broker':
-            return `${issuer} 交易量与加密资产价格回落拖累收入预期`;
+            return `${issuer} 币价、波动率与交易量回落拖累收入预期`;
         case 'bitcoin-leverage-proxy':
             return `${issuer} 比特币价格波动与融资加仓结构放大股价弹性`;
         case 'bitcoin-miner':
@@ -4601,6 +4749,19 @@ function isChinaPlatformBroadFrameworkRule(rule: AttributionMacroRule): boolean 
     return rule.id === 'china-growth-reset-2022' || rule.id === 'china-platform-rectification-2021';
 }
 
+function isCryptoExchangeSpecificRule(rule: AttributionMacroRule): boolean {
+    return (
+        rule.cycle_families?.includes('crypto-cycle') === true &&
+        (rule.symbols?.some((symbol) => ['COIN', 'HOOD'].includes(symbol)) === true ||
+            rule.archetypes?.includes('crypto-exchange-broker') === true ||
+            Boolean(rule.event_signal_tags?.length))
+    );
+}
+
+function isCryptoExchangeBroadFrameworkRule(rule: AttributionMacroRule): boolean {
+    return rule.id === 'crypto-cycle-reset-2021' || rule.id === 'crypto-liquidity-bear-market-2022';
+}
+
 function rankAttributionRules(
     symbol: string,
     companyName: string | null,
@@ -4619,6 +4780,9 @@ function rankAttributionRules(
     const candidateRules = DRAWDOWN_ATTRIBUTION_RULES.filter(
         (rule) => eventOverlapsRule(peakDate, troughDate, rule) && isRuleApplicableToSymbol(rule, symbol)
     );
+    const hasCryptoExchangeSpecificCandidate =
+        inferredArchetype === 'crypto-exchange-broker' &&
+        candidateRules.some((rule) => isCryptoExchangeSpecificRule(rule));
     const hasChinaPlatformSpecificCandidate =
         isChinaPlatformArchetype && candidateRules.some((rule) => isChinaPlatformSpecificRule(rule));
 
@@ -4647,6 +4811,17 @@ function rankAttributionRules(
                 (total, tag) => total + (eventSignals.has(tag) ? 10 : 0),
                 0
             );
+            const cryptoExchangeSpecificityBonus =
+                hasCryptoExchangeSpecificCandidate && isCryptoExchangeSpecificRule(rule) && peakAlignmentScore >= 0 ? 28 : 0;
+            const cryptoExchangeBroadPenalty =
+                hasCryptoExchangeSpecificCandidate && isCryptoExchangeBroadFrameworkRule(rule) ? -20 : 0;
+            const cryptoExchangeSignalBonus =
+                hasCryptoExchangeSpecificCandidate && peakAlignmentScore >= 0 && (rule.event_signal_tags ?? []).length > 0
+                    ? (rule.event_signal_tags ?? []).reduce(
+                          (total, tag) => total + (eventSignals.has(tag) ? 16 : 0),
+                          0
+                      )
+                    : 0;
             const chinaPlatformSpecificityBonus =
                 hasChinaPlatformSpecificCandidate && isChinaPlatformSpecificRule(rule) && peakAlignmentScore >= 0 ? 24 : 0;
             const chinaPlatformBroadPenalty =
@@ -4672,6 +4847,9 @@ function rankAttributionRules(
                     cryptoSpecificityBonus +
                     cryptoMacroPenalty +
                     signalScore +
+                    cryptoExchangeSpecificityBonus +
+                    cryptoExchangeBroadPenalty +
+                    cryptoExchangeSignalBonus +
                     chinaPlatformSpecificityBonus +
                     chinaPlatformBroadPenalty +
                     chinaPlatformSignalBonus
@@ -4707,7 +4885,7 @@ function buildStructuredFallbackAttribution(
         background_regime: null,
         primary_driver_type: 'company',
         primary_driver: buildCycleAwarePrimaryDriver(issuer, businessArchetype, cycleFamily, eventSignals),
-        secondary_driver: '市场风险偏好回落放大跌幅',
+        secondary_driver: cycleFamily === 'crypto-cycle' ? null : '市场风险偏好回落放大跌幅',
         reason_zh: buildFallbackAttributionReason(symbol, companyName, peakDate),
         primary_rule_id: `fallback:${fallbackRuleKey}:${peakDate}:${troughDate}`,
         background_rule_id: null
@@ -4768,6 +4946,12 @@ function chooseHeuristicAttributionReason(
             candidate.rule.id !== primary.id &&
             ['macro', 'policy', 'geopolitical'].includes(candidate.rule.driver_type)
     )?.rule;
+    const suppressBackgroundNarrative =
+        inferredCycleFamily === 'crypto-cycle' &&
+        (primary.cycle_families?.includes('crypto-cycle') === true ||
+            primary.archetypes?.includes('crypto-exchange-broker') === true ||
+            primary.archetypes?.includes('bitcoin-leverage-proxy') === true ||
+            primary.archetypes?.includes('bitcoin-miner') === true);
 
     const structured: StructuredAttributionReason = {
         business_archetype: inferredArchetype,
@@ -4777,16 +4961,22 @@ function chooseHeuristicAttributionReason(
         event_signal_details: eventSignalDetails,
         reason_family: primary.family,
         background_regime:
-            ['macro', 'policy', 'geopolitical'].includes(primary.driver_type) ? primary.reason_zh : background?.reason_zh ?? null,
+            suppressBackgroundNarrative
+                ? null
+                : ['macro', 'policy', 'geopolitical'].includes(primary.driver_type)
+                  ? primary.reason_zh
+                  : background?.reason_zh ?? null,
         primary_driver_type: primary.driver_type,
         primary_driver: primary.reason_zh,
         secondary_driver:
-            primary.driver_type === 'company' || primary.driver_type === 'sector'
-                ? background?.reason_zh ?? null
-                : null,
+            suppressBackgroundNarrative
+                ? null
+                : primary.driver_type === 'company' || primary.driver_type === 'sector'
+                  ? background?.reason_zh ?? null
+                  : null,
         reason_zh: primary.reason_zh,
         primary_rule_id: primary.id,
-        background_rule_id: background?.id ?? null
+        background_rule_id: suppressBackgroundNarrative ? null : background?.id ?? null
     };
 
     structured.reason_zh = renderStructuredAttributionReason(structured);
