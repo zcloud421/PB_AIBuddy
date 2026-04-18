@@ -97,7 +97,7 @@ const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
 const DRAWDOWN_PREWARM_COOLDOWN_MS = 30 * 60 * 1000;
 const DRAWDOWN_PREWARM_FRESHNESS_MS = 2 * 60 * 1000;
-const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 9;
+const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 10;
 const DRAWDOWN_TAIL_RISK_HISTORY_LIMIT = 1500;
 const DRAWDOWN_TAIL_RISK_LOOKBACK_DAYS = 365 * 5;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
@@ -459,6 +459,27 @@ const ARCHETYPE_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
         archetypes: ['bitcoin-leverage-proxy']
     },
     {
+        tag: 'mnav-compression',
+        keywords: ['mnav', 'premium to nav', 'nav premium', 'premium compression', 'valuation premium', 'trading at a premium'],
+        archetypes: ['bitcoin-leverage-proxy']
+    },
+    {
+        tag: 'crypto-short-report',
+        keywords: ['citron', 'short position', 'short seller', 'overvalued', 'too hot', 'detached from bitcoin'],
+        archetypes: ['bitcoin-leverage-proxy']
+    },
+    {
+        tag: 'mt-gox-overhang',
+        keywords: ['mt. gox', 'mt gox', 'repayment', 'creditor payouts', 'creditor repayment'],
+        archetypes: ['bitcoin-leverage-proxy', 'crypto-exchange-broker', 'bitcoin-miner'],
+        cycle_families: ['crypto-cycle']
+    },
+    {
+        tag: 'leveraged-etf-unwind',
+        keywords: ['leveraged etf', '2x etf', 'teeters on 200-day', 'downside protection', 'volatility shares', 'trading volume surge'],
+        archetypes: ['bitcoin-leverage-proxy']
+    },
+    {
         tag: 'treasury-financing-overhang',
         keywords: ['at-the-market', 'share sale', 'equity offering', 'preferred stock', 'convertible offering', 'funding plan'],
         archetypes: ['bitcoin-leverage-proxy']
@@ -709,9 +730,41 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         archetypes: ['bitcoin-leverage-proxy'],
         subsectors: ['crypto-platform'],
         cycle_families: ['crypto-cycle'],
-        keywords: ['bitcoin', 'btc', 'convertible', 'holdings', 'crypto'],
+        keywords: ['bear market', 'risk appetite', 'convertible', 'funding stress', 'treasury financing'],
         event_signal_tags: ['crypto-drawdown', 'bitcoin-treasury-pressure'],
         markers: ['比特币', '杠杆持币', '融资压力', 'Strategy']
+    },
+    {
+        id: 'bitcoin-proxy-terra-contagion-2022',
+        start: '2022-05-01',
+        end: '2022-07-31',
+        reason_zh: 'Terra/LUNA崩盘与加密信用传染冲击：币价急跌、杠杆去化与流动性收缩放大Strategy回撤',
+        family: 'crypto-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['MSTR'],
+        archetypes: ['bitcoin-leverage-proxy'],
+        subsectors: ['crypto-platform'],
+        cycle_families: ['crypto-cycle'],
+        keywords: ['terra', 'luna', 'stablecoin', 'crypto contagion', '3ac', 'liquidation'],
+        event_signal_tags: ['crypto-drawdown', 'bitcoin-treasury-pressure'],
+        markers: ['Terra', 'LUNA', '信用传染', '杠杆去化']
+    },
+    {
+        id: 'bitcoin-proxy-ftx-contagion-2022',
+        start: '2022-11-01',
+        end: '2022-12-31',
+        reason_zh: 'FTX暴雷与加密信用危机扩散：币价下跌、交易对手风险与融资压力放大Strategy估值回撤',
+        family: 'crypto-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['MSTR'],
+        archetypes: ['bitcoin-leverage-proxy'],
+        subsectors: ['crypto-platform'],
+        cycle_families: ['crypto-cycle'],
+        keywords: ['ftx', 'alameda', 'exchange collapse', 'counterparty risk', 'bankruptcy'],
+        event_signal_tags: ['crypto-drawdown', 'bitcoin-treasury-pressure'],
+        markers: ['FTX', 'Alameda', '交易对手风险', '加密信用危机']
     },
     {
         id: 'bitcoin-miner-bear-market-2021',
@@ -747,8 +800,8 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
     {
         id: 'bitcoin-proxy-post-etf-volatility-2024',
         start: '2023-11-01',
-        end: '2025-12-31',
-        reason_zh: '比特币杠杆代理高波动回撤：现货ETF资金流、融资加仓与持币结构放大Strategy对币价的高贝塔弹性',
+        end: '2024-04-30',
+        reason_zh: '现货ETF落地后的代理溢价重估：ETF资金流、交易拥挤与融资预期放大Strategy对币价的高贝塔波动',
         family: 'crypto-cycle',
         driver_type: 'company',
         applies_to: 'symbols_only',
@@ -757,14 +810,14 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         subsectors: ['crypto-platform'],
         cycle_families: ['crypto-cycle'],
         keywords: ['etf', 'bitcoin', 'btc', 'convertible', 'at-the-market', 'preferred stock', 'treasury'],
-        event_signal_tags: ['crypto-drawdown', 'bitcoin-treasury-pressure'],
-        markers: ['ETF', '比特币', '融资加仓', '高贝塔']
+        event_signal_tags: ['bitcoin-etf-flow-reset', 'bitcoin-treasury-pressure', 'mnav-compression'],
+        markers: ['ETF', '比特币', '代理溢价', '高贝塔']
     },
     {
         id: 'bitcoin-proxy-financing-reset-2025',
         start: '2025-01-01',
-        end: '2025-12-31',
-        reason_zh: 'Strategy融资与持币结构重估：可转债、优先股与ATM融资安排放大对比特币回撤的高贝塔弹性',
+        end: '2025-04-30',
+        reason_zh: 'Strategy溢价与融资结构重估：杠杆ETF去泡沫、mNAV压缩与融资安排重估放大高贝塔回撤',
         family: 'crypto-cycle',
         driver_type: 'company',
         applies_to: 'symbols_only',
@@ -772,9 +825,57 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         archetypes: ['bitcoin-leverage-proxy'],
         subsectors: ['crypto-platform'],
         cycle_families: ['crypto-cycle'],
-        keywords: ['convertible', 'preferred stock', 'at-the-market', 'share sale', 'treasury'],
-        event_signal_tags: ['bitcoin-treasury-pressure', 'treasury-financing-overhang'],
-        markers: ['可转债', '优先股', 'ATM', '融资']
+        keywords: ['convertible', 'preferred stock', 'at-the-market', 'share sale', 'treasury', 'mnav', 'premium compression', 'leveraged etf'],
+        event_signal_tags: ['bitcoin-treasury-pressure', 'treasury-financing-overhang', 'mnav-compression', 'leveraged-etf-unwind'],
+        markers: ['可转债', '优先股', 'ATM', 'mNAV', '杠杆ETF']
+    },
+    {
+        id: 'bitcoin-proxy-mt-gox-reset-2024',
+        start: '2024-07-01',
+        end: '2024-09-30',
+        reason_zh: 'Mt. Gox赔付与风险资产去杠杆引发比特币抛压担忧，放大Strategy高贝塔下跌',
+        family: 'crypto-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['MSTR'],
+        archetypes: ['bitcoin-leverage-proxy'],
+        subsectors: ['crypto-platform'],
+        cycle_families: ['crypto-cycle'],
+        keywords: ['mt. gox', 'mt gox', 'repayment', 'creditor', 'crypto market bloodbath', 'risk-off'],
+        event_signal_tags: ['mt-gox-overhang', 'crypto-drawdown'],
+        markers: ['Mt. Gox', '赔付', '抛压担忧', 'risk-off']
+    },
+    {
+        id: 'bitcoin-proxy-citron-reset-2024',
+        start: '2024-11-01',
+        end: '2024-12-31',
+        reason_zh: 'Citron做空与估值溢价重估：市场质疑Strategy相对比特币的过热溢价，放大高贝塔回撤',
+        family: 'crypto-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['MSTR'],
+        archetypes: ['bitcoin-leverage-proxy'],
+        subsectors: ['crypto-platform'],
+        cycle_families: ['crypto-cycle'],
+        keywords: ['citron', 'short position', 'too hot', 'overvalued', 'premium to nav', 'detached from bitcoin'],
+        event_signal_tags: ['crypto-short-report', 'mnav-compression'],
+        markers: ['Citron', '做空', '估值溢价', '过热']
+    },
+    {
+        id: 'bitcoin-proxy-mnav-compression-2025-2026',
+        start: '2025-07-01',
+        end: '2026-03-31',
+        reason_zh: '比特币高位回落叠加Strategy估值溢价收缩：币价回调、mNAV压缩与融资扩张预期放大高贝塔下跌',
+        family: 'crypto-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['MSTR'],
+        archetypes: ['bitcoin-leverage-proxy'],
+        subsectors: ['crypto-platform'],
+        cycle_families: ['crypto-cycle'],
+        keywords: ['crypto slump', 'bitcoin slides', 'mnav', 'premium compression', 'downside protection', 'funding expansion', 'risk-off'],
+        event_signal_tags: ['mnav-compression', 'treasury-financing-overhang', 'crypto-drawdown'],
+        markers: ['mNAV', '溢价收缩', '比特币回调', '风险偏好']
     },
     {
         id: 'bitcoin-miner-reset-2024',
@@ -3826,8 +3927,20 @@ function buildCycleAwarePrimaryDriver(
     if (signalSet.has('crypto-banking-stress') && cycleFamily === 'crypto-cycle') {
         return `加密资金通道与流动性承压，放大 ${issuer} 风险溢价`;
     }
+    if (signalSet.has('crypto-short-report') && archetype === 'bitcoin-leverage-proxy') {
+        return `${issuer} 估值溢价过高与做空质疑触发重估`;
+    }
+    if (signalSet.has('mt-gox-overhang') && archetype === 'bitcoin-leverage-proxy') {
+        return `${issuer} 因 Mt. Gox 赔付抛压预期与风险资产去杠杆承压`;
+    }
     if (signalSet.has('bitcoin-etf-flow-reset') && archetype === 'bitcoin-leverage-proxy') {
         return `${issuer} 现货ETF资金流变化重估其对比特币的高贝塔弹性`;
+    }
+    if (signalSet.has('mnav-compression') && archetype === 'bitcoin-leverage-proxy') {
+        return `${issuer} 相对比特币的估值溢价收缩压制股价弹性`;
+    }
+    if (signalSet.has('leveraged-etf-unwind') && archetype === 'bitcoin-leverage-proxy') {
+        return `${issuer} 杠杆产品去泡沫与融资结构重估放大回撤`;
     }
     if (signalSet.has('crypto-drawdown') && archetype === 'bitcoin-leverage-proxy') {
         return `${issuer} 比特币回撤与杠杆持币结构放大净值波动`;
@@ -4009,6 +4122,19 @@ function getDriverPriority(rule: AttributionMacroRule): number {
     }
 }
 
+function getRuleWindowSpecificityScore(rule: AttributionMacroRule): number {
+    const start = new Date(`${rule.start}T00:00:00Z`).getTime();
+    const end = new Date(`${rule.end}T00:00:00Z`).getTime();
+    const days = Math.max(1, Math.round((end - start) / (1000 * 60 * 60 * 24)));
+
+    if (days <= 45) return 10;
+    if (days <= 90) return 8;
+    if (days <= 180) return 6;
+    if (days <= 365) return 4;
+    if (days <= 730) return 2;
+    return 0;
+}
+
 function rankAttributionRules(
     symbol: string,
     companyName: string | null,
@@ -4027,6 +4153,7 @@ function rankAttributionRules(
         .filter((rule) => eventOverlapsRule(peakDate, troughDate, rule) && isRuleApplicableToSymbol(rule, symbol))
         .map((rule) => {
             const specificityScore = getRuleSpecificityScore(rule, symbol);
+            const windowSpecificityScore = getRuleWindowSpecificityScore(rule);
             const keywordScore = countKeywordHits(newsItems, rule.keywords) * 8;
             const driverScore = getDriverPriority(rule);
             const archetypeScore = inferredArchetype && rule.archetypes?.includes(inferredArchetype) ? 16 : 0;
@@ -4038,7 +4165,15 @@ function rankAttributionRules(
             );
             return {
                 rule,
-                score: specificityScore + keywordScore + driverScore + archetypeScore + subsectorScore + cycleScore + signalScore
+                score:
+                    specificityScore +
+                    windowSpecificityScore +
+                    keywordScore +
+                    driverScore +
+                    archetypeScore +
+                    subsectorScore +
+                    cycleScore +
+                    signalScore
             };
         })
         .sort((left, right) => right.score - left.score);
