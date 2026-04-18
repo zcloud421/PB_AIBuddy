@@ -5226,7 +5226,8 @@ function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>
         });
     }
 
-    const recoveredEpisodes = episodes.filter((episode) => episode.recovery_days !== null);
+    const significantEpisodes = episodes.filter((episode) => episode.max_drawdown_pct <= -10);
+    const recoveredEpisodes = significantEpisodes.filter((episode) => episode.recovery_days !== null);
     const sortedRecoveryDays = recoveredEpisodes
         .map((episode) => episode.recovery_days as number)
         .sort((left, right) => left - right);
