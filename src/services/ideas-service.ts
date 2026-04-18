@@ -109,6 +109,7 @@ type AttributionAppliesTo = 'all' | 'us_tech' | 'china_tech' | 'symbols_only';
 type AttributionDriverType = 'macro' | 'policy' | 'sector' | 'company' | 'geopolitical' | 'mixed';
 type AttributionCycleFamily =
     | 'banking-credit-cycle'
+    | 'china-platform-cycle'
     | 'energy-oil-cycle'
     | 'healthcare-cost-cycle'
     | 'industrial-capex-cycle'
@@ -143,6 +144,12 @@ type AttributionBusinessArchetype =
     | 'off-price-retail'
     | 'used-auto-retail'
     | 'china-ecommerce-platform'
+    | 'china-search-ai-platform'
+    | 'china-online-gaming'
+    | 'china-content-platform'
+    | 'china-music-platform'
+    | 'china-property-platform'
+    | 'china-value-retail'
     | 'ad-platform-internet'
     | 'cloud-platform'
     | 'consumer-tech-ecosystem'
@@ -226,6 +233,12 @@ const US_TECH_ATTRIBUTION_SYMBOLS = new Set([
 
 const SYMBOL_SUBSECTOR_MAP: Array<{ subsector: string; symbols: string[] }> = [
     { subsector: 'china-ecommerce-platform', symbols: ['PDD', 'JD', 'BABA'] },
+    { subsector: 'china-search-ai-platform', symbols: ['BIDU'] },
+    { subsector: 'china-online-gaming', symbols: ['NTES', 'TCEHY'] },
+    { subsector: 'china-content-platform', symbols: ['BILI', 'IQ'] },
+    { subsector: 'china-music-platform', symbols: ['TME'] },
+    { subsector: 'china-property-platform', symbols: ['BEKE'] },
+    { subsector: 'china-value-retail', symbols: ['VIPS'] },
     { subsector: 'ad-platform-internet', symbols: ['GOOG', 'GOOGL', 'META', 'SNAP', 'PINS', 'BIDU'] },
     { subsector: 'cloud-platform', symbols: ['MSFT', 'AMZN', 'ORCL'] },
     { subsector: 'consumer-tech-ecosystem', symbols: ['AAPL'] },
@@ -266,6 +279,12 @@ const SYMBOL_ARCHETYPE_MAP: Array<{ archetype: AttributionBusinessArchetype; sym
     { archetype: 'off-price-retail', symbols: ['TJX'] },
     { archetype: 'used-auto-retail', symbols: ['KMX'] },
     { archetype: 'china-ecommerce-platform', symbols: ['PDD', 'JD', 'BABA'] },
+    { archetype: 'china-search-ai-platform', symbols: ['BIDU'] },
+    { archetype: 'china-online-gaming', symbols: ['NTES', 'TCEHY'] },
+    { archetype: 'china-content-platform', symbols: ['BILI', 'IQ'] },
+    { archetype: 'china-music-platform', symbols: ['TME'] },
+    { archetype: 'china-property-platform', symbols: ['BEKE'] },
+    { archetype: 'china-value-retail', symbols: ['VIPS'] },
     { archetype: 'ad-platform-internet', symbols: ['GOOG', 'GOOGL', 'META', 'SNAP', 'PINS', 'BIDU'] },
     { archetype: 'cloud-platform', symbols: ['MSFT', 'AMZN', 'ORCL'] },
     { archetype: 'consumer-tech-ecosystem', symbols: ['AAPL'] },
@@ -287,6 +306,10 @@ const SYMBOL_ARCHETYPE_MAP: Array<{ archetype: AttributionBusinessArchetype; sym
 ];
 
 const SYMBOL_CYCLE_FAMILY_MAP: Array<{ cycle_family: AttributionCycleFamily; symbols: string[] }> = [
+    {
+        cycle_family: 'china-platform-cycle',
+        symbols: ['BABA', 'JD', 'PDD', 'BIDU', 'NTES', 'TME', 'BILI', 'IQ', 'VIPS', 'TCEHY', 'BEKE']
+    },
     {
         cycle_family: 'banking-credit-cycle',
         symbols: ['JPM', 'BAC', 'C', 'WFC', 'GS', 'MS', 'HSBC']
@@ -388,6 +411,36 @@ const ARCHETYPE_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
         tag: 'global-expansion-slowdown',
         keywords: ['global outlook', 'global business', 'expansion slows', 'external challenges', 'uncertain market'],
         archetypes: ['china-ecommerce-platform']
+    },
+    {
+        tag: 'china-ad-spending-reset',
+        keywords: ['online marketing revenue', 'ad revenue', 'advertising revenue', 'search advertising', 'marketing spending', 'search demand'],
+        archetypes: ['china-search-ai-platform']
+    },
+    {
+        tag: 'gaming-approval-reset',
+        keywords: ['game approvals', 'gaming approvals', 'new titles', 'title pipeline', 'anti-addiction', 'game revenue', 'mobile games'],
+        archetypes: ['china-online-gaming']
+    },
+    {
+        tag: 'content-monetization-reset',
+        keywords: ['membership revenue', 'subscriber growth', 'content costs', 'advertising revenue', 'streaming revenue', 'losses narrowed'],
+        archetypes: ['china-content-platform']
+    },
+    {
+        tag: 'music-social-entertainment-reset',
+        keywords: ['social entertainment', 'online music', 'music subscriptions', 'music revenue', 'karaoke', 'licensing costs'],
+        archetypes: ['china-music-platform']
+    },
+    {
+        tag: 'property-transaction-reset',
+        keywords: ['existing-home sales', 'property transactions', 'home transactions', 'housing stimulus', 'brokerage services', 'secondary home sales'],
+        archetypes: ['china-property-platform']
+    },
+    {
+        tag: 'value-retail-demand-reset',
+        keywords: ['discount retail', 'apparel demand', 'active customers', 'brand partners', 'consumer spending', 'value retail'],
+        archetypes: ['china-value-retail']
     },
     {
         tag: 'medical-cost-pressure',
@@ -1143,6 +1196,102 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'china_tech',
         keywords: ['lockdown', 'consumer', 'property', 'real estate', 'delisting', 'hfcaa', 'china growth', 'export'],
         markers: ['中国经济', '复苏不及预期', '地产压力', '退市担忧']
+    },
+    {
+        id: 'china-search-ai-reset-2022',
+        start: '2022-04-01',
+        end: '2026-12-31',
+        reason_zh: '中国搜索与AI平台承压：广告需求偏弱、搜索流量变现与AI投入回报预期波动拖累估值',
+        family: 'china-platform-fundamental',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['BIDU'],
+        archetypes: ['china-search-ai-platform'],
+        subsectors: ['china-search-ai-platform'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['search', 'advertising revenue', 'online marketing', 'ernie', 'cloud', 'ai'],
+        event_signal_tags: ['china-ad-spending-reset', 'cloud-spending-reset'],
+        markers: ['百度', '搜索广告', '在线营销', 'AI投入']
+    },
+    {
+        id: 'china-gaming-platform-reset-2022',
+        start: '2021-07-01',
+        end: '2026-12-31',
+        reason_zh: '中国游戏平台承压：版号、内容供给与用户付费预期波动压制估值',
+        family: 'china-platform-fundamental',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['NTES', 'TCEHY'],
+        archetypes: ['china-online-gaming'],
+        subsectors: ['china-online-gaming'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['game approvals', 'gaming approvals', 'new titles', 'anti-addiction', 'game revenue', 'pipeline'],
+        event_signal_tags: ['gaming-approval-reset'],
+        markers: ['游戏版号', '内容供给', '用户付费', '游戏平台']
+    },
+    {
+        id: 'china-content-platform-reset-2022',
+        start: '2021-07-01',
+        end: '2026-12-31',
+        reason_zh: '中国内容平台承压：广告变现、会员增长与内容成本压力压制估值',
+        family: 'china-platform-fundamental',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['BILI', 'IQ'],
+        archetypes: ['china-content-platform'],
+        subsectors: ['china-content-platform'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['membership revenue', 'subscriber growth', 'content costs', 'advertising revenue', 'losses narrowed'],
+        event_signal_tags: ['content-monetization-reset'],
+        markers: ['内容平台', '会员增长', '内容成本', '广告变现']
+    },
+    {
+        id: 'china-music-platform-reset-2022',
+        start: '2021-07-01',
+        end: '2026-12-31',
+        reason_zh: '中国音乐娱乐平台承压：订阅增长、社交娱乐收入与版权成本预期波动压制估值',
+        family: 'china-platform-fundamental',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['TME'],
+        archetypes: ['china-music-platform'],
+        subsectors: ['china-music-platform'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['online music', 'music subscriptions', 'social entertainment', 'licensing costs', 'music revenue'],
+        event_signal_tags: ['music-social-entertainment-reset'],
+        markers: ['腾讯音乐', '订阅增长', '社交娱乐', '版权成本']
+    },
+    {
+        id: 'china-property-platform-reset-2022',
+        start: '2022-04-01',
+        end: '2026-12-31',
+        reason_zh: '中国地产服务平台承压：房屋成交、地产信心与住房政策预期波动压制平台业务估值',
+        family: 'china-platform-fundamental',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['BEKE'],
+        archetypes: ['china-property-platform'],
+        subsectors: ['china-property-platform'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['existing-home sales', 'property transactions', 'housing stimulus', 'secondary home sales', 'brokerage services'],
+        event_signal_tags: ['property-transaction-reset'],
+        markers: ['贝壳', '房屋成交', '地产信心', '住房政策']
+    },
+    {
+        id: 'china-value-retail-reset-2022',
+        start: '2022-04-01',
+        end: '2026-12-31',
+        reason_zh: '中国折扣零售平台承压：消费信心、活跃用户与品牌供给预期走弱压制估值',
+        family: 'china-platform-fundamental',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['VIPS'],
+        archetypes: ['china-value-retail'],
+        subsectors: ['china-value-retail'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['discount retail', 'apparel demand', 'active customers', 'brand partners', 'consumer spending'],
+        event_signal_tags: ['value-retail-demand-reset'],
+        markers: ['唯品会', '折扣零售', '活跃用户', '消费信心']
     },
     {
         id: 'pdd-temu-competition-reset-2024',
@@ -3788,6 +3937,12 @@ function inferSymbolSubsector(symbol: string, companyName: string | null, newsIt
     if (text.includes('glp-1') || text.includes('obesity drug') || text.includes('drug pricing')) return 'large-pharma';
     if (text.includes('clinical trial') || text.includes('pipeline setback') || text.includes('fda delay')) return 'large-biotech';
     if (text.includes('temu') || text.includes('pinduoduo') || text.includes('e-commerce') || text.includes('ecommerce')) return 'china-ecommerce-platform';
+    if (text.includes('search advertising') || text.includes('online marketing') || text.includes('ernie')) return 'china-search-ai-platform';
+    if (text.includes('game approvals') || text.includes('new titles') || text.includes('anti-addiction')) return 'china-online-gaming';
+    if (text.includes('membership revenue') || text.includes('content costs') || text.includes('streaming revenue')) return 'china-content-platform';
+    if (text.includes('online music') || text.includes('social entertainment') || text.includes('music subscriptions')) return 'china-music-platform';
+    if (text.includes('property transactions') || text.includes('existing-home sales') || text.includes('housing stimulus')) return 'china-property-platform';
+    if (text.includes('discount retail') || text.includes('brand partners') || text.includes('apparel demand')) return 'china-value-retail';
     if (text.includes('azure') || text.includes('aws') || text.includes('gcp') || text.includes('cloud growth')) return 'cloud-platform';
     if (text.includes('iphone') || text.includes('app store') || text.includes('mac sales')) return 'consumer-tech-ecosystem';
     if (text.includes('optical') || text.includes('networking') || text.includes('telecom')) return 'optical-networking';
@@ -3843,6 +3998,12 @@ function inferSymbolBusinessArchetype(
     if (text.includes('glp-1') || text.includes('obesity drug') || text.includes('drug pricing')) return 'large-pharma';
     if (text.includes('clinical trial') || text.includes('pipeline setback') || text.includes('fda delay')) return 'large-biotech';
     if (text.includes('temu') || text.includes('pinduoduo') || text.includes('e-commerce') || text.includes('ecommerce')) return 'china-ecommerce-platform';
+    if (text.includes('search advertising') || text.includes('online marketing') || text.includes('ernie')) return 'china-search-ai-platform';
+    if (text.includes('game approvals') || text.includes('new titles') || text.includes('anti-addiction')) return 'china-online-gaming';
+    if (text.includes('membership revenue') || text.includes('content costs') || text.includes('streaming revenue')) return 'china-content-platform';
+    if (text.includes('online music') || text.includes('social entertainment') || text.includes('music subscriptions')) return 'china-music-platform';
+    if (text.includes('property transactions') || text.includes('existing-home sales') || text.includes('housing stimulus')) return 'china-property-platform';
+    if (text.includes('discount retail') || text.includes('brand partners') || text.includes('apparel demand')) return 'china-value-retail';
     if (text.includes('azure') || text.includes('aws') || text.includes('gcp') || text.includes('cloud growth')) return 'cloud-platform';
     if (text.includes('iphone') || text.includes('app store') || text.includes('mac sales')) return 'consumer-tech-ecosystem';
     if (text.includes('oil') || text.includes('opec') || text.includes('barrels')) return 'integrated-oil-major';
@@ -3941,6 +4102,16 @@ function normalizeIssuerName(symbol: string, companyName: string | null): string
         TSLA: 'Tesla',
         TSM: 'TSMC',
         PDD: '拼多多',
+        BABA: '阿里巴巴',
+        JD: '京东',
+        BIDU: '百度',
+        NTES: '网易',
+        TME: '腾讯音乐',
+        BILI: '哔哩哔哩',
+        IQ: '爱奇艺',
+        VIPS: '唯品会',
+        BEKE: '贝壳',
+        TCEHY: '腾讯',
         COIN: 'Coinbase',
         MSTR: 'Strategy',
         MSFT: 'Microsoft',
@@ -3994,6 +4165,24 @@ function buildCycleAwarePrimaryDriver(
     }
     if (signalSet.has('global-expansion-slowdown') && archetype === 'china-ecommerce-platform') {
         return `${issuer} 全球扩张与增长可持续性预期转弱`;
+    }
+    if (signalSet.has('china-ad-spending-reset') && archetype === 'china-search-ai-platform') {
+        return `${issuer} 在线营销需求、搜索流量与AI投入回报预期走弱`;
+    }
+    if (signalSet.has('gaming-approval-reset') && archetype === 'china-online-gaming') {
+        return `${issuer} 版号、爆款节奏与用户付费预期波动`;
+    }
+    if (signalSet.has('content-monetization-reset') && archetype === 'china-content-platform') {
+        return `${issuer} 内容变现、会员增长与成本控制预期承压`;
+    }
+    if (signalSet.has('music-social-entertainment-reset') && archetype === 'china-music-platform') {
+        return `${issuer} 音乐订阅与社交娱乐收入预期走弱`;
+    }
+    if (signalSet.has('property-transaction-reset') && archetype === 'china-property-platform') {
+        return `${issuer} 房屋成交与地产链信心偏弱压制平台业务`;
+    }
+    if (signalSet.has('value-retail-demand-reset') && archetype === 'china-value-retail') {
+        return `${issuer} 折扣零售需求与活跃用户增长预期放缓`;
     }
     if (signalSet.has('medical-cost-pressure') && archetype === 'managed-care') {
         return `${issuer} 医疗赔付率与成本压力上行压制盈利预期`;
@@ -4126,6 +4315,8 @@ function buildCycleAwarePrimaryDriver(
     switch (cycleFamily) {
         case 'banking-credit-cycle':
             return `${issuer} 利率、信贷质量与资本市场活跃度变化压制估值`;
+        case 'china-platform-cycle':
+            return `${issuer} 中国平台经济、消费与监管预期波动压制估值`;
         case 'healthcare-cost-cycle':
             return `${issuer} 医疗赔付率与成本趋势上行压制盈利预期`;
         case 'energy-oil-cycle':
@@ -4179,6 +4370,18 @@ function buildCycleAwarePrimaryDriver(
             return `${issuer} 终端消费与可选支出需求走弱`;
         case 'china-ecommerce-platform':
             return `${issuer} 平台电商竞争、商家生态与跨境业务预期承压`;
+        case 'china-search-ai-platform':
+            return `${issuer} 搜索广告、在线营销与AI投入回报预期承压`;
+        case 'china-online-gaming':
+            return `${issuer} 游戏版号、内容供给与用户付费预期波动`;
+        case 'china-content-platform':
+            return `${issuer} 内容成本、广告变现与会员增长预期承压`;
+        case 'china-music-platform':
+            return `${issuer} 音乐订阅与社交娱乐业务预期走弱`;
+        case 'china-property-platform':
+            return `${issuer} 房屋成交与地产链信心偏弱压制平台业务`;
+        case 'china-value-retail':
+            return `${issuer} 折扣零售需求与消费信心转弱压制增长预期`;
         case 'ad-platform-internet':
             return `${issuer} 广告、流量与平台主业预期承压`;
         case 'cloud-platform':
