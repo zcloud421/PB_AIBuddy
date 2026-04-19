@@ -145,6 +145,7 @@ type AttributionCycleFamily =
     | 'materials-cycle'
     | 'consumer-discretionary-cycle'
     | 'semiconductor-cycle'
+    | 'software-saas-cycle'
     | 'travel-leisure-cycle'
     | 'crypto-cycle';
 
@@ -184,6 +185,7 @@ type AttributionBusinessArchetype =
     | 'consumer-tech-ecosystem'
     | 'ev-oem'
     | 'fintech-payments'
+    | 'enterprise-software'
     | 'crypto-exchange-broker'
     | 'bitcoin-leverage-proxy'
     | 'bitcoin-miner'
@@ -275,7 +277,8 @@ const SYMBOL_SUBSECTOR_MAP: Array<{ subsector: string; symbols: string[] }> = [
     { subsector: 'cloud-platform', symbols: ['MSFT', 'AMZN', 'ORCL'] },
     { subsector: 'consumer-tech-ecosystem', symbols: ['AAPL'] },
     { subsector: 'ev-oem', symbols: ['TSLA', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI'] },
-    { subsector: 'fintech-payments', symbols: ['V', 'MA', 'SQ', 'PYPL'] },
+    { subsector: 'fintech-payments', symbols: ['V', 'MA', 'SQ', 'PYPL', 'AXP'] },
+    { subsector: 'enterprise-software', symbols: ['ADBE', 'CRM', 'NOW', 'WDAY', 'SNOW'] },
     { subsector: 'optical-networking', symbols: ['LITE', 'CIEN', 'COHR', 'AAOI', 'INFN'] },
     { subsector: 'managed-care', symbols: ['UNH', 'HUM', 'ELV', 'CI', 'CVS'] },
     { subsector: 'large-pharma', symbols: ['LLY', 'NVO'] },
@@ -305,7 +308,7 @@ const SYMBOL_ARCHETYPE_MAP: Array<{ archetype: AttributionBusinessArchetype; sym
     { archetype: 'construction-aggregates', symbols: ['VMC'] },
     { archetype: 'home-improvement-retail', symbols: ['HD', 'LOW'] },
     { archetype: 'restaurant-franchise', symbols: ['MCD'] },
-    { archetype: 'consumer-brand', symbols: ['NKE', 'BBWI'] },
+    { archetype: 'consumer-brand', symbols: ['NKE', 'BBWI', 'LULU'] },
     { archetype: 'media-parks', symbols: ['DIS'] },
     { archetype: 'online-travel', symbols: ['ABNB', 'BKNG'] },
     { archetype: 'off-price-retail', symbols: ['TJX'] },
@@ -321,7 +324,8 @@ const SYMBOL_ARCHETYPE_MAP: Array<{ archetype: AttributionBusinessArchetype; sym
     { archetype: 'cloud-platform', symbols: ['MSFT', 'AMZN', 'ORCL'] },
     { archetype: 'consumer-tech-ecosystem', symbols: ['AAPL'] },
     { archetype: 'ev-oem', symbols: ['TSLA', 'GM', 'F', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI'] },
-    { archetype: 'fintech-payments', symbols: ['V', 'MA', 'SQ', 'PYPL'] },
+    { archetype: 'fintech-payments', symbols: ['V', 'MA', 'SQ', 'PYPL', 'AXP'] },
+    { archetype: 'enterprise-software', symbols: ['ADBE', 'CRM', 'NOW', 'WDAY', 'SNOW', 'DOCU', 'ZM'] },
     { archetype: 'crypto-exchange-broker', symbols: ['COIN', 'HOOD'] },
     { archetype: 'bitcoin-leverage-proxy', symbols: ['MSTR'] },
     { archetype: 'bitcoin-miner', symbols: ['MARA', 'CLSK', 'RIOT'] },
@@ -344,11 +348,11 @@ const SYMBOL_CYCLE_FAMILY_MAP: Array<{ cycle_family: AttributionCycleFamily; sym
     },
     {
         cycle_family: 'banking-credit-cycle',
-        symbols: ['JPM', 'BAC', 'C', 'WFC', 'GS', 'MS', 'HSBC']
+        symbols: ['JPM', 'BAC', 'C', 'WFC', 'GS', 'MS', 'HSBC', 'AXP']
     },
     {
         cycle_family: 'healthcare-cost-cycle',
-        symbols: ['UNH', 'HUM', 'ELV', 'CI', 'CVS']
+        symbols: ['UNH', 'HUM', 'ELV', 'CI', 'CVS', 'LLY']
     },
     {
         cycle_family: 'energy-oil-cycle',
@@ -364,7 +368,7 @@ const SYMBOL_CYCLE_FAMILY_MAP: Array<{ cycle_family: AttributionCycleFamily; sym
     },
     {
         cycle_family: 'consumer-discretionary-cycle',
-        symbols: ['TSLA', 'GM', 'F', 'AMZN', 'HD', 'LOW', 'MCD', 'NKE', 'DIS', 'ABNB', 'BKNG', 'TJX', 'KMX', 'BBWI']
+        symbols: ['TSLA', 'GM', 'F', 'AMZN', 'HD', 'LOW', 'MCD', 'NKE', 'LULU', 'DIS', 'ABNB', 'BKNG', 'TJX', 'KMX', 'BBWI']
     },
     {
         cycle_family: 'semiconductor-cycle',
@@ -377,6 +381,10 @@ const SYMBOL_CYCLE_FAMILY_MAP: Array<{ cycle_family: AttributionCycleFamily; sym
     {
         cycle_family: 'crypto-cycle',
         symbols: ['HOOD', 'COIN', 'MSTR', 'MARA', 'CLSK', 'RIOT', 'CRCL']
+    },
+    {
+        cycle_family: 'software-saas-cycle',
+        symbols: ['ADBE', 'CRM', 'NOW', 'WDAY', 'SNOW', 'DOCU', 'ZM']
     }
 ];
 
@@ -586,6 +594,100 @@ const ARCHETYPE_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
         archetypes: ['fintech-payments']
     },
     {
+        tag: 'ai-native-disruption',
+        keywords: [
+            'generative ai',
+            'ai competition',
+            'ai-native',
+            'canva',
+            'midjourney',
+            'cursor',
+            'figma',
+            'openai',
+            'ai creative',
+            'ai coding',
+            'ai writing',
+            'replaces subscription',
+            'ai alternative',
+            'platform disruption'
+        ],
+        archetypes: ['enterprise-software'],
+        cycle_families: ['software-saas-cycle']
+    },
+    {
+        tag: 'saas-growth-deceleration',
+        keywords: [
+            'arr growth',
+            'net revenue retention',
+            'nrr',
+            'churn',
+            'seat expansion',
+            'enterprise spending cuts',
+            'software budget',
+            'it spending slowdown',
+            'renewal pressure',
+            'upsell slowed',
+            'deal elongation',
+            'sales cycle'
+        ],
+        archetypes: ['enterprise-software'],
+        cycle_families: ['software-saas-cycle']
+    },
+    {
+        tag: 'glp1-competition-reset',
+        keywords: [
+            'ozempic',
+            'wegovy',
+            'novo nordisk',
+            'glp-1 competition',
+            'weight loss drug',
+            'semaglutide',
+            'tirzepatide competition',
+            'oral glp-1',
+            'obesity drug',
+            'pipeline competition',
+            'compounding',
+            'biosimilar glp'
+        ],
+        archetypes: ['large-pharma'],
+        cycle_families: ['healthcare-cost-cycle']
+    },
+    {
+        tag: 'tariff-consumer-brand',
+        keywords: [
+            'tariffs',
+            'sourcing costs',
+            'vietnam tariff',
+            'china manufacturing',
+            'import costs',
+            'supply chain costs',
+            'gross margin pressure',
+            'factory relocation',
+            'reshoring costs',
+            'duty impact'
+        ],
+        archetypes: ['consumer-brand'],
+        cycle_families: ['consumer-discretionary-cycle']
+    },
+    {
+        tag: 'consumer-brand-china-slowdown',
+        keywords: [
+            'china sales',
+            'china revenue',
+            'greater china',
+            'china market share',
+            'china consumer',
+            'local competition',
+            'china brand preference',
+            'domestic brands',
+            'anta',
+            'li ning',
+            'china retail'
+        ],
+        archetypes: ['consumer-brand'],
+        cycle_families: ['consumer-discretionary-cycle']
+    },
+    {
         tag: 'bitcoin-etf-flow-reset',
         keywords: ['etf outflows', 'etf inflows slow', 'spot bitcoin etf', 'bitcoin etf flows', 'etf demand', 'fund flows'],
         archetypes: ['crypto-exchange-broker', 'bitcoin-leverage-proxy'],
@@ -779,6 +881,140 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         keywords: ['att', 'privacy', 'ad', 'advertising', 'metaverse', 'reality labs', 'tiktok', 'daily users'],
         event_signal_tags: ['regulatory-probe'],
         markers: ['ATT', '元宇宙', 'TikTok', 'Reality Labs']
+    },
+    {
+        id: 'enterprise-software-ai-disruption-2022',
+        start: '2022-01-01',
+        end: '2023-06-30',
+        reason_zh: '利率上升压制高估值SaaS板块，企业IT预算收缩，成长股估值重置',
+        family: 'software-saas-cycle',
+        driver_type: 'macro',
+        applies_to: 'us_tech',
+        archetypes: ['enterprise-software'],
+        cycle_families: ['software-saas-cycle'],
+        keywords: ['saas', 'software', 'valuation reset', 'multiple compression', 'rate sensitive'],
+        markers: ['fed-hike-2022']
+    },
+    {
+        id: 'enterprise-software-ai-native-disruption-2023',
+        start: '2023-03-01',
+        end: '2026-12-31',
+        reason_zh: 'AI原生工具（Cursor、Midjourney、ChatGPT）冲击传统SaaS订阅护城河，市场担忧席位增长放缓及客户留存压力',
+        family: 'software-saas-cycle',
+        driver_type: 'sector',
+        applies_to: 'us_tech',
+        archetypes: ['enterprise-software'],
+        cycle_families: ['software-saas-cycle'],
+        event_signal_tags: ['ai-native-disruption', 'saas-growth-deceleration'],
+        keywords: ['ai disruption', 'generative ai', 'canva', 'midjourney', 'openai', 'creative software', 'seat growth']
+    },
+    {
+        id: 'adbe-figma-blocked-ai-reset-2023',
+        start: '2023-12-01',
+        end: '2026-12-31',
+        reason_zh: 'Adobe收购Figma被监管否决（$20亿分手费），同期AI原生设计工具快速崛起，市场重新定价创意软件护城河',
+        family: 'software-saas-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['ADBE'],
+        archetypes: ['enterprise-software'],
+        event_signal_tags: ['ai-native-disruption', 'regulatory-probe'],
+        keywords: ['figma', 'acquisition blocked', 'ai creative', 'canva', 'midjourney', 'creative cloud']
+    },
+    {
+        id: 'glp1-obesity-drug-cycle-2023',
+        start: '2023-06-01',
+        end: '2026-12-31',
+        reason_zh: 'GLP-1减肥药（Mounjaro/Zepbound）驱动LLY强劲增长周期，供给瓶颈、定价压力及口服竞品研发构成阶段性回调风险',
+        family: 'healthcare-cost-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['LLY'],
+        archetypes: ['large-pharma'],
+        cycle_families: ['healthcare-cost-cycle'],
+        event_signal_tags: ['glp1-competition-reset', 'drug-pricing-pressure'],
+        keywords: ['mounjaro', 'zepbound', 'glp-1', 'tirzepatide', 'obesity', 'weight loss', 'novo nordisk', 'wegovy', 'supply shortage']
+    },
+    {
+        id: 'consumer-brand-tariff-china-reset-2025',
+        start: '2025-01-01',
+        end: '2026-12-31',
+        reason_zh: '美国对亚洲制造基地（越南、中国）加征关税推高运动服饰品牌成本结构，同期中国市场本土品牌（安踏、李宁）分流高端份额',
+        family: 'consumer-discretionary-cycle',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['NKE', 'LULU'],
+        archetypes: ['consumer-brand'],
+        cycle_families: ['consumer-discretionary-cycle'],
+        event_signal_tags: ['tariff-consumer-brand', 'consumer-brand-china-slowdown'],
+        keywords: ['tariffs', 'vietnam', 'china sourcing', 'gross margin', 'anta', 'li ning', 'china market share']
+    },
+    {
+        id: 'nke-brand-reset-turnaround-2024',
+        start: '2024-06-01',
+        end: '2026-12-31',
+        reason_zh: 'Nike直营DTC战略过度扩张后收缩，批发渠道关系受损，新CEO启动品牌回归传统零售的复苏计划，增长重新加速存在不确定性',
+        family: 'consumer-discretionary-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['NKE'],
+        archetypes: ['consumer-brand'],
+        event_signal_tags: ['demand-slowdown', 'guidance-cut', 'ceo-change'],
+        keywords: ['dtc', 'direct to consumer', 'wholesale', 'brand reset', 'new ceo', 'innovation pipeline', 'market share loss']
+    },
+    {
+        id: 'lulu-growth-reset-2024',
+        start: '2024-01-01',
+        end: '2026-12-31',
+        reason_zh: 'Lululemon美国本土增长饱和，产品线创新不足及颜色/款式决策失误导致库存积压，股价从高点回撤超40%',
+        family: 'consumer-discretionary-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['LULU'],
+        archetypes: ['consumer-brand'],
+        event_signal_tags: ['demand-slowdown', 'inventory-correction', 'guidance-cut'],
+        keywords: ['lululemon', 'product innovation', 'color assortment', 'us slowdown', 'inventory', 'action plan', 'international growth']
+    },
+    {
+        id: 'gs-investment-banking-reset-2022',
+        start: '2022-01-01',
+        end: '2023-12-31',
+        reason_zh: '利率快速上升压制IPO/并购市场，高盛投行收入大幅下滑，Marcus消费金融业务战略收缩产生额外亏损',
+        family: 'banking-credit-cycle',
+        driver_type: 'macro',
+        applies_to: 'symbols_only',
+        symbols: ['GS'],
+        archetypes: ['investment-bank-broker'],
+        cycle_families: ['banking-credit-cycle'],
+        event_signal_tags: ['capital-markets-slowdown'],
+        keywords: ['ipo market', 'deal activity', 'advisory fees', 'marcus', 'consumer banking exit', 'write-down']
+    },
+    {
+        id: 'investment-banking-recovery-2024',
+        start: '2024-01-01',
+        end: '2026-12-31',
+        reason_zh: '美联储降息周期启动，并购/资本市场活动回暖，投行板块进入复苏周期，但关税与地缘政治风险阶段性压制交易情绪',
+        family: 'banking-credit-cycle',
+        driver_type: 'macro',
+        applies_to: 'all',
+        archetypes: ['investment-bank-broker'],
+        cycle_families: ['banking-credit-cycle'],
+        event_signal_tags: ['capital-markets-slowdown'],
+        keywords: ['deal pipeline', 'ipo activity', 'rate cuts', 'capital markets recovery', 'backlog', 'advisory revenue']
+    },
+    {
+        id: 'axp-premium-consumer-reset-2022',
+        start: '2022-06-01',
+        end: '2023-06-30',
+        reason_zh: '高利率环境下信用卡坏账率上升，优质消费者支出韧性强但整体信贷成本上行压制盈利预期',
+        family: 'banking-credit-cycle',
+        driver_type: 'macro',
+        applies_to: 'symbols_only',
+        symbols: ['AXP'],
+        archetypes: ['fintech-payments'],
+        cycle_families: ['banking-credit-cycle'],
+        event_signal_tags: ['payment-volume-slowdown'],
+        keywords: ['credit loss', 'provision', 'delinquency', 'card spending', 'travel spending', 'premium consumer']
     },
     {
         id: 'broad-semiconductor-downcycle-2022',
