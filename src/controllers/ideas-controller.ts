@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import {
     getClientFocusDetail,
     getClientFocusList,
+    getDailyMarketNarrative,
     getClientFocusMarketState,
     getMiddleEastPolymarket,
     getSymbolIdea,
@@ -37,6 +38,12 @@ export async function getClientFocusDetailController(req: Request, res: Response
 
 export async function getClientFocusMarketStateController(_req: Request, res: Response): Promise<void> {
     const payload = await getClientFocusMarketState();
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.status(200).json(payload);
+}
+
+export async function getDailyMarketNarrativeController(_req: Request, res: Response): Promise<void> {
+    const payload = await getDailyMarketNarrative();
     res.setHeader('Cache-Control', 'private, max-age=300');
     res.status(200).json(payload);
 }

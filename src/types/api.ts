@@ -240,6 +240,14 @@ export interface ClientFocusMiddleEastSignals {
     has_breakdown: boolean;
 }
 
+export interface DailyMarketNarrative {
+    primary_slug: string;
+    narrative: string;
+    pitch_line: string;
+    ranked_slugs: string[];
+    generated_at: string;
+}
+
 export interface ClientFocusMarketSnapshotItem {
     code: string;
     name: string;

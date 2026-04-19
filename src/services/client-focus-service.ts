@@ -18,6 +18,7 @@ import type {
     ClientFocusSectorRotation,
     ClientFocusTransmissionItem,
     ClientFocusUpdate,
+    DailyMarketNarrative,
     NewsItem,
     WhatChangedGroup
 } from '../types/api';
@@ -300,6 +301,8 @@ const focusChainCache = new Map<string, { expiresAt: number; value: ClientFocusT
 const focusMarketChartCache = new Map<string, { expiresAt: number; value: ClientFocusMarketChart | null }>();
 const polymarketCache = new Map<string, { expiresAt: number; value: ClientFocusPolymarketResponse }>();
 const focusMarketStateCache = new Map<string, { expiresAt: number; value: ClientFocusMarketStateResponse }>();
+const dailyNarrativeCache = { expiresAt: 0, value: null as DailyMarketNarrative | null };
+const DAILY_NARRATIVE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 interface EastMoneySouthboundRow {
     TRADE_DATE?: string;
@@ -2613,6 +2616,120 @@ ${newsSection}
             : [];
 
         return openers.length > 0 ? openers : null;
+    } catch {
+        return null;
+    }
+}
+
+async function generateDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
+    const cachedTopics = FOCUS_TOPICS
+        .map((topic) => {
+            const cached = focusCache.get(topic.slug);
+            return cached?.value
+                ? {
+                      slug: topic.slug,
+                      title: cached.value.title,
+                      status: cached.value.status ?? '',
+                      summary: (cached.value.summary ?? '').trim().slice(0, 60),
+                      latest_updates: Array.isArray(cached.value.latest_updates)
+                          ? cached.value.latest_updates.slice(0, 2).map((item) => item.title).filter(Boolean)
+                          : [],
+                  }
+                : null;
+        })
+        .filter((item): item is { slug: string; title: string; status: string; summary: string; latest_updates: string[] } => Boolean(item));
+
+    if (cachedTopics.length < 2) {
+        return null;
+    }
+
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) {
+        return null;
+    }
+
+    const topicSection = cachedTopics
+        .map(
+            (item, index) =>
+                `${index + 1}. slug=${item.slug}\n标题=${item.title}\n状态=${item.status || '无'}\n摘要=${item.summary || '无'}\n最新事件=${item.latest_updates.join('；') || '无'}`
+        )
+        .join('\n\n');
+
+    const userPrompt = `
+当前所有活跃客户焦点主题摘要如下：
+
+${topicSection}
+
+任务：
+1. 判断今天哪个主题对风险资产定价影响最大（primary_slug）
+2. 用1-2句话描述今天市场在定价什么（narrative，25-40字，主语为“市场”或“投资者”）
+3. 生成一句对话切入问题（pitch_line，20-35字，主语为客户的组合或持仓，不给方向判断，能自然引出产品讨论）
+4. 将所有主题按今日市场影响力从高到低排序（ranked_slugs）
+
+输出JSON：
+{
+  "primary_slug": "...",
+  "narrative": "...",
+  "pitch_line": "...",
+  "ranked_slugs": ["...", "..."]
+}
+
+写作约束：
+- narrative 禁止：“风险升温”“情绪波动”“不确定性”“引发关注”
+- pitch_line 主语必须是客户的组合/持仓，不能是“您觉得市场会...”
+- pitch_line 示例：“您目前黄金仓位的规模，是否已经反映了您对实际利率见顶的判断？”
+- 只输出 JSON
+`.trim();
+
+    try {
+        const response = await fetch(`${process.env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: 'deepseek-chat',
+                messages: [
+                    { role: 'system', content: '你是香港私人银行首席市场策略师，每天早上为RM团队提供一句话市场定性。' },
+                    { role: 'user', content: userPrompt }
+                ],
+                max_tokens: 260,
+                temperature: 0.3
+            })
+        });
+
+        if (!response.ok) {
+            return null;
+        }
+
+        const payload = (await response.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+        };
+        const parsed = safeParseJson(payload.choices?.[0]?.message?.content ?? '') as Partial<DailyMarketNarrative> | null;
+        if (
+            !parsed
+            || typeof parsed.primary_slug !== 'string'
+            || typeof parsed.narrative !== 'string'
+            || typeof parsed.pitch_line !== 'string'
+            || !Array.isArray(parsed.ranked_slugs)
+        ) {
+            return null;
+        }
+
+        const validSlugs = new Set(FOCUS_TOPICS.map((topic) => topic.slug));
+        const ranked_slugs = parsed.ranked_slugs.filter((slug): slug is string => typeof slug === 'string' && validSlugs.has(slug));
+        if (!validSlugs.has(parsed.primary_slug)) {
+            return null;
+        }
+
+        return {
+            primary_slug: parsed.primary_slug,
+            narrative: parsed.narrative.trim(),
+            pitch_line: parsed.pitch_line.trim(),
+            ranked_slugs,
+            generated_at: new Date().toISOString(),
+        };
     } catch {
         return null;
     }
@@ -5591,15 +5708,6 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
             : topic.slug === 'private-credit-stress'
                 ? await generatePrivateCreditWhatChanged(newsItems)
                 : [];
-    const middleEastSignals = topic.slug === 'middle-east-tensions'
-        ? extractMiddleEastSignals(newsItems)
-        : null;
-    const [marketClientFocus, conversationOpeners] = topic.slug === 'middle-east-tensions' && middleEastSignals
-        ? await Promise.all([
-            generateMiddleEastMarketClientFocus(newsItems, middleEastSignals),
-            generateMiddleEastConversationOpeners(newsItems, middleEastSignals),
-        ])
-        : [null, null];
     const dynamicClientQuestions = await generateDynamicClientQuestions(topic, newsItems);
     const persistedDailyVerdict = await getLatestClientFocusDailyVerdict(topic.slug).catch(() => null);
     const dailyVerdict = persistedDailyVerdict?.verdict_json as ClientFocusDailyVerdict | null
@@ -5650,8 +5758,6 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         focus_secondary_price_history: focusSecondaryPriceHistory ?? undefined,
         gold_drivers: topic.slug === 'gold-repricing' ? buildGoldDrivers(newsItems) : undefined,
         theme_winners_losers: (themeResult?.result_json as ClientFocusDetailResponse['theme_winners_losers']) ?? null,
-        market_client_focus: marketClientFocus ?? null,
-        conversation_openers: conversationOpeners ?? null,
         daily_verdict: dailyVerdict ?? null,
         disclaimer: DEFAULT_DISCLAIMER
     };
@@ -5738,6 +5844,20 @@ export async function getClientFocusMarketState(): Promise<ClientFocusMarketStat
         summary: '跨资产信号仍有分化，建议结合黄金、美元、美股与港股的相对表现理解今天的客户焦点。',
         indices: []
     };
+}
+
+export async function getDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
+    if (dailyNarrativeCache.value && dailyNarrativeCache.expiresAt > Date.now()) {
+        return dailyNarrativeCache.value;
+    }
+
+    const result = await generateDailyMarketNarrative();
+    if (result) {
+        dailyNarrativeCache.value = { ...result, generated_at: new Date().toISOString() };
+        dailyNarrativeCache.expiresAt = Date.now() + DAILY_NARRATIVE_CACHE_TTL_MS;
+    }
+
+    return dailyNarrativeCache.value;
 }
 
 export async function getClientFocusDetail(slug: string): Promise<ClientFocusDetailResponse | null> {
