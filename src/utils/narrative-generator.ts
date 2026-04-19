@@ -34,6 +34,12 @@ interface NarrativeInput {
     earnings_weight?: number;
     days_to_earnings?: number | null;
     days_since_earnings?: number | null;
+    active_attribution_rules?: Array<{
+        id: string;
+        reason_zh: string;
+        driver_type: string;
+        family: string;
+    }>;
 }
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
@@ -246,6 +252,13 @@ function buildUserPrompt(
    9.2 XOM 和 USO 需结合油价脉冲、供给扰动与后续回落风险来写
    9.3 禁止把这三个标的一律写成“单纯避险受益”，必须写清具体传导机制`
             : '';
+    const activeAttributionSection =
+        input.active_attribution_rules && input.active_attribution_rules.length > 0
+            ? `\n当前仍在持续的归因风险（按相关性排序，最多取前2条）：\n${input.active_attribution_rules
+                  .slice(0, 2)
+                  .map((r, i) => `${i + 1}. [${r.driver_type}] ${r.reason_zh}`)
+                  .join('\n')}`
+            : '';
 
     return `请为以下FCN询价机会生成推荐内容：
 
@@ -259,6 +272,7 @@ function buildUserPrompt(
 IV水平：${input.iv_level}
 距离财报：${input.days_to_earnings !== null && input.days_to_earnings !== undefined ? `${input.days_to_earnings}天` : '数据不可用'}
 ${newsSection}
+${activeAttributionSection}
 ${recentEarningsContext}
 
 请根据评级采用对应口径输出：
@@ -271,6 +285,11 @@ ${recentEarningsContext}
    5.0 敲入（Knock-in）= 股价跌破执行价，客户须按执行价买入股票，是FCN的下行风险；敲出（Knock-out）= 股价涨回初始价格上方，FCN提前结束，客户拿回本金和票息，是有利结果。高隐含波动率环境下，风险是敲入概率增加，而非敲出概率增加。risk_note中严禁出现"敲出概率增加"，如需提及波动率风险，必须写"敲入风险上升"或"触及执行价风险上升"。
 5. 风险提示按以下优先级排列：
    5.1 如果14天内有财报，必须第一句提及财报风险
+   5.15 如果存在"当前仍在持续的归因风险"，risk_note必须在财报风险之后优先提及最相关的一条：
+       - driver_type 为 macro/policy/geopolitical 的优先级最高
+       - 格式：[风险简称] 仍在持续，[说明对盈利预期或接股风险的具体影响]
+       - 禁止直接复制 reason_zh 原文，必须改写为面向客户的简洁风险提示（1句）
+       - 如果 active_attribution_rules 为空，跳过此规则，不要生成空泛风险提示
    5.2 高IV或波动率风险
    5.3 行业或宏观风险
 6. 如果最近一次财报发布时间距今超过14天，不得使用“近期财报”“刚公布”“最新财报显示”等表述
