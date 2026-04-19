@@ -889,8 +889,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         reason_zh: '利率上行抬升SaaS折现率 → 企业软件预算收缩、订阅扩张放缓 → ADBE/CRM等收入增速与估值倍数被下修',
         family: 'software-saas-cycle',
         driver_type: 'macro',
-        applies_to: 'symbols_only',
-        symbols: ['ADBE', 'CRM', 'NOW', 'WDAY', 'SNOW', 'DOCU', 'ZM'],
+        applies_to: 'us_tech',
         archetypes: ['enterprise-software'],
         cycle_families: ['software-saas-cycle'],
         keywords: ['saas', 'software', 'valuation reset', 'multiple compression', 'rate sensitive'],
@@ -903,8 +902,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         reason_zh: 'ChatGPT、Cursor、Midjourney分流单点工具需求 → 席位扩张与续费率放缓、获客成本上升 → SaaS订阅增长与估值倍数被重置',
         family: 'software-saas-cycle',
         driver_type: 'sector',
-        applies_to: 'symbols_only',
-        symbols: ['ADBE', 'CRM', 'NOW', 'WDAY', 'SNOW', 'DOCU', 'ZM'],
+        applies_to: 'us_tech',
         archetypes: ['enterprise-software'],
         cycle_families: ['software-saas-cycle'],
         event_signal_tags: ['ai-native-disruption', 'saas-growth-deceleration'],
@@ -998,8 +996,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         reason_zh: '降息预期改善融资环境 → IPO与并购管线回暖、承销顾问费修复 → 投行收入与估值倍数进入复苏周期',
         family: 'banking-credit-cycle',
         driver_type: 'macro',
-        applies_to: 'symbols_only',
-        symbols: ['GS', 'MS', 'JPM', 'BAC', 'C', 'WFC', 'SCHW', 'IBKR'],
+        applies_to: 'all',
         archetypes: ['investment-bank-broker'],
         cycle_families: ['banking-credit-cycle'],
         event_signal_tags: ['capital-markets-slowdown'],
@@ -5331,12 +5328,38 @@ function eventOverlapsRule(
 
 function isRuleApplicableToSymbol(rule: AttributionMacroRule, symbol: string): boolean {
     const upper = symbol.toUpperCase();
+
+    // Exact symbol match always wins
     if (rule.symbols?.includes(upper)) {
         return true;
     }
     if (rule.applies_to === 'symbols_only') {
         return false;
     }
+
+    // Resolve symbol's archetype and cycle family from maps
+    const symbolArchetypes = new Set(
+        SYMBOL_ARCHETYPE_MAP.filter((e) => e.symbols.includes(upper)).map((e) => e.archetype)
+    );
+    const symbolCycleFamilies = new Set(
+        SYMBOL_CYCLE_FAMILY_MAP.filter((e) => e.symbols.includes(upper)).map((e) => e.cycle_family)
+    );
+
+    // If the rule declares archetypes, the symbol must match at least one
+    const archetypeMatch =
+        !rule.archetypes?.length ||
+        rule.archetypes.some((a) => symbolArchetypes.has(a as AttributionBusinessArchetype));
+
+    // If the rule declares cycle_families, the symbol must match at least one
+    const cycleFamilyMatch =
+        !rule.cycle_families?.length ||
+        rule.cycle_families.some((f) => symbolCycleFamilies.has(f as AttributionCycleFamily));
+
+    // Both constraints must pass
+    if (!archetypeMatch || !cycleFamilyMatch) {
+        return false;
+    }
+
     if (rule.applies_to === 'china_tech') {
         return CHINA_TECH_ATTRIBUTION_SYMBOLS.has(upper);
     }
