@@ -57,11 +57,13 @@ import type {
     ClientFocusMarketStateResponse,
     DailyBestCard,
     Flag,
+    InteractiveStrikeRiskSummary,
     NarrativeOutput,
     NewsItem,
     DrawdownAttribution,
     SignalColor,
     SignalRow,
+    StrikeRiskGroupedDrawdownEvent,
     SymbolIdeaResponse,
     SymbolNarrativeResponse,
     SymbolPriceHistoryResponse,
@@ -2498,7 +2500,7 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
 
 export { deleteTodayIdeaCandidate };
 
-export async function getSymbolPriceHistory(symbol: string): Promise<SymbolPriceHistoryResponse> {
+export async function getSymbolPriceHistory(symbol: string, strikePct?: number | null): Promise<SymbolPriceHistoryResponse> {
     const normalizedSymbol = symbol.toUpperCase();
     const prewarmInFlight = drawdownPrewarmInFlight.get(normalizedSymbol);
     const recentlyPrewarmed = (Date.now() - (drawdownPrewarmTriggeredAt.get(normalizedSymbol) ?? 0)) < DRAWDOWN_PREWARM_FRESHNESS_MS;
@@ -2520,13 +2522,22 @@ export async function getSymbolPriceHistory(symbol: string): Promise<SymbolPrice
             ? DRAWDOWN_ATTRIBUTION_WARM_TIMEOUT_MS
             : DRAWDOWN_ATTRIBUTION_TIMEOUT_MS
     );
+    const tailRiskStats = buildTailRiskStats(priceHistory);
+    const interactiveStrikeRiskSummary = buildInteractiveStrikeRiskSummaryResponse(
+        priceHistory,
+        strikePct ?? null,
+        drawdownAttributions
+    );
 
     return {
         symbol: normalizedSymbol,
         data_as_of_date: priceHistory[priceHistory.length - 1]?.date ?? latestUsTradingDate(),
         price_history: priceHistory,
-        tail_risk: buildTailRiskStats(priceHistory),
-        drawdown_attributions: drawdownAttributions
+        tail_risk: tailRiskStats,
+        tail_risk_footer_summary: buildTailRiskFooterSummary(tailRiskStats),
+        drawdown_attributions: drawdownAttributions,
+        interactive_strike_risk_summary: interactiveStrikeRiskSummary,
+        display_drawdown_events: interactiveStrikeRiskSummary?.groupedEvents ?? []
     };
 }
 
@@ -5487,6 +5498,381 @@ function buildTailRiskStats(priceHistory: Array<{ date: string; close: number }>
         worst_episode: worstEpisode,
         longest_recovery_episode: longestRecoveryEpisode
     };
+}
+
+function buildTailRiskFooterSummary(
+    tailRisk: ReturnType<typeof buildTailRiskStats>
+): { max_drawdown_text: string; longest_recovery_text: string; has_unrecovered_drawdown: boolean } | null {
+    if (!tailRisk) {
+        return null;
+    }
+
+    const maxYear = tailRisk.max_drawdown_trough_date?.slice(0, 4) ?? '—';
+    const hasUnrecoveredDrawdown = tailRisk.worst_episode?.recovered === false;
+    const longestRecoveryDays = hasUnrecoveredDrawdown
+        ? null
+        : tailRisk.longest_recovery_episode?.recovery_days ?? null;
+    const longestRecoveryYear = hasUnrecoveredDrawdown
+        ? '—'
+        : tailRisk.longest_recovery_episode?.trough_date?.slice(0, 4) ?? '—';
+
+    return {
+        max_drawdown_text: `${formatSignedPercentValue(tailRisk.max_drawdown_pct)} (${maxYear})`,
+        longest_recovery_text: `${longestRecoveryDays !== null ? formatDaysLabelValue(longestRecoveryDays) : '—'} (${longestRecoveryYear})`,
+        has_unrecovered_drawdown: hasUnrecoveredDrawdown
+    };
+}
+
+function buildInteractiveStrikeRiskSummaryResponse(
+    priceHistory: Array<{ date: string; close: number }>,
+    strikePct: number | null,
+    drawdownAttributions: DrawdownAttribution[] = []
+): InteractiveStrikeRiskSummary | null {
+    const currentPrice = priceHistory[priceHistory.length - 1]?.close ?? null;
+
+    if (
+        priceHistory.length < 2 ||
+        currentPrice === null ||
+        currentPrice <= 0 ||
+        strikePct === null ||
+        strikePct <= 0 ||
+        strikePct > 100
+    ) {
+        return null;
+    }
+
+    const thresholdPct = Math.abs(strikePct - 100);
+    const allEpisodes = buildInteractiveDrawdownEpisodesForAttribution(priceHistory);
+    const meaningfulEpisodes = allEpisodes.filter((event) => Math.abs(event.max_drawdown_pct) >= 10);
+    const rawBreachEvents = allEpisodes.filter((event) => Math.abs(event.max_drawdown_pct) >= thresholdPct);
+
+    const resolveEventAttribution = (event: (typeof rawBreachEvents)[number]) =>
+        drawdownAttributions.find(
+            (item) => item.peak_date === event.peak_date && item.trough_date === event.trough_date
+        ) ?? null;
+
+    const resolveEventReason = (event: (typeof rawBreachEvents)[number]) =>
+        resolveEventAttribution(event)?.reason_zh ??
+        `${formatPeakLabel(event.peak_date)} 暂无明确宏观归因，或为个股／板块特定因素驱动`;
+
+    const resolveEventRuleId = (event: (typeof rawBreachEvents)[number]) =>
+        resolveEventAttribution(event)?.primary_rule_id ?? null;
+
+    const allBreachEventsHaveBackendAttribution = rawBreachEvents.every((event) => resolveEventAttribution(event));
+
+    const events = allBreachEventsHaveBackendAttribution
+        ? [...rawBreachEvents]
+        : rawBreachEvents.reduce<typeof rawBreachEvents>((acc, event) => {
+              const isSecondaryDip = acc.some((prior) => {
+                  const daysDiff =
+                      (new Date(event.peak_date).getTime() - new Date(prior.peak_date).getTime()) /
+                      (1000 * 60 * 60 * 24);
+                  const eventRuleId = resolveEventRuleId(event);
+                  const priorRuleId = resolveEventRuleId(prior);
+
+                  return (
+                      daysDiff < 900 &&
+                      event.peak_price <= prior.peak_price &&
+                      eventRuleId !== null &&
+                      priorRuleId !== null &&
+                      eventRuleId === priorRuleId
+                  );
+              });
+
+              if (!isSecondaryDip) {
+                  acc.push(event);
+              }
+              return acc;
+          }, []);
+
+    const eventsWithBelowStrikeDays = events.map((event) => {
+        const episodeBarrier = event.peak_price * (strikePct / 100);
+        const peakIdx = priceHistory.findIndex((point) => point.date === event.peak_date);
+        if (peakIdx === -1) {
+            return { ...event, days_below_strike: null as number | null };
+        }
+
+        let firstBreachIdx = -1;
+        for (let index = peakIdx; index < priceHistory.length; index += 1) {
+            if (priceHistory[index].close < episodeBarrier) {
+                firstBreachIdx = index;
+                break;
+            }
+        }
+        if (firstBreachIdx === -1) {
+            return { ...event, days_below_strike: null as number | null };
+        }
+
+        const troughIdx = priceHistory.findIndex((point) => point.date === event.trough_date);
+        const searchFromIdx = troughIdx !== -1 ? troughIdx : firstBreachIdx;
+
+        let recoveryIdx = -1;
+        for (let index = searchFromIdx + 1; index < priceHistory.length; index += 1) {
+            if (priceHistory[index].close >= episodeBarrier) {
+                recoveryIdx = index;
+                break;
+            }
+        }
+
+        return {
+            ...event,
+            days_below_strike: recoveryIdx === -1 ? null : (recoveryIdx - firstBreachIdx)
+        };
+    });
+
+    const annotatedEvents = eventsWithBelowStrikeDays.map((event) => ({
+        ...event,
+        reason_zh: resolveEventReason(event),
+        display_order: resolveEventAttribution(event)?.display_order ?? null
+    }));
+
+    const groupedEvents = groupStrikeRiskDrawdownEvents(annotatedEvents);
+    const belowStrikeDays = eventsWithBelowStrikeDays
+        .map((event) => event.days_below_strike)
+        .filter((value): value is number => value !== null);
+    const sortedRecoveryDays = [...belowStrikeDays].sort((left, right) => left - right);
+    const medianRecoveryDays =
+        sortedRecoveryDays.length > 0 ? calculateMedian(sortedRecoveryDays) : null;
+    const averageRecoveryDays =
+        sortedRecoveryDays.length > 0
+            ? Math.round(sortedRecoveryDays.reduce((sum, value) => sum + value, 0) / sortedRecoveryDays.length)
+            : null;
+    const longestRecoveryDays =
+        sortedRecoveryDays.length > 0 ? sortedRecoveryDays[sortedRecoveryDays.length - 1] : null;
+    const recoveredWithin30 = belowStrikeDays.filter((days) => days <= 30).length;
+    const recoveredWithin180 = belowStrikeDays.filter((days) => days > 30 && days <= 180).length;
+    const recoveredOver180 = belowStrikeDays.filter((days) => days > 180).length;
+    const unrecoveredInDistribution = eventsWithBelowStrikeDays.filter(
+        (event) => event.days_below_strike === null
+    ).length;
+    const unrecoveredCount = unrecoveredInDistribution;
+    const partiallyRecoveredCount = eventsWithBelowStrikeDays.filter(
+        (event) => event.closed_by_partial_recovery && event.recovery_days !== null
+    ).length;
+    const fullyRecoveredCount = eventsWithBelowStrikeDays.filter((event) => event.recovered).length;
+    const totalRecoveredCount = fullyRecoveredCount + partiallyRecoveredCount;
+    const breachProbabilityPct =
+        meaningfulEpisodes.length > 0 ? Math.round((events.length / meaningfulEpisodes.length) * 100) : null;
+    const maxOvershootPct =
+        events.length > 0
+            ? Math.max(...events.map((event) => Math.abs(event.max_drawdown_pct) - thresholdPct))
+            : null;
+    const strikePrice = currentPrice * (strikePct / 100);
+    const breachFrequencyLabel =
+        breachProbabilityPct !== null && breachProbabilityPct >= 50
+            ? '较高'
+            : breachProbabilityPct !== null && breachProbabilityPct >= 20
+              ? '中等'
+              : '较低';
+    const tailRiskLabel =
+        unrecoveredCount > 0 ||
+        (maxOvershootPct !== null && maxOvershootPct >= 25) ||
+        (longestRecoveryDays !== null && longestRecoveryDays >= 180)
+            ? '较高'
+            : (maxOvershootPct !== null && maxOvershootPct >= 12) ||
+                (longestRecoveryDays !== null && longestRecoveryDays >= 60)
+              ? '中等'
+              : '较低';
+    const conclusionStatsLine =
+        events.length === 0
+            ? `过去5年出现 ${meaningfulEpisodes.length} 次跌幅≥10%的回撤，均未触及执行价对应的 -${thresholdPct.toFixed(0)}% 跌幅。`
+            : `过去5年出现 ${meaningfulEpisodes.length} 次跌幅≥10%的回撤，其中 ${events.length} 次超过执行价对应的跌幅（-${thresholdPct.toFixed(0)}%）。`;
+
+    return {
+        breachCount: events.length,
+        thresholdPct: Number(thresholdPct.toFixed(1)),
+        medianRecoveryDays,
+        recoveryDaysSample: sortedRecoveryDays,
+        recoveredCount: totalRecoveredCount,
+        averageRecoveryDays,
+        longestRecoveryDays,
+        breachProbabilityPct,
+        maxOvershootPct: maxOvershootPct !== null ? Number(maxOvershootPct.toFixed(1)) : null,
+        unrecoveredCount,
+        conclusion: conclusionStatsLine,
+        conclusionStatsLine,
+        conclusionRiskLine:
+            events.length === 0
+                ? null
+                : {
+                      breachFrequencyLabel,
+                      tailRiskLabel
+                  },
+        conclusionQualifierLine: null,
+        currentPriceLabel: formatPriceDisplay(currentPrice),
+        strikePriceLabel: formatPriceDisplay(strikePrice),
+        metricCards: [
+            {
+                label: '历史敲入概率',
+                value:
+                    breachProbabilityPct !== null
+                        ? `${breachProbabilityPct}% (${events.length}/${meaningfulEpisodes.length}次)`
+                        : '—',
+                tone: 'default'
+            },
+            {
+                label: '已修复案例中位反弹时间',
+                value: medianRecoveryDays !== null ? formatDaysWithMonthsLabel(medianRecoveryDays) : '—',
+                tone: 'default'
+            },
+            {
+                label: '敲入后超跌幅度',
+                value: maxOvershootPct !== null ? `${maxOvershootPct.toFixed(1)}%` : '—',
+                tone: 'default'
+            },
+            {
+                label: '敲入后未反弹回执行价格',
+                value: unrecoveredCount > 0 ? `${unrecoveredCount}次` : '0次',
+                tone: unrecoveredCount > 0 ? 'warning' : 'default'
+            }
+        ],
+        recoveryDistribution: (() => {
+            const distributionTotal = belowStrikeDays.length + unrecoveredInDistribution;
+            return [
+                {
+                    label: '30天内',
+                    value: formatPercentShare(recoveredWithin30, distributionTotal),
+                    count: recoveredWithin30,
+                    tone: 'fast' as const
+                },
+                {
+                    label: '30–180天',
+                    value: formatPercentShare(recoveredWithin180, distributionTotal),
+                    count: recoveredWithin180,
+                    tone: 'mid' as const
+                },
+                {
+                    label: '180天以上',
+                    value: formatPercentShare(recoveredOver180, distributionTotal),
+                    count: recoveredOver180,
+                    tone: 'slow' as const
+                },
+                {
+                    label: '未修复',
+                    value: formatPercentShare(unrecoveredInDistribution, distributionTotal),
+                    count: unrecoveredInDistribution,
+                    tone: 'unrecovered' as const
+                }
+            ];
+        })(),
+        groupedEvents
+    };
+}
+
+function groupStrikeRiskDrawdownEvents(
+    events: Array<{
+        peak_date: string;
+        trough_date: string;
+        max_drawdown_pct: number;
+        days_below_strike: number | null;
+        reason_zh: string | null;
+        display_order?: number | null;
+    }>
+): StrikeRiskGroupedDrawdownEvent[] {
+    const grouped = new Map<
+        string,
+        {
+            displayReason: string;
+            max_drawdown_pct: number;
+            hasUnrecovered: boolean;
+            yearLabel: string;
+            displayOrder: number | null;
+            latestPeakTimestamp: number;
+        }
+    >();
+
+    for (const event of events) {
+        const peakDate = new Date(event.peak_date);
+        const yearLabel = formatPeakLabel(event.peak_date);
+        const displayReason =
+            event.reason_zh ?? `${yearLabel} 暂无明确宏观归因，或为个股／板块特定因素驱动`;
+        const groupKey = `${displayReason}::${event.peak_date.slice(0, 7)}`;
+        const existing = grouped.get(groupKey);
+
+        if (!existing) {
+            grouped.set(groupKey, {
+                displayReason,
+                max_drawdown_pct: event.max_drawdown_pct,
+                hasUnrecovered: event.days_below_strike === null,
+                yearLabel,
+                displayOrder: event.display_order ?? null,
+                latestPeakTimestamp: peakDate.getTime()
+            });
+            continue;
+        }
+
+        existing.max_drawdown_pct = Math.min(existing.max_drawdown_pct, event.max_drawdown_pct);
+        existing.hasUnrecovered = existing.hasUnrecovered || event.days_below_strike === null;
+        if (event.display_order !== null && event.display_order !== undefined) {
+            existing.displayOrder =
+                existing.displayOrder === null ? event.display_order : Math.min(existing.displayOrder, event.display_order);
+        }
+        existing.latestPeakTimestamp = Math.max(existing.latestPeakTimestamp, peakDate.getTime());
+    }
+
+    return [...grouped.values()]
+        .sort((left, right) => {
+            if (left.displayOrder !== null && right.displayOrder !== null && left.displayOrder !== right.displayOrder) {
+                return left.displayOrder - right.displayOrder;
+            }
+            if (left.displayOrder !== null) return -1;
+            if (right.displayOrder !== null) return 1;
+            if (right.latestPeakTimestamp !== left.latestPeakTimestamp) {
+                return right.latestPeakTimestamp - left.latestPeakTimestamp;
+            }
+            return left.max_drawdown_pct - right.max_drawdown_pct;
+        })
+        .map(({ latestPeakTimestamp: _latestPeakTimestamp, ...item }) => item);
+}
+
+function formatPeakLabel(date: string): string {
+    const peakDate = new Date(date);
+    return `${peakDate.getFullYear()}年${peakDate.getMonth() + 1}月`;
+}
+
+function formatPercentShare(part: number, total: number): string {
+    if (total <= 0) {
+        return '—';
+    }
+    return `${Math.round((part / total) * 100)}%`;
+}
+
+function formatDaysWithMonthsLabel(value: number | null | undefined): string {
+    if (value === null || value === undefined) {
+        return '—';
+    }
+    const roundedDays = Math.round(value);
+    if (roundedDays < 21) {
+        return `${roundedDays}天 (<1个月)`;
+    }
+    const months = Math.round(roundedDays / 21);
+    return `${roundedDays}天 (${months}个月)`;
+}
+
+function formatPriceDisplay(value: number | null | undefined): string {
+    const numericValue = toFiniteNumber(value);
+    if (numericValue === null) {
+        return '—';
+    }
+    return `$${stripTrailingZeros(numericValue)}`;
+}
+
+function stripTrailingZeros(value: number): string {
+    return value.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+}
+
+function formatSignedPercentValue(value: number | null | undefined): string {
+    if (value === null || value === undefined) {
+        return '—';
+    }
+    return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
+}
+
+function formatDaysLabelValue(value: number | null | undefined): string {
+    if (value === null || value === undefined) {
+        return '未修复';
+    }
+    return `${Math.round(value)}天`;
 }
 
 function calculateMedian(values: number[]): number {
