@@ -126,7 +126,7 @@ const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
 const DRAWDOWN_PREWARM_COOLDOWN_MS = 30 * 60 * 1000;
 const DRAWDOWN_PREWARM_FRESHNESS_MS = 2 * 60 * 1000;
-const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 22;
+const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 23;
 const DRAWDOWN_TAIL_RISK_HISTORY_LIMIT = 1500;
 const DRAWDOWN_TAIL_RISK_LOOKBACK_DAYS = 365 * 5;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
@@ -140,6 +140,7 @@ type AttributionCycleFamily =
     | 'banking-credit-cycle'
     | 'china-platform-cycle'
     | 'energy-oil-cycle'
+    | 'gold-cycle'
     | 'healthcare-cost-cycle'
     | 'industrial-capex-cycle'
     | 'materials-cycle'
@@ -168,6 +169,7 @@ type AttributionBusinessArchetype =
     | 'construction-aggregates'
     | 'home-improvement-retail'
     | 'consumer-brand'
+    | 'streaming-platform'
     | 'restaurant-franchise'
     | 'media-parks'
     | 'online-travel'
@@ -191,6 +193,8 @@ type AttributionBusinessArchetype =
     | 'bitcoin-miner'
     | 'memory'
     | 'foundry'
+    | 'gold-etf'
+    | 'gold-miner'
     | 'analog-chip'
     | 'chip-equipment'
     | 'broad-semiconductor'
@@ -283,7 +287,7 @@ const SYMBOL_SUBSECTOR_MAP: Array<{ subsector: string; symbols: string[] }> = [
     { subsector: 'managed-care', symbols: ['UNH', 'HUM', 'ELV', 'CI', 'CVS'] },
     { subsector: 'large-pharma', symbols: ['LLY', 'NVO'] },
     { subsector: 'large-biotech', symbols: ['AMGN', 'GILD'] },
-    { subsector: 'ai-infra', symbols: ['VRT', 'SMCI', 'DELL', 'ANET', 'AVGO', 'MRVL', 'NVDA'] },
+    { subsector: 'ai-infra', symbols: ['VRT', 'SMCI', 'DELL', 'ANET', 'PLTR', 'ORCL', 'AVGO', 'MRVL', 'NVDA'] },
     { subsector: 'crypto-platform', symbols: ['COIN', 'HOOD', 'MSTR'] },
     { subsector: 'memory', symbols: ['MU', 'WDC', 'STX'] },
     { subsector: 'semiconductor', symbols: ['AMD', 'INTC', 'AVGO', 'MRVL', 'NVDA', 'MU', 'TSM'] }
@@ -309,6 +313,7 @@ const SYMBOL_ARCHETYPE_MAP: Array<{ archetype: AttributionBusinessArchetype; sym
     { archetype: 'home-improvement-retail', symbols: ['HD', 'LOW'] },
     { archetype: 'restaurant-franchise', symbols: ['MCD'] },
     { archetype: 'consumer-brand', symbols: ['NKE', 'BBWI', 'LULU'] },
+    { archetype: 'streaming-platform', symbols: ['NFLX', 'ROKU', 'SNAP'] },
     { archetype: 'media-parks', symbols: ['DIS'] },
     { archetype: 'online-travel', symbols: ['ABNB', 'BKNG'] },
     { archetype: 'off-price-retail', symbols: ['TJX'] },
@@ -331,6 +336,8 @@ const SYMBOL_ARCHETYPE_MAP: Array<{ archetype: AttributionBusinessArchetype; sym
     { archetype: 'bitcoin-miner', symbols: ['MARA', 'CLSK', 'RIOT'] },
     { archetype: 'memory', symbols: ['MU', 'WDC', 'STX'] },
     { archetype: 'foundry', symbols: ['TSM'] },
+    { archetype: 'gold-etf', symbols: ['GLD', 'IAU'] },
+    { archetype: 'gold-miner', symbols: ['GDX', 'NEM', 'GOLD', 'AEM'] },
     { archetype: 'analog-chip', symbols: ['TXN', 'QCOM'] },
     { archetype: 'chip-equipment', symbols: ['AMAT', 'LRCX'] },
     { archetype: 'broad-semiconductor', symbols: ['AMD', 'INTC', 'AVGO', 'MRVL', 'NVDA'] },
@@ -368,7 +375,7 @@ const SYMBOL_CYCLE_FAMILY_MAP: Array<{ cycle_family: AttributionCycleFamily; sym
     },
     {
         cycle_family: 'consumer-discretionary-cycle',
-        symbols: ['TSLA', 'GM', 'F', 'AMZN', 'HD', 'LOW', 'MCD', 'NKE', 'LULU', 'DIS', 'ABNB', 'BKNG', 'TJX', 'KMX', 'BBWI']
+        symbols: ['TSLA', 'GM', 'F', 'AMZN', 'HD', 'LOW', 'MCD', 'NKE', 'LULU', 'NFLX', 'DIS', 'ABNB', 'BKNG', 'TJX', 'KMX', 'BBWI']
     },
     {
         cycle_family: 'semiconductor-cycle',
@@ -381,6 +388,10 @@ const SYMBOL_CYCLE_FAMILY_MAP: Array<{ cycle_family: AttributionCycleFamily; sym
     {
         cycle_family: 'crypto-cycle',
         symbols: ['HOOD', 'COIN', 'MSTR', 'MARA', 'CLSK', 'RIOT', 'CRCL']
+    },
+    {
+        cycle_family: 'gold-cycle',
+        symbols: ['GLD', 'GDX', 'NEM', 'GOLD', 'IAU', 'AEM']
     },
     {
         cycle_family: 'software-saas-cycle',
@@ -579,9 +590,33 @@ const ARCHETYPE_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
         archetypes: ['consumer-tech-ecosystem']
     },
     {
+        tag: 'subscriber-growth-miss',
+        keywords: ['subscriber miss', 'subscriber growth slowed', 'net adds miss', 'net additions', 'paid net adds', 'subscriber loss', 'churn', 'password sharing'],
+        archetypes: ['streaming-platform'],
+        cycle_families: ['consumer-discretionary-cycle']
+    },
+    {
+        tag: 'streaming-content-cost-reset',
+        keywords: ['content spending', 'content costs', 'programming costs', 'content budget', 'streaming wars', 'ad-supported tier', 'password crackdown'],
+        archetypes: ['streaming-platform'],
+        cycle_families: ['consumer-discretionary-cycle']
+    },
+    {
         tag: 'vehicle-delivery-miss',
         keywords: ['deliveries miss', 'delivery expectations', 'vehicle registrations', 'europe sales', 'china-made ev sales'],
         archetypes: ['ev-oem']
+    },
+    {
+        tag: 'china-ev-price-war',
+        keywords: ['price war', 'price cuts', 'byd price', 'ev price', 'huawei ev', 'aito', 'margin compression', 'average selling price'],
+        archetypes: ['ev-oem'],
+        cycle_families: ['consumer-discretionary-cycle']
+    },
+    {
+        tag: 'china-ev-subsidy-reset',
+        keywords: ['subsidy expiry', 'purchase subsidy', 'ev subsidy', 'government support', 'trade-in subsidy', 'green plate'],
+        archetypes: ['ev-oem'],
+        cycle_families: ['consumer-discretionary-cycle']
     },
     {
         tag: 'payment-volume-slowdown',
@@ -831,9 +866,32 @@ const ARCHETYPE_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
         archetypes: ['ai-infrastructure']
     },
     {
+        tag: 'ai-networking-capex-reset',
+        keywords: ['ethernet switching', 'ai networking', 'infiniband', 'spine-leaf', 'data center networking', 'network spend', 'switching revenue'],
+        archetypes: ['ai-infrastructure'],
+        cycle_families: ['semiconductor-cycle']
+    },
+    {
+        tag: 'government-contract-risk',
+        keywords: ['government contract', 'doge', 'federal spending', 'defense budget', 'contract cancellation', 'budget cuts', 'government customers'],
+        archetypes: ['ai-infrastructure']
+    },
+    {
         tag: 'telecom-inventory-reset',
         keywords: ['telecom spending', 'network inventory', 'optical demand', 'inventory digestion', 'carrier spending'],
         archetypes: ['optical-networking']
+    },
+    {
+        tag: 'real-rate-pressure',
+        keywords: ['real yields', 'real rates', 'tips yield', 'inflation expectations', 'breakeven', 'treasury yield', 'rate hike'],
+        archetypes: ['gold-etf', 'gold-miner'],
+        cycle_families: ['gold-cycle']
+    },
+    {
+        tag: 'gold-safe-haven-demand',
+        keywords: ['safe haven', 'gold demand', 'central bank buying', 'geopolitical risk', 'flight to safety', 'de-dollarization'],
+        archetypes: ['gold-etf', 'gold-miner'],
+        cycle_families: ['gold-cycle']
     },
     {
         tag: 'credit-loss-pressure',
@@ -2605,6 +2663,358 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         applies_to: 'all',
         keywords: ['iran', 'middle east', 'oil', 'hormuz', 'war', 'ceasefire'],
         markers: ['中东', '伊朗', '霍尔木兹', '能源', '停火']
+    },
+    {
+        id: 'nflx-subscriber-reset-2022',
+        start: '2021-11-01',
+        end: '2022-09-30',
+        reason_zh: '疫情红利消退叠加密码共享泛滥 → 连续两季订阅用户净流失、Disney+竞争分流时长 → Netflix用户增长预期与估值倍数被大幅下修',
+        family: 'nflx-subscriber-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['NFLX'],
+        archetypes: ['streaming-platform'],
+        cycle_families: ['consumer-discretionary-cycle'],
+        event_signal_tags: ['subscriber-growth-miss', 'streaming-content-cost-reset'],
+        keywords: ['subscriber loss', 'password sharing', 'disney+', 'net adds', 'streaming competition'],
+        markers: ['订阅用户', '密码共享', '流媒体竞争', 'Disney+']
+    },
+    {
+        id: 'nflx-ad-tier-transition-2022',
+        start: '2022-10-01',
+        end: '2023-06-30',
+        reason_zh: '广告支持层定价低于预期、密码共享整改节奏不确定 → 每用户平均收入(ARPU)提升幅度存疑 → 盈利修复路径与估值再定价存在不确定性',
+        family: 'nflx-subscriber-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['NFLX'],
+        archetypes: ['streaming-platform'],
+        cycle_families: ['consumer-discretionary-cycle'],
+        event_signal_tags: ['subscriber-growth-miss'],
+        keywords: ['ad-supported', 'arpu', 'password sharing crackdown', 'monetization'],
+        markers: ['广告层', 'ARPU', '密码整改']
+    },
+    {
+        id: 'nflx-content-cost-reset-2024',
+        start: '2024-01-01',
+        end: '2026-12-31',
+        reason_zh: '内容军备竞赛推升制作成本、体育版权竞价激烈 → 自由现金流与利润率改善节奏承压 → Netflix盈利弹性与估值倍数扩张空间被限制',
+        family: 'nflx-subscriber-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['NFLX'],
+        archetypes: ['streaming-platform'],
+        cycle_families: ['consumer-discretionary-cycle'],
+        event_signal_tags: ['streaming-content-cost-reset'],
+        keywords: ['content costs', 'sports rights', 'free cash flow', 'margin', 'live sports'],
+        markers: ['内容成本', '体育版权', '自由现金流']
+    },
+    {
+        id: 'china-ev-price-war-2023',
+        start: '2023-01-01',
+        end: '2024-06-30',
+        reason_zh: '比亚迪与特斯拉发起连续价格战 → 中国EV平均售价与毛利率快速下滑 → 小鹏/理想盈利预期与估值倍数被下修',
+        family: 'china-ev-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['LI', 'XPEV', 'NIO'],
+        archetypes: ['ev-oem'],
+        cycle_families: ['consumer-discretionary-cycle'],
+        event_signal_tags: ['china-ev-price-war', 'pricing-pressure'],
+        keywords: ['price war', 'byd', 'tesla china', 'margin', 'average selling price', 'ev competition'],
+        markers: ['中国EV价格战', '比亚迪', '毛利率', '平均售价']
+    },
+    {
+        id: 'china-ev-huawei-competition-2024',
+        start: '2024-01-01',
+        end: '2026-12-31',
+        reason_zh: '华为问界/鸿蒙智行入场加剧高端EV竞争 → 理想/小鹏高端车型销量与定价能力受压 → 收入增速与利润率预期被下修',
+        family: 'china-ev-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['LI', 'XPEV', 'NIO'],
+        archetypes: ['ev-oem'],
+        cycle_families: ['consumer-discretionary-cycle'],
+        event_signal_tags: ['china-ev-price-war', 'demand-slowdown'],
+        keywords: ['huawei', 'aito', 'harmony os', 'high-end ev', 'premium segment', 'competition'],
+        markers: ['华为问界', '鸿蒙智行', '高端EV竞争', '小鹏', '理想']
+    },
+    {
+        id: 'china-ev-subsidy-reset-2022',
+        start: '2022-01-01',
+        end: '2023-03-31',
+        reason_zh: '中国新能源补贴2022年底退坡 → 抢购潮结束后需求真空、交付节奏波动 → 中国EV销量预期与盈利时间表被重估',
+        family: 'china-ev-cycle',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['LI', 'XPEV', 'NIO'],
+        archetypes: ['ev-oem'],
+        cycle_families: ['consumer-discretionary-cycle'],
+        event_signal_tags: ['china-ev-subsidy-reset', 'demand-slowdown'],
+        keywords: ['subsidy expiry', 'ev subsidy', 'china ev policy', 'pull-forward demand'],
+        markers: ['补贴退坡', '需求前置', '中国EV政策']
+    },
+    {
+        id: 'china-ev-tariff-ipo-risk-2025',
+        start: '2025-01-01',
+        end: '2026-12-31',
+        reason_zh: '中美贸易摩擦升温引发中国EV赴美上市监管担忧 → ADR流动性溢价收缩、外资持仓情绪降温 → 中国EV估值倍数被折价',
+        family: 'china-ev-cycle',
+        driver_type: 'geopolitical',
+        applies_to: 'symbols_only',
+        symbols: ['LI', 'XPEV', 'NIO'],
+        archetypes: ['ev-oem'],
+        cycle_families: ['consumer-discretionary-cycle'],
+        event_signal_tags: ['hfcaa-delisting-risk'],
+        keywords: ['delisting risk', 'adr', 'trade war', 'china ev', 'us listing'],
+        markers: ['中国EV', 'ADR风险', '中美贸易', '退市']
+    },
+    {
+        id: 'gold-real-rate-reset-2022',
+        start: '2022-01-01',
+        end: '2022-12-31',
+        reason_zh: '美联储激进加息推升实际利率至多年高位 → 黄金持有机会成本上升、避险需求被美元走强对冲 → 金价承压回落压制GLD与黄金矿商估值',
+        family: 'gold-cycle',
+        driver_type: 'macro',
+        applies_to: 'all',
+        archetypes: ['gold-etf', 'gold-miner'],
+        cycle_families: ['gold-cycle'],
+        event_signal_tags: ['real-rate-pressure'],
+        keywords: ['real yields', 'fed hike', 'dollar strength', 'gold price', 'opportunity cost'],
+        markers: ['实际利率', '美联储加息', '美元走强', '黄金持仓成本']
+    },
+    {
+        id: 'gold-miner-cost-inflation-2022',
+        start: '2022-01-01',
+        end: '2023-06-30',
+        reason_zh: '能源与劳工成本通胀推高矿商全维持成本(AISC) → 金价未能同步上涨导致利润率压缩 → GDX矿商盈利预期与估值倍数被下修',
+        family: 'gold-cycle',
+        driver_type: 'sector',
+        applies_to: 'all',
+        archetypes: ['gold-miner'],
+        cycle_families: ['gold-cycle'],
+        keywords: ['aisc', 'all-in sustaining cost', 'mining costs', 'energy costs', 'labor inflation', 'margin compression'],
+        markers: ['AISC', '矿商成本', '能源通胀', '全维持成本']
+    },
+    {
+        id: 'gold-safe-haven-rally-reversal-2023',
+        start: '2023-04-01',
+        end: '2024-06-30',
+        reason_zh: '银行业危机消退、软着陆预期升温 → 避险需求回落、实际利率高位震荡压制金价 → GLD与GDX涨幅回吐、矿商估值扩张受限',
+        family: 'gold-cycle',
+        driver_type: 'macro',
+        applies_to: 'all',
+        archetypes: ['gold-etf', 'gold-miner'],
+        cycle_families: ['gold-cycle'],
+        event_signal_tags: ['real-rate-pressure'],
+        keywords: ['soft landing', 'risk appetite', 'gold pullback', 'real rates', 'safe haven fades'],
+        markers: ['软着陆预期', '避险退潮', '实际利率高位', '金价回吐']
+    },
+    {
+        id: 'gold-central-bank-demand-2024',
+        start: '2024-01-01',
+        end: '2026-12-31',
+        reason_zh: '央行黄金储备持续增持叠加地缘冲突避险需求 → 金价突破历史高位但短期涨幅过快积累获利盘 → GLD/GDX阶段性承受高位回调压力',
+        family: 'gold-cycle',
+        driver_type: 'macro',
+        applies_to: 'all',
+        archetypes: ['gold-etf', 'gold-miner'],
+        cycle_families: ['gold-cycle'],
+        event_signal_tags: ['gold-safe-haven-demand'],
+        keywords: ['central bank buying', 'gold reserves', 'all time high', 'profit taking', 'geopolitical'],
+        markers: ['央行购金', '历史高位', '避险需求', '获利回吐']
+    },
+    {
+        id: 'intc-amd-share-loss-2019',
+        start: '2019-01-01',
+        end: '2022-12-31',
+        reason_zh: 'AMD Zen架构追上Intel性能/功耗比 → 服务器与PC份额持续被侵蚀、定价能力下降 → Intel数据中心与客户端收入预期被系统性下修',
+        family: 'intc-competitive-reset',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['INTC'],
+        archetypes: ['broad-semiconductor'],
+        cycle_families: ['semiconductor-cycle'],
+        event_signal_tags: ['demand-slowdown', 'pricing-pressure'],
+        keywords: ['amd share', 'market share loss', 'zen', 'epyc', 'server share', 'pc share', 'ryzen'],
+        markers: ['AMD竞争', '份额丢失', 'Zen架构', '服务器份额']
+    },
+    {
+        id: 'intc-process-delay-reset-2020',
+        start: '2020-07-01',
+        end: '2023-06-30',
+        reason_zh: 'Intel 7nm制程延迟两年以上 → 先进制程优势丧失、代工客户转向台积电 → Intel技术溢价消失、长期竞争力预期被下修',
+        family: 'intc-competitive-reset',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['INTC'],
+        archetypes: ['broad-semiconductor'],
+        cycle_families: ['semiconductor-cycle'],
+        event_signal_tags: ['guidance-cut'],
+        keywords: ['7nm delay', 'process node', 'tsmc', 'manufacturing delay', 'foundry', 'node delay'],
+        markers: ['制程延迟', '7nm', '台积电', '代工转移']
+    },
+    {
+        id: 'intc-foundry-losses-reset-2023',
+        start: '2023-01-01',
+        end: '2026-12-31',
+        reason_zh: 'Intel Foundry大规模亏损拖累整体财报 → 代工营收与客户获取进展远低于预期 → Intel长期战略可信度与估值倍数被持续下修',
+        family: 'intc-competitive-reset',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['INTC'],
+        archetypes: ['broad-semiconductor'],
+        cycle_families: ['semiconductor-cycle'],
+        event_signal_tags: ['guidance-cut', 'earnings-miss'],
+        keywords: ['intel foundry', 'ifs', 'foundry losses', 'external customers', 'manufacturing strategy'],
+        markers: ['Intel代工', 'IFS亏损', '代工客户', '战略可信度']
+    },
+    {
+        id: 'anet-ai-networking-cycle-2024',
+        start: '2024-01-01',
+        end: '2026-12-31',
+        reason_zh: 'AI超大规模数据中心对以太网交换机需求激增 → 但InfiniBand竞争与订单可见性不足引发估值高位波动 → Arista收入增速与估值溢价阶段性承压',
+        family: 'anet-ai-infra',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['ANET'],
+        archetypes: ['ai-infrastructure'],
+        cycle_families: ['semiconductor-cycle'],
+        event_signal_tags: ['ai-networking-capex-reset', 'orders-slowdown'],
+        keywords: ['ethernet', 'infiniband', 'ai networking', 'hyperscaler', 'data center switching', 'arista'],
+        markers: ['AI网络', '以太网', 'InfiniBand', '超大规模客户']
+    },
+    {
+        id: 'pltr-government-contract-reset-2022',
+        start: '2022-01-01',
+        end: '2023-12-31',
+        reason_zh: '美国联邦预算收紧与政府合同续签不确定性 → Palantir政府收入增速放缓、商业客户转化低于预期 → 高估值成长股在加息环境下估值倍数被压缩',
+        family: 'pltr-gov-cycle',
+        driver_type: 'macro',
+        applies_to: 'symbols_only',
+        symbols: ['PLTR'],
+        archetypes: ['ai-infrastructure'],
+        cycle_families: ['semiconductor-cycle'],
+        event_signal_tags: ['government-contract-risk', 'saas-growth-deceleration'],
+        keywords: ['government revenue', 'federal contracts', 'commercial growth', 'valuation', 'palantir'],
+        markers: ['政府合同', '联邦预算', '商业转化', 'Palantir估值']
+    },
+    {
+        id: 'pltr-doge-contract-risk-2025',
+        start: '2025-01-01',
+        end: '2026-12-31',
+        reason_zh: 'DOGE联邦开支削减引发Palantir政府合同取消风险 → 政府收入能见度下降、AI商业化节奏存疑 → 收入增速预期与估值倍数面临重估',
+        family: 'pltr-gov-cycle',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['PLTR'],
+        archetypes: ['ai-infrastructure'],
+        cycle_families: ['semiconductor-cycle'],
+        event_signal_tags: ['government-contract-risk'],
+        keywords: ['doge', 'federal spending cuts', 'government contracts', 'contract cancellation', 'palantir'],
+        markers: ['DOGE', '联邦削支', '政府合同取消', 'Palantir']
+    },
+    {
+        id: 'orcl-cloud-transition-reset-2022',
+        start: '2022-01-01',
+        end: '2023-06-30',
+        reason_zh: '传统数据库授权收入向云订阅转型节奏慢于预期 → OCI云市场份额落后AWS/Azure、订阅增速承压 → Oracle估值倍数扩张空间受限',
+        family: 'orcl-cloud-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['ORCL'],
+        archetypes: ['cloud-platform'],
+        cycle_families: ['software-saas-cycle'],
+        event_signal_tags: ['cloud-spending-reset', 'saas-growth-deceleration'],
+        keywords: ['oracle cloud', 'oci', 'cloud transition', 'license revenue', 'aws', 'azure competition'],
+        markers: ['OCI', '云转型', '数据库授权', 'AWS竞争']
+    },
+    {
+        id: 'orcl-ai-infra-demand-2024',
+        start: '2024-01-01',
+        end: '2026-12-31',
+        reason_zh: '生成式AI训练需求带动OCI算力租赁订单激增 → 但资本开支大幅提升拖累短期自由现金流 → Oracle盈利节奏与估值倍数面临高预期下的波动',
+        family: 'orcl-cloud-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['ORCL'],
+        archetypes: ['cloud-platform'],
+        cycle_families: ['software-saas-cycle'],
+        event_signal_tags: ['capex-reset'],
+        keywords: ['oci', 'ai cloud', 'gpu cluster', 'training workloads', 'capex', 'free cash flow'],
+        markers: ['OCI算力', 'AI训练', '资本开支', '自由现金流']
+    },
+    {
+        id: 'futu-china-brokerage-reset-2021',
+        start: '2021-07-01',
+        end: '2022-12-31',
+        reason_zh: '中国监管收紧证券账户跨境开户资质 → 富途新增用户增速大幅放缓、香港市场交投低迷 → 富途用户与收入增速预期被系统性下修',
+        family: 'futu-brokerage-cycle',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['FUTU'],
+        archetypes: ['investment-bank-broker'],
+        cycle_families: ['china-platform-cycle'],
+        event_signal_tags: ['regulatory-probe'],
+        keywords: ['futu', 'cross-border brokerage', 'account opening', 'regulatory approval', 'hong kong trading'],
+        markers: ['富途监管', '跨境开户', '证券账户资质', '香港交投']
+    },
+    {
+        id: 'futu-hk-market-reset-2022',
+        start: '2022-01-01',
+        end: '2023-06-30',
+        reason_zh: '港股与中概股熊市压制富途客户资产与交易活跃度 → 佣金收入与利息收入同步下滑 → 富途EPS预期与成长溢价被下修',
+        family: 'futu-brokerage-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['FUTU'],
+        archetypes: ['investment-bank-broker'],
+        cycle_families: ['china-platform-cycle'],
+        event_signal_tags: ['capital-markets-slowdown'],
+        keywords: ['hong kong market', 'trading volume', 'commission revenue', 'client assets', 'hsi'],
+        markers: ['港股熊市', '交易量', '佣金收入', 'HSI']
+    },
+    {
+        id: 'consumer-brand-rate-reset-2022',
+        start: '2022-01-01',
+        end: '2023-03-31',
+        reason_zh: '加息与通胀压缩消费可支配支出 → 运动服饰非必需消费需求走弱、库存积压 → NKE/LULU等消费品牌收入增速与估值倍数被下修',
+        family: 'consumer-discretionary-cycle',
+        driver_type: 'macro',
+        applies_to: 'all',
+        archetypes: ['consumer-brand'],
+        cycle_families: ['consumer-discretionary-cycle'],
+        event_signal_tags: ['demand-slowdown', 'inventory-correction'],
+        keywords: ['consumer spending', 'discretionary spending', 'inventory', 'inflation', 'rate hike impact'],
+        markers: ['消费紧缩', '库存积压', '可支配支出', '通胀']
+    },
+    {
+        id: 'oil-opec-oversupply-reset-2025',
+        start: '2025-01-01',
+        end: '2026-12-31',
+        reason_zh: 'OPEC+增产叠加全球需求增速低于预期 → 油价中枢下移、炼油利润率收窄 → XOM盈利预期与股息可持续性预期被下修',
+        family: 'energy-oil-cycle',
+        driver_type: 'sector',
+        applies_to: 'all',
+        archetypes: ['integrated-oil-major'],
+        cycle_families: ['energy-oil-cycle'],
+        event_signal_tags: ['oil-price-reset', 'opec-supply-shift'],
+        keywords: ['opec', 'output increase', 'oil demand', 'refining margins', 'exxon earnings'],
+        markers: ['OPEC增产', '油价下移', '炼油利润', 'XOM']
+    },
+    {
+        id: 'financial-tariff-credit-reset-2025',
+        start: '2025-04-01',
+        end: '2026-12-31',
+        reason_zh: '关税引发衰退担忧推升信贷损失预期 → 资本市场活动骤降、贷款损失准备金提升 → 金融股ROE预期与估值倍数被下修',
+        family: 'banking-credit-cycle',
+        driver_type: 'policy',
+        applies_to: 'all',
+        archetypes: ['investment-bank-broker', 'fintech-payments'],
+        cycle_families: ['banking-credit-cycle'],
+        event_signal_tags: ['capital-markets-slowdown', 'credit-loss-pressure'],
+        keywords: ['tariff recession', 'credit losses', 'ipo freeze', 'deal freeze', 'provisions', 'card spending'],
+        markers: ['关税衰退担忧', '信贷损失', '资本市场停摆', '准备金']
     }
 ];
 
