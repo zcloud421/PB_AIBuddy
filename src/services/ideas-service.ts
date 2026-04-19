@@ -1524,7 +1524,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
     {
         id: 'aapl-china-huawei-reset-2023',
         start: '2023-08-01',
-        end: '2026-12-31',
+        end: '2024-12-31',
         reason_zh: 'Apple中国市场份额承压：华为Mate60复苏、国产替代与政府采购限制压制中国区iPhone销量预期',
         family: 'aapl-china-competition',
         driver_type: 'sector',
@@ -1545,6 +1545,30 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         ],
         event_signal_tags: ['china-demand-reset', 'market-share-loss'],
         markers: ['华为', 'Mate 60', '中国市场份额', '国产替代', '政府限购']
+    },
+    {
+        id: 'aapl-china-recovery-2025',
+        start: '2025-01-01',
+        end: '2026-12-31',
+        reason_zh: 'Apple中国市场强势反弹：iPhone 17需求超预期、政府补贴助力销量，市占率回升至第二位压缩竞争叙述',
+        family: 'aapl-china-competition',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['AAPL'],
+        archetypes: ['consumer-tech-ecosystem'],
+        subsectors: ['consumer-tech-ecosystem'],
+        keywords: [
+            'china recovery',
+            'iphone 17',
+            'china market share',
+            'subsidy',
+            'premium smartphone',
+            'huawei competition',
+            'china sales growth',
+            'trade-in program'
+        ],
+        event_signal_tags: ['china-demand-reset'],
+        markers: ['中国反弹', 'iPhone 17', '市占率回升', '政府补贴', '高端市场']
     },
     {
         id: 'msft-cloud-pc-reset-2022',
