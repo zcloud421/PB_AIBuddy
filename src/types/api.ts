@@ -504,8 +504,8 @@ export interface PairAnalysisResponse {
     data_as_of: string;
     trading_days_overlap: number;
     correlation: {
-        d60: number;
-        d120: number;
+        d90: number;
+        d180: number;
         d252: number;
         bear_2022: number;
     };

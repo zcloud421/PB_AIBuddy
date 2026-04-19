@@ -7,8 +7,8 @@ export interface PairAnalysisResponse {
     data_as_of: string;
     trading_days_overlap: number;
     correlation: {
-        d60: number;
-        d120: number;
+        d90: number;
+        d180: number;
         d252: number;
         bear_2022: number;
     };
@@ -76,8 +76,8 @@ export async function analyzePairSuitability(symbolA: string, symbolB: string): 
     const returnSeries = computeLogReturns(alignedSeries);
     const recentReturnSeries = takeRecentTradingWindow(returnSeries, RECENT_TRADING_DAYS);
     const recentAlignedSeries = alignedSeries.slice(-(recentReturnSeries.length + 1));
-    const corr60 = roundMetric(calculateCorrelation(takeRecentTradingWindow(returnSeries, 60).map((point) => point.returnA), takeRecentTradingWindow(returnSeries, 60).map((point) => point.returnB)));
-    const corr120 = roundMetric(calculateCorrelation(takeRecentTradingWindow(returnSeries, 120).map((point) => point.returnA), takeRecentTradingWindow(returnSeries, 120).map((point) => point.returnB)));
+    const corr90 = roundMetric(calculateCorrelation(takeRecentTradingWindow(returnSeries, 90).map((point) => point.returnA), takeRecentTradingWindow(returnSeries, 90).map((point) => point.returnB)));
+    const corr180 = roundMetric(calculateCorrelation(takeRecentTradingWindow(returnSeries, 180).map((point) => point.returnA), takeRecentTradingWindow(returnSeries, 180).map((point) => point.returnB)));
     const corr252 = roundMetric(calculateCorrelation(recentReturnSeries.map((point) => point.returnA), recentReturnSeries.map((point) => point.returnB)));
     const bear2022Series = filterReturnSeriesByDateRange(returnSeries, BEAR_2022_START, BEAR_2022_END);
     const corrBear2022 = roundMetric(calculateCorrelation(
@@ -89,8 +89,8 @@ export async function analyzePairSuitability(symbolA: string, symbolB: string): 
     const volB = roundMetric(calculateAnnualizedVolatility(recent60Returns.map((point) => point.returnB)));
     const volatilityGap = roundMetric(Math.abs(volA - volB));
     const downsideSync = roundMetric(calculateDownsideSync(returnSeries));
-    const correlationStability = determineCorrelationStability([corr60, corr120, corr252]);
-    const suitability = determineSuitability(corr60, corr120, downsideSync);
+    const correlationStability = determineCorrelationStability([corr90, corr180, corr252]);
+    const suitability = determineSuitability(corr90, corr180, downsideSync);
 
     return {
         kind: 'ok',
@@ -100,8 +100,8 @@ export async function analyzePairSuitability(symbolA: string, symbolB: string): 
             data_as_of: recentAlignedSeries[recentAlignedSeries.length - 1].date,
             trading_days_overlap: recentAlignedSeries.length,
             correlation: {
-                d60: corr60,
-                d120: corr120,
+                d90: corr90,
+                d180: corr180,
                 d252: corr252,
                 bear_2022: corrBear2022
             },
