@@ -126,7 +126,7 @@ const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
 const DRAWDOWN_PREWARM_COOLDOWN_MS = 30 * 60 * 1000;
 const DRAWDOWN_PREWARM_FRESHNESS_MS = 2 * 60 * 1000;
-const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 23;
+const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 24;
 const DRAWDOWN_TAIL_RISK_HISTORY_LIMIT = 1500;
 const DRAWDOWN_TAIL_RISK_LOOKBACK_DAYS = 365 * 5;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
@@ -6669,19 +6669,64 @@ function inferDrawdownType(
 }
 
 function renderStructuredAttributionReason(reason: StructuredAttributionReason): string {
+    const normalizeNarrative = (text: string | null | undefined): string | null => {
+        if (!text) {
+            return null;
+        }
+
+        const cleaned = text
+            .replace(/\s*→\s*/g, '→')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/^[，。；、\s]+/, '')
+            .replace(/[，。；、\s]+$/, '');
+
+        if (!cleaned.includes('→')) {
+            return cleaned;
+        }
+
+        const segments = cleaned
+            .split('→')
+            .map((segment) => segment.trim().replace(/^[，。；、\s]+/, '').replace(/[，。；、\s]+$/, ''))
+            .filter(Boolean);
+
+        if (segments.length <= 1) {
+            return cleaned;
+        }
+
+        if (segments.length === 2) {
+            return `${segments[0]}，进而${segments[1]}`;
+        }
+
+        const [trigger, ...rest] = segments;
+        const transmissionAndImpact = rest.map((segment, index) =>
+            index === rest.length - 1 ? `最终使${segment}` : `导致${segment}`
+        );
+
+        return `${trigger}，${transmissionAndImpact.join('，')}`;
+    };
+
     if (!reason.primary_driver) {
         return reason.reason_zh;
     }
 
-    if (reason.secondary_driver) {
-        return `${reason.primary_driver}，叠加${reason.secondary_driver}`;
+    const primaryDriver = normalizeNarrative(reason.primary_driver);
+    const secondaryDriver = normalizeNarrative(reason.secondary_driver);
+    const backgroundRegime = normalizeNarrative(reason.background_regime);
+
+    if (!primaryDriver) {
+        return reason.reason_zh;
     }
 
-    if (reason.background_regime && reason.background_regime !== reason.primary_driver) {
-        return `${reason.primary_driver}，背景环境为${reason.background_regime}`;
+    if (secondaryDriver) {
+        return `${primaryDriver}，同时${secondaryDriver}`;
     }
 
-    return reason.primary_driver;
+    if (backgroundRegime && backgroundRegime !== primaryDriver) {
+        return `${primaryDriver}，背景上${backgroundRegime}`;
+    }
+
+    return primaryDriver;
 }
 
 function chooseHeuristicAttributionReason(
@@ -7546,8 +7591,10 @@ function groupStrikeRiskDrawdownEvents(
     for (const event of events) {
         const peakDate = new Date(event.peak_date);
         const yearLabel = formatPeakLabel(event.peak_date);
-        const displayReason =
-            event.reason_zh ?? `${yearLabel} 暂无明确宏观归因，或为个股／板块特定因素驱动`;
+        const rawReason = event.reason_zh ?? `${yearLabel} 暂无明确宏观归因，或为个股／板块特定因素驱动`;
+        const displayReason = rawReason.includes(' → ')
+            ? rawReason.split(' → ').join('，')
+            : rawReason;
         const groupKey = `${displayReason}::${event.peak_date.slice(0, 7)}`;
         const existing = grouped.get(groupKey);
 
