@@ -1,10 +1,15 @@
 export type Grade = 'GO' | 'CAUTION' | 'AVOID';
 export type SignalColor = 'green' | 'amber' | 'red' | 'gray';
 export type FlagSeverity = 'INFO' | 'WARN' | 'BLOCK';
+export type WaitReason = 'WAIT_EARNINGS_RISK' | 'WAIT_SETUP_RESET';
+export type AssignmentQualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
 export type FlagType =
+    | 'ACTIONABLE_CAUTION'
+    | 'ASSIGNMENT_QUALITY_CAP'
     | 'BROKEN_TREND'
     | 'COMMODITY_BETA_CAUTION'
     | 'EARNINGS_PROXIMITY'
+    | 'FRAGILE_NARRATIVE'
     | 'HIGH_BETA_THEME_CAUTION'
     | 'HIGH_VOL_LOW_STRIKE'
     | 'HIGH_COUPON_OVERRIDE'
@@ -17,7 +22,10 @@ export type FlagType =
     | 'LOW_COUPON'
     | 'LOW_LIQUIDITY'
     | 'NO_APPROVED_TENOR'
-    | 'NO_APPROVED_STRIKE';
+    | 'NO_APPROVED_STRIKE'
+    | 'OVEREXTENDED_UPTREND'
+    | 'QUALITY_DIP_EXCEPTION'
+    | 'WEAK_RECOVERY_PROFILE';
 
 export interface Flag {
     type: FlagType;
@@ -58,6 +66,10 @@ export interface IdeaCard {
     narrative: NarrativeOutput | null;
     news_items: NewsItem[];
     flags: Flag[];
+    actionable_caution?: boolean;
+    wait_reason?: WaitReason | null;
+    assignment_quality_score?: number | null;
+    assignment_quality_label?: AssignmentQualityLabel | null;
     current_price: number | null;
     pct_from_52w_high: number | null;
     ma50: number | null;
@@ -70,6 +82,7 @@ export interface AvoidEntry {
     symbol: string;
     primary_flag_type: FlagType;
     primary_flag_detail: string;
+    wait_reason?: WaitReason | null;
 }
 
 export interface DailyBestCard {
@@ -87,6 +100,8 @@ export interface DailyBestCard {
     narrative: NarrativeOutput | null;
     news_items: NewsItem[];
     flags: Flag[];
+    assignment_quality_score?: number | null;
+    assignment_quality_label?: AssignmentQualityLabel | null;
     sentiment_score: number | null;
 }
 
@@ -448,6 +463,10 @@ export interface SymbolIdeaResponse {
     narrative: NarrativeOutput | null;
     news_items: NewsItem[];
     flags: Flag[];
+    actionable_caution?: boolean;
+    wait_reason?: WaitReason | null;
+    assignment_quality_score?: number | null;
+    assignment_quality_label?: AssignmentQualityLabel | null;
     signals: SignalRow[];
     price_context: PriceContext;
     sentiment_score: number | null;
