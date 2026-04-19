@@ -89,6 +89,33 @@ const KNOWN_CONFERENCE_END_DATES: Partial<Record<string, string>> = {
     OFC: '2026-03-19'
 };
 
+const PEER_SYNC_GROUPS: Record<string, string[]> = {
+    BABA: ['JD', 'PDD', 'BIDU', 'NTES', 'TCEHY'],
+    JD: ['BABA', 'PDD', 'BIDU', 'TCEHY'],
+    PDD: ['BABA', 'JD', 'BIDU', 'TCEHY'],
+    BIDU: ['BABA', 'JD', 'PDD', 'TCEHY'],
+    NTES: ['BABA', 'BIDU', 'TCEHY', 'BILI'],
+    BILI: ['NTES', 'BABA', 'BIDU'],
+    TCEHY: ['BABA', 'JD', 'PDD', 'BIDU'],
+    COIN: ['HOOD', 'MSTR', 'MARA', 'RIOT'],
+    HOOD: ['COIN', 'MSTR'],
+    MSTR: ['COIN', 'MARA', 'RIOT'],
+    MARA: ['COIN', 'MSTR', 'RIOT'],
+    RIOT: ['COIN', 'MSTR', 'MARA']
+};
+
+const PEER_SYNC_THRESHOLD = 0.6;
+const PEER_SYNC_MIN_DRAWDOWN = 0.12;
+const CRYPTO_MACRO_ENTANGLED_RULE_PAIRS: Array<{ cryptoRuleId: string; macroRuleId: string }> = [
+    { cryptoRuleId: 'crypto-liquidity-bear-market-2022', macroRuleId: 'fed-hike-2022' },
+    { cryptoRuleId: 'crypto-terra-contagion-2022', macroRuleId: 'fed-hike-2022' },
+    { cryptoRuleId: 'crypto-ftx-contagion-2022', macroRuleId: 'fed-hike-2022' },
+    { cryptoRuleId: 'bitcoin-proxy-reset-2021', macroRuleId: 'fed-hike-2022' },
+    { cryptoRuleId: 'bitcoin-proxy-terra-contagion-2022', macroRuleId: 'fed-hike-2022' },
+    { cryptoRuleId: 'bitcoin-proxy-ftx-contagion-2022', macroRuleId: 'fed-hike-2022' }
+];
+const ENTANGLEMENT_MIN_SCORE_RATIO = 0.55;
+
 const IDEA_OPTIONAL_QUERY_TIMEOUT_MS = 500;
 const DRAWDOWN_ATTRIBUTION_TIMEOUT_MS = 1500;
 const DRAWDOWN_ATTRIBUTION_WARM_TIMEOUT_MS = 3200;
@@ -99,7 +126,7 @@ const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
 const DRAWDOWN_PREWARM_COOLDOWN_MS = 30 * 60 * 1000;
 const DRAWDOWN_PREWARM_FRESHNESS_MS = 2 * 60 * 1000;
-const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 19;
+const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 22;
 const DRAWDOWN_TAIL_RISK_HISTORY_LIMIT = 1500;
 const DRAWDOWN_TAIL_RISK_LOOKBACK_DAYS = 365 * 5;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
@@ -206,6 +233,8 @@ interface RankedAttributionRule {
     rule: AttributionMacroRule;
     score: number;
 }
+
+type DrawdownEpisodeForAttribution = ReturnType<typeof buildInteractiveDrawdownEpisodesForAttribution>[number];
 
 interface StructuredAttributionReason {
     business_archetype: AttributionBusinessArchetype | null;
@@ -383,6 +412,45 @@ const NEWS_EVENT_SIGNAL_KEYWORDS: NewsEventSignalRule[] = [
     { tag: 'accounting-issue', keywords: ['accounting', 'auditor', 'short report', 'fraud', 'restatement'] },
     { tag: 'capex-reset', keywords: ['capex', 'capital expenditure', 'ai spending', 'spending plan'] },
     { tag: 'orders-slowdown', keywords: ['orders', 'bookings', 'backlog', 'order slowdown'] },
+    {
+        tag: 'export-control-escalation',
+        keywords: [
+            'export controls',
+            'entity list',
+            'bis rule',
+            'chip ban',
+            'license requirement',
+            'china restriction',
+            'advanced chip',
+            'fab equipment export'
+        ]
+    },
+    {
+        tag: 'wfe-spending-cut',
+        keywords: [
+            'wafer fab equipment',
+            'wfe',
+            'capex reduction',
+            'fab investment cut',
+            'equipment order',
+            'tool shipment',
+            'memory capex',
+            'foundry capex'
+        ]
+    },
+    {
+        tag: 'hbm-allocation-reset',
+        keywords: [
+            'hbm',
+            'high bandwidth memory',
+            'hbm3',
+            'hbm3e',
+            'memory allocation',
+            'ai training memory',
+            'capacity constraint',
+            'dram mix'
+        ]
+    },
     { tag: 'crypto-drawdown', keywords: ['bitcoin falls', 'bitcoin drops', 'btc falls', 'btc drops', 'crypto prices', 'token prices', 'trading volumes', 'volumes plunged', 'ether falls'] },
     { tag: 'crypto-banking-stress', keywords: ['silvergate', 'signature bank', 'crypto bank', 'banking rails'] }
 ];
@@ -729,6 +797,22 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['半导体', 'PC需求', '库存', 'Client']
     },
     {
+        id: 'nvda-gaming-gpu-downcycle-2022',
+        start: '2021-11-01',
+        end: '2023-01-31',
+        reason_zh: 'NVIDIA游戏GPU需求崩塌：加密挖矿退潮与PC需求下行引发渠道库存积压，数据中心增速放缓加剧估值回撤',
+        family: 'semiconductor-downcycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['NVDA'],
+        archetypes: ['broad-semiconductor'],
+        subsectors: ['semiconductor'],
+        cycle_families: ['semiconductor-cycle'],
+        keywords: ['gaming', 'gpu', 'crypto mining', 'channel inventory', 'rtx', 'pc demand', 'data center', 'hyperscaler'],
+        event_signal_tags: ['inventory-correction', 'demand-slowdown', 'guidance-cut'],
+        markers: ['游戏GPU', '渠道库存', '加密挖矿', 'RTX', '数据中心放缓']
+    },
+    {
         id: 'memory-downcycle-2022',
         start: '2022-01-01',
         end: '2023-12-31',
@@ -743,6 +827,150 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         keywords: ['dram', 'nand', 'memory', 'inventory', 'pricing', 'oversupply'],
         event_signal_tags: ['inventory-correction', 'pricing-pressure', 'demand-slowdown'],
         markers: ['存储', 'DRAM', 'NAND', '供需失衡']
+    },
+    {
+        id: 'nvidia-china-export-control-2022',
+        start: '2022-09-01',
+        end: '2023-03-31',
+        reason_zh: '美国对华芯片出口管制：A100/H100禁售中国数据中心客户，NVIDIA中国收入占比高企压制估值',
+        family: 'chip-export-control',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['NVDA', 'AMD'],
+        archetypes: ['broad-semiconductor'],
+        subsectors: ['semiconductor'],
+        cycle_families: ['semiconductor-cycle'],
+        keywords: ['export controls', 'china ban', 'a100', 'h100', 'bis', 'commerce department', 'license'],
+        event_signal_tags: ['export-control-escalation'],
+        markers: ['出口管制', 'A100', 'H100', '中国禁售', 'BIS']
+    },
+    {
+        id: 'nvidia-china-export-control-2023',
+        start: '2023-09-01',
+        end: '2024-03-31',
+        reason_zh: '美国追加芯片出口限制：H800/A800被纳入管控范围，NVIDIA中国替代方案受阻压制营收预期',
+        family: 'chip-export-control',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['NVDA', 'AMD'],
+        archetypes: ['broad-semiconductor'],
+        subsectors: ['semiconductor'],
+        cycle_families: ['semiconductor-cycle'],
+        keywords: ['export controls', 'h800', 'a800', 'china revenue', 'bis rule', 'entity list', 'license requirement'],
+        event_signal_tags: ['export-control-escalation'],
+        markers: ['出口管制升级', 'H800', 'A800', '中国营收']
+    },
+    {
+        id: 'chip-export-escalation-2024',
+        start: '2024-06-01',
+        end: '2025-03-31',
+        reason_zh: '芯片出口管制持续收紧：BIS实体清单扩容、设备出口受限压制美系半导体对华业务预期',
+        family: 'chip-export-control',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['NVDA', 'AMD', 'AMAT', 'LRCX'],
+        archetypes: ['broad-semiconductor', 'chip-equipment'],
+        subsectors: ['semiconductor'],
+        cycle_families: ['semiconductor-cycle'],
+        keywords: ['export controls', 'entity list', 'bis', 'china fab', 'equipment export', 'license denial'],
+        event_signal_tags: ['export-control-escalation'],
+        markers: ['出口管制', '实体清单', '设备出口', '对华限制']
+    },
+    {
+        id: 'chip-export-escalation-2025',
+        start: '2025-01-01',
+        end: '2026-12-31',
+        reason_zh: '美国芯片出口管制进一步升级：算力芯片与半导体设备对华禁令扩大，全球供应链重构压力持续',
+        family: 'chip-export-control',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['NVDA', 'AMD', 'AMAT', 'LRCX', 'AVGO', 'MRVL'],
+        archetypes: ['broad-semiconductor', 'chip-equipment'],
+        subsectors: ['semiconductor'],
+        cycle_families: ['semiconductor-cycle'],
+        keywords: ['export controls', 'china chips act', 'diffusion rule', 'advanced chips', 'fab equipment', 'supply chain'],
+        event_signal_tags: ['export-control-escalation'],
+        markers: ['芯片出口禁令', '供应链重构', '算力管控', '设备限制']
+    },
+    {
+        id: 'chip-equipment-downcycle-2023',
+        start: '2022-07-01',
+        end: '2024-06-30',
+        reason_zh: '晶圆设备资本开支周期下行：三星/美光砍产能、先进制程扩产延迟，WFE订单前景承压',
+        family: 'chip-equipment-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['AMAT', 'LRCX'],
+        archetypes: ['chip-equipment'],
+        subsectors: ['semiconductor'],
+        cycle_families: ['semiconductor-cycle'],
+        keywords: [
+            'wafer fab equipment',
+            'wfe',
+            'capex cuts',
+            'samsung spending',
+            'equipment orders',
+            'fab investment',
+            'tool orders',
+            'memory capex',
+            'lam research',
+            'applied materials'
+        ],
+        event_signal_tags: ['wfe-spending-cut', 'inventory-correction'],
+        markers: ['WFE', '晶圆设备', '资本开支下行', '三星砍产能', '设备订单']
+    },
+    {
+        id: 'chip-equipment-china-export-2024',
+        start: '2024-03-01',
+        end: '2026-12-31',
+        reason_zh: '半导体设备出口管制拖累：AMAT/LRCX对华销售受限，中国营收敞口收缩压制增长预期',
+        family: 'chip-equipment-cycle',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['AMAT', 'LRCX'],
+        archetypes: ['chip-equipment'],
+        subsectors: ['semiconductor'],
+        cycle_families: ['semiconductor-cycle'],
+        keywords: [
+            'china revenue',
+            'export license',
+            'equipment restrictions',
+            'smee',
+            'fab tools',
+            'advanced packaging',
+            'foundry equipment',
+            'bis',
+            'china fab'
+        ],
+        event_signal_tags: ['export-control-escalation', 'wfe-spending-cut'],
+        markers: ['设备出口管制', '中国营收', 'AMAT', 'LRCX', '晶圆厂工具']
+    },
+    {
+        id: 'memory-hbm-ai-cycle-2024',
+        start: '2024-01-01',
+        end: '2026-12-31',
+        reason_zh: 'MU HBM供需与AI内存周期重估：高带宽内存产能分配、定价与AI训练需求节奏驱动估值波动',
+        family: 'memory-ai-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['MU'],
+        archetypes: ['memory'],
+        subsectors: ['memory'],
+        cycle_families: ['semiconductor-cycle'],
+        keywords: [
+            'hbm',
+            'high bandwidth memory',
+            'hbm3',
+            'hbm3e',
+            'ai memory',
+            'training cluster',
+            'capacity allocation',
+            'nvidia supply',
+            'memory pricing',
+            'dram mix shift'
+        ],
+        event_signal_tags: ['hbm-allocation-reset', 'memory-cycle-turn'],
+        markers: ['HBM', '高带宽内存', 'AI内存', '产能分配', 'HBM3E']
     },
     {
         id: 'tesla-musk-sale-volatility-2021',
@@ -1215,11 +1443,11 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         id: 'optical-networking-downcycle-2023',
         start: '2022-10-01',
         end: '2024-12-31',
-        reason_zh: '光通信链景气承压：网络客户去库存、运营商与数通需求偏弱拖累估值',
+        reason_zh: '光通信与数通网络链景气承压：网络客户去库存、运营商与数据中心需求偏弱拖累估值',
         family: 'optical-networking',
         driver_type: 'sector',
         applies_to: 'symbols_only',
-        symbols: ['LITE', 'CIEN', 'COHR', 'AAOI', 'INFN'],
+        symbols: ['LITE', 'CIEN', 'COHR', 'MRVL', 'AAOI', 'INFN'],
         archetypes: ['optical-networking'],
         subsectors: ['optical-networking'],
         cycle_families: ['semiconductor-cycle'],
@@ -1241,6 +1469,234 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         keywords: ['cloud', 'capex', 'ai spending', 'revenue miss', 'margin'],
         event_signal_tags: ['capex-reset', 'earnings-miss'],
         markers: ['Alphabet', 'Cloud', 'AI资本开支', '估值弹性']
+    },
+    {
+        id: 'aapl-china-supply-disruption-2022',
+        start: '2022-10-01',
+        end: '2023-03-31',
+        reason_zh: 'Apple中国供应链冲击：郑州富士康停产叠加中国iPhone需求转弱，出货量与营收预期下调',
+        family: 'aapl-china-supply',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['AAPL'],
+        archetypes: ['consumer-tech-ecosystem'],
+        subsectors: ['consumer-tech-ecosystem'],
+        keywords: [
+            'foxconn',
+            'zhengzhou',
+            'china iphone',
+            'supply disruption',
+            'production halt',
+            'china demand',
+            'shipments',
+            'iphone 14',
+            'lockdown'
+        ],
+        event_signal_tags: ['supply-chain-disruption', 'china-demand-reset'],
+        markers: ['富士康', '郑州', '中国供应链', 'iPhone出货']
+    },
+    {
+        id: 'aapl-services-regulatory-reset-2023',
+        start: '2023-06-01',
+        end: '2025-06-30',
+        reason_zh: 'Apple Services监管与竞争压力：欧盟DMA强制开放App Store、DOJ反垄断诉讼威胁服务营收护城河',
+        family: 'aapl-regulatory',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['AAPL'],
+        archetypes: ['consumer-tech-ecosystem'],
+        subsectors: ['consumer-tech-ecosystem'],
+        keywords: [
+            'app store',
+            'dma',
+            'antitrust',
+            'doj',
+            'sideloading',
+            'google deal',
+            'services revenue',
+            'apple intelligence',
+            'safari',
+            'default browser'
+        ],
+        event_signal_tags: ['regulatory-probe', 'antitrust-overhang'],
+        markers: ['App Store', 'DMA', '反垄断', 'Services护城河', 'DOJ']
+    },
+    {
+        id: 'aapl-china-huawei-reset-2023',
+        start: '2023-08-01',
+        end: '2026-12-31',
+        reason_zh: 'Apple中国市场份额承压：华为Mate60复苏、国产替代与政府采购限制压制中国区iPhone销量预期',
+        family: 'aapl-china-competition',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['AAPL'],
+        archetypes: ['consumer-tech-ecosystem'],
+        subsectors: ['consumer-tech-ecosystem'],
+        keywords: [
+            'huawei',
+            'mate 60',
+            'china sales',
+            'market share',
+            'domestic alternative',
+            'government ban',
+            'iphone ban',
+            'china revenue',
+            'local brands'
+        ],
+        event_signal_tags: ['china-demand-reset', 'market-share-loss'],
+        markers: ['华为', 'Mate 60', '中国市场份额', '国产替代', '政府限购']
+    },
+    {
+        id: 'msft-cloud-pc-reset-2022',
+        start: '2022-01-01',
+        end: '2023-06-30',
+        reason_zh: 'Microsoft云增速放缓与PC周期下行：Azure增长低于预期、Windows/Surface需求收缩，高估值受加息压缩',
+        family: 'msft-cloud-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['MSFT'],
+        archetypes: ['cloud-platform'],
+        subsectors: ['cloud-platform'],
+        keywords: [
+            'azure',
+            'cloud growth',
+            'pc demand',
+            'windows',
+            'surface',
+            'enterprise spending',
+            'guidance',
+            'revenue miss',
+            'bookings'
+        ],
+        event_signal_tags: ['demand-slowdown', 'guidance-cut'],
+        markers: ['Azure增速', 'PC需求', '企业支出', 'Windows']
+    },
+    {
+        id: 'msft-activision-regulatory-overhang-2022',
+        start: '2022-01-18',
+        end: '2023-10-13',
+        reason_zh: 'Microsoft收购动视暴雪监管阻力：FTC/CMA反垄断审查拖延、并购溢价与整合不确定性压制估值',
+        family: 'msft-acquisition',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['MSFT'],
+        archetypes: ['cloud-platform'],
+        subsectors: ['cloud-platform'],
+        keywords: [
+            'activision',
+            'blizzard',
+            'ftc',
+            'cma',
+            'antitrust',
+            'acquisition',
+            'gaming',
+            'deal approval',
+            'regulatory block',
+            'merger'
+        ],
+        event_signal_tags: ['regulatory-probe', 'acquisition-overhang'],
+        markers: ['动视暴雪', 'FTC', 'CMA', '反垄断审查', '并购溢价']
+    },
+    {
+        id: 'msft-ai-copilot-monetization-reset-2024',
+        start: '2024-01-01',
+        end: '2026-12-31',
+        reason_zh: 'Microsoft AI Copilot变现节奏与Azure增速再定价：Copilot企业渗透率与ROI争议压制AI溢价估值',
+        family: 'msft-ai-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['MSFT'],
+        archetypes: ['cloud-platform'],
+        subsectors: ['cloud-platform'],
+        keywords: [
+            'copilot',
+            'azure openai',
+            'ai monetization',
+            'enterprise adoption',
+            'github copilot',
+            'azure growth',
+            'openai',
+            'roi',
+            'seat adoption',
+            'ai premium'
+        ],
+        event_signal_tags: ['capex-reset', 'demand-slowdown'],
+        markers: ['Copilot', 'Azure AI', '企业渗透率', 'AI溢价', '变现节奏']
+    },
+    {
+        id: 'amzn-retail-margin-reset-2022',
+        start: '2022-01-01',
+        end: '2023-06-30',
+        reason_zh: 'Amazon零售业务利润率崩塌：疫情期过度扩张、物流成本激增与消费降速引发盈利预期大幅下修',
+        family: 'amzn-retail-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['AMZN'],
+        archetypes: ['cloud-platform'],
+        subsectors: ['cloud-platform'],
+        keywords: [
+            'retail margin',
+            'logistics cost',
+            'fulfillment',
+            'overcapacity',
+            'headcount',
+            'operating loss',
+            'consumer spending',
+            'e-commerce slowdown',
+            'warehouse'
+        ],
+        event_signal_tags: ['margin-compression', 'demand-slowdown', 'guidance-cut'],
+        markers: ['零售利润率', '物流成本', '过度扩张', '盈利下修', '消费降速']
+    },
+    {
+        id: 'amzn-aws-deceleration-2022',
+        start: '2022-07-01',
+        end: '2023-09-30',
+        reason_zh: 'AWS云增速放缓：企业云支出优化、客户降本与宏观压力拖累AWS营收预期，云估值溢价收缩',
+        family: 'amzn-cloud-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['AMZN'],
+        archetypes: ['cloud-platform'],
+        subsectors: ['cloud-platform'],
+        keywords: [
+            'aws',
+            'cloud optimization',
+            'enterprise cloud',
+            'revenue deceleration',
+            'cost cutting',
+            'cloud spend',
+            'workload migration',
+            'azure competition'
+        ],
+        event_signal_tags: ['demand-slowdown', 'guidance-cut'],
+        markers: ['AWS增速', '云支出优化', '企业降本', '云估值']
+    },
+    {
+        id: 'amzn-ai-cloud-competition-2024',
+        start: '2024-01-01',
+        end: '2026-12-31',
+        reason_zh: 'Amazon云AI竞争与资本开支压力：Azure/Google AI云份额争夺加剧，AWS AI基础设施大规模投入拖累自由现金流预期',
+        family: 'amzn-cloud-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['AMZN'],
+        archetypes: ['cloud-platform'],
+        subsectors: ['cloud-platform'],
+        keywords: [
+            'aws ai',
+            'bedrock',
+            'azure openai',
+            'google cloud',
+            'ai competition',
+            'capex',
+            'free cash flow',
+            'data center investment',
+            'trainium',
+            'inferentia'
+        ],
+        event_signal_tags: ['capex-reset', 'competition-reset'],
+        markers: ['AWS AI', '云竞争', 'Azure', '资本开支', '自由现金流']
     },
     {
         id: 'tsmc-semiconductor-cycle-2023',
@@ -1290,16 +1746,96 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['Meta', 'AI投入', '广告主线', '资本开支']
     },
     {
+        id: 'avgo-vmware-enterprise-reset-2022',
+        start: '2022-01-01',
+        end: '2024-06-30',
+        reason_zh: 'Broadcom企业网络支出放缓叠加VMware收购溢价担忧：并购整合风险与企业IT预算收缩压制估值',
+        family: 'avgo-enterprise-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['AVGO'],
+        archetypes: ['broad-semiconductor'],
+        subsectors: ['semiconductor'],
+        cycle_families: ['semiconductor-cycle'],
+        keywords: [
+            'vmware',
+            'acquisition',
+            'enterprise',
+            'networking',
+            'broadcom',
+            'software',
+            'integration',
+            'it spending',
+            'capex',
+            'enterprise demand',
+            'deal risk'
+        ],
+        event_signal_tags: ['enterprise-spending-reset', 'acquisition-overhang'],
+        markers: ['VMware', 'Broadcom收购', '企业IT', '网络支出', '整合风险']
+    },
+    {
+        id: 'ai-capex-sustainability-reset-2024',
+        start: '2024-06-01',
+        end: '2025-01-19',
+        reason_zh: 'AI资本开支可持续性预期阶段性降温：超大规模云厂商支出节奏与ROI争议、Blackwell量产延迟引发AI链条估值回调',
+        family: 'ai-capex-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['NVDA', 'AMD', 'AVGO', 'MRVL', 'AMAT', 'LRCX', 'COHR', 'LITE'],
+        archetypes: ['broad-semiconductor', 'chip-equipment', 'optical-networking'],
+        subsectors: ['semiconductor'],
+        cycle_families: ['semiconductor-cycle'],
+        keywords: [
+            'ai capex',
+            'hyperscaler spending',
+            'roi',
+            'blackwell',
+            'gb200',
+            'supply delay',
+            'capex sustainability',
+            'ai bubble',
+            'infrastructure spend',
+            'cloud capex'
+        ],
+        event_signal_tags: ['capex-reset', 'demand-slowdown'],
+        markers: ['AI资本开支', 'ROI争议', 'Blackwell延迟', '超大规模支出节奏']
+    },
+    {
         id: 'deepseek-ai-reset-2025',
         start: '2025-01-20',
         end: '2025-03-31',
-        reason_zh: 'DeepSeek低成本模型冲击AI链条定价，算力需求与资本开支回报预期被重估',
+        reason_zh: 'DeepSeek低成本模型冲击AI链条定价：算力/HBM需求与光互联资本开支回报预期被系统性重估',
         family: 'ai-reset',
         driver_type: 'sector',
         applies_to: 'symbols_only',
-        symbols: ['NVDA', 'AMD', 'AVGO', 'MRVL', 'ANET'],
-        keywords: ['deepseek', 'ai', 'capex', 'gpu', 'inference', 'training'],
+        symbols: ['NVDA', 'AMD', 'AVGO', 'MRVL', 'ANET', 'MU', 'COHR', 'LITE'],
+        keywords: ['deepseek', 'ai', 'capex', 'gpu', 'inference', 'training', 'hbm', 'memory demand', 'optical interconnect', 'ai cluster'],
         markers: ['DeepSeek', '算力', '资本开支', 'AI链条']
+    },
+    {
+        id: 'google-ad-cycle-reset-2022',
+        start: '2022-01-01',
+        end: '2023-03-31',
+        reason_zh: 'Alphabet广告周期承压：宏观走弱拖累搜索与YouTube广告收入，TikTok竞争加速用户时长迁移',
+        family: 'google-ad-cycle',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['GOOG', 'GOOGL'],
+        archetypes: ['ad-platform-internet'],
+        subsectors: ['ad-platform-internet'],
+        keywords: [
+            'advertising',
+            'youtube',
+            'search revenue',
+            'ad spend',
+            'tiktok',
+            'macro',
+            'digital advertising',
+            'revenue miss',
+            'headcount'
+        ],
+        event_signal_tags: ['ad-cycle-reset', 'demand-slowdown'],
+        markers: ['广告周期', 'YouTube', '搜索收入', 'TikTok', '数字广告']
     },
     {
         id: 'unh-cost-guidance-reset-2025',
@@ -4054,6 +4590,8 @@ function buildInteractiveDrawdownEpisodesForAttribution(priceHistory: Array<{ da
     peak_price: number;
     trough_date: string;
     max_drawdown_pct: number;
+    drawdown_velocity: number;
+    onset_type: 'sharp' | 'gradual' | 'moderate';
     recovery_days: number | null;
     total_duration_days: number | null;
     recovered: boolean;
@@ -4075,6 +4613,8 @@ function buildInteractiveDrawdownEpisodesForAttribution(priceHistory: Array<{ da
         peak_price: number;
         trough_date: string;
         max_drawdown_pct: number;
+        drawdown_velocity: number;
+        onset_type: 'sharp' | 'gradual' | 'moderate';
         recovery_days: number | null;
         total_duration_days: number | null;
         recovered: boolean;
@@ -4102,6 +4642,11 @@ function buildInteractiveDrawdownEpisodesForAttribution(priceHistory: Array<{ da
                     peak_price: roundPrice(peakPrice),
                     trough_date: normalizedHistory[activeEpisode.troughIndex].date,
                     max_drawdown_pct: roundPct(activeEpisode.maxDrawdownPct),
+                    ...buildDrawdownVelocityStats(
+                        normalizedHistory[activeEpisode.peakIndex].date,
+                        normalizedHistory[activeEpisode.troughIndex].date,
+                        activeEpisode.maxDrawdownPct
+                    ),
                     recovery_days: index - activeEpisode.troughIndex,
                     total_duration_days: index - activeEpisode.peakIndex,
                     recovered: true,
@@ -4139,6 +4684,11 @@ function buildInteractiveDrawdownEpisodesForAttribution(priceHistory: Array<{ da
                 peak_price: roundPrice(peakPrice),
                 trough_date: normalizedHistory[activeEpisode.troughIndex].date,
                 max_drawdown_pct: roundPct(activeEpisode.maxDrawdownPct),
+                ...buildDrawdownVelocityStats(
+                    normalizedHistory[activeEpisode.peakIndex].date,
+                    normalizedHistory[activeEpisode.troughIndex].date,
+                    activeEpisode.maxDrawdownPct
+                ),
                 recovery_days: index - activeEpisode.troughIndex,
                 total_duration_days: index - activeEpisode.peakIndex,
                 recovered: false,
@@ -4156,6 +4706,11 @@ function buildInteractiveDrawdownEpisodesForAttribution(priceHistory: Array<{ da
             peak_price: roundPrice(peakPrice),
             trough_date: normalizedHistory[activeEpisode.troughIndex].date,
             max_drawdown_pct: roundPct(activeEpisode.maxDrawdownPct),
+            ...buildDrawdownVelocityStats(
+                normalizedHistory[activeEpisode.peakIndex].date,
+                normalizedHistory[activeEpisode.troughIndex].date,
+                activeEpisode.maxDrawdownPct
+            ),
             recovery_days: null,
             total_duration_days: null,
             recovered: false,
@@ -4164,6 +4719,96 @@ function buildInteractiveDrawdownEpisodesForAttribution(priceHistory: Array<{ da
     }
 
     return episodes;
+}
+
+function daysBetweenIsoDates(startDate: string, endDate: string): number {
+    const start = new Date(`${startDate}T00:00:00Z`).getTime();
+    const end = new Date(`${endDate}T00:00:00Z`).getTime();
+
+    if (!Number.isFinite(start) || !Number.isFinite(end)) {
+        return 1;
+    }
+
+    return Math.max(1, Math.round((end - start) / (1000 * 60 * 60 * 24)));
+}
+
+function shiftDate(date: string, deltaDays: number): string {
+    const base = new Date(`${date}T00:00:00Z`);
+    if (Number.isNaN(base.getTime())) {
+        return date;
+    }
+    base.setUTCDate(base.getUTCDate() + deltaDays);
+    return base.toISOString().slice(0, 10);
+}
+
+function buildDrawdownVelocityStats(
+    peakDate: string,
+    troughDate: string,
+    maxDrawdownPct: number
+): { drawdown_velocity: number; onset_type: 'sharp' | 'gradual' | 'moderate' } {
+    const daysToTrough = daysBetweenIsoDates(peakDate, troughDate);
+    const drawdownVelocity = Math.abs(maxDrawdownPct) / daysToTrough;
+    const onsetType: 'sharp' | 'gradual' | 'moderate' =
+        drawdownVelocity >= 1.5 ? 'sharp' : drawdownVelocity <= 0.4 ? 'gradual' : 'moderate';
+
+    return {
+        drawdown_velocity: Number(drawdownVelocity.toFixed(2)),
+        onset_type: onsetType
+    };
+}
+
+async function detectPeerSync(
+    symbol: string,
+    peakDate: string,
+    troughDate: string,
+    episodeDrawdownPct: number
+): Promise<{ hasPeerSync: boolean; syncedPeerCount: number; totalPeers: number }> {
+    void episodeDrawdownPct;
+    const peers = PEER_SYNC_GROUPS[symbol.toUpperCase()];
+    if (!peers || peers.length === 0) {
+        return { hasPeerSync: false, syncedPeerCount: 0, totalPeers: 0 };
+    }
+
+    const peakWindowStart = shiftDate(peakDate, -10);
+    const peakWindowEnd = shiftDate(peakDate, 10);
+    const troughWindowEnd = shiftDate(troughDate, 10);
+
+    const peerHistories = await Promise.all(
+        peers.map(async (peer) => {
+            try {
+                const history = await getRecentPriceHistoryBySymbol(peer, 500);
+                return { peer, history };
+            } catch {
+                return { peer, history: [] as Array<{ date: string; close: number }> };
+            }
+        })
+    );
+
+    let syncedCount = 0;
+    for (const { history } of peerHistories) {
+        if (history.length === 0) {
+            continue;
+        }
+
+        const nearPeak = history.find((point) => point.date >= peakWindowStart && point.date <= peakWindowEnd);
+        const nearTrough = history.find((point) => point.date >= peakDate && point.date <= troughWindowEnd);
+        const peakClose = toFiniteNumber(nearPeak?.close);
+        const troughClose = toFiniteNumber(nearTrough?.close);
+        if (peakClose === null || troughClose === null || peakClose <= 0) {
+            continue;
+        }
+
+        const peerDrawdown = (troughClose - peakClose) / peakClose;
+        if (peerDrawdown <= -PEER_SYNC_MIN_DRAWDOWN) {
+            syncedCount += 1;
+        }
+    }
+
+    return {
+        hasPeerSync: peers.length > 0 && syncedCount / peers.length >= PEER_SYNC_THRESHOLD,
+        syncedPeerCount: syncedCount,
+        totalPeers: peers.length
+    };
 }
 
 function buildHistoricalNewsWindow(peakDate: string, troughDate: string): { from: string; to: string } {
@@ -4209,6 +4854,10 @@ function isRuleApplicableToSymbol(rule: AttributionMacroRule, symbol: string): b
         return US_TECH_ATTRIBUTION_SYMBOLS.has(upper);
     }
     return rule.applies_to === 'all';
+}
+
+function getAttributionRuleById(ruleId: string): AttributionMacroRule | null {
+    return DRAWDOWN_ATTRIBUTION_RULES.find((rule) => rule.id === ruleId) ?? null;
 }
 
 function countKeywordHits(items: NewsItem[], keywords: string[] | undefined): number {
@@ -4434,10 +5083,66 @@ function normalizeIssuerName(symbol: string, companyName: string | null): string
     return raw || upper;
 }
 
+function formatAttributionDateLabel(peakDate: string): string {
+    return `${new Date(`${peakDate}T00:00:00Z`).getUTCFullYear()}年${new Date(`${peakDate}T00:00:00Z`).getUTCMonth() + 1}月`;
+}
+
 function buildFallbackAttributionReason(symbol: string, companyName: string | null, peakDate: string): string {
-    const label = `${new Date(`${peakDate}T00:00:00Z`).getUTCFullYear()}年${new Date(`${peakDate}T00:00:00Z`).getUTCMonth() + 1}月`;
+    const label = formatAttributionDateLabel(peakDate);
     const issuer = normalizeIssuerName(symbol, companyName);
     return `${label} ${issuer} 暂无明确单一宏观主因，回撤更可能由个股基本面、板块节奏或市场风险偏好共同驱动`;
+}
+
+function buildVelocityFallbackReason(
+    peakDate: string,
+    issuerName: string,
+    onsetType: 'sharp' | 'gradual'
+): string {
+    const dateLabel = formatAttributionDateLabel(peakDate);
+
+    if (onsetType === 'sharp') {
+        return `${dateLabel} ${issuerName} 快速下跌，或与个股消息、财报或短期市场情绪冲击相关`;
+    }
+
+    return `${dateLabel} ${issuerName} 缓慢回调，或与板块估值收缩、资金轮动或宏观预期渐进调整相关`;
+}
+
+function isCryptoMacroEntangledEpisode(
+    peakDate: string,
+    troughDate: string,
+    rankedRules: RankedAttributionRule[]
+): boolean {
+    if (rankedRules.length < 2) {
+        const primaryOnly = rankedRules[0];
+        if (!primaryOnly) {
+            return false;
+        }
+        const matchedPair = CRYPTO_MACRO_ENTANGLED_RULE_PAIRS.find((pair) => pair.cryptoRuleId === primaryOnly.rule.id);
+        if (!matchedPair) {
+            return false;
+        }
+        const macroRule = getAttributionRuleById(matchedPair.macroRuleId);
+        return macroRule ? eventOverlapsRule(peakDate, troughDate, macroRule) : false;
+    }
+
+    const primary = rankedRules[0];
+    if (!primary || primary.score <= 0) {
+        return false;
+    }
+
+    const matchedPair = CRYPTO_MACRO_ENTANGLED_RULE_PAIRS.find((pair) => pair.cryptoRuleId === primary.rule.id);
+    if (!matchedPair) {
+        return false;
+    }
+
+    const macroCandidate = rankedRules.find((candidate) => candidate.rule.id === matchedPair.macroRuleId);
+    if (!macroCandidate) {
+        const macroRule = getAttributionRuleById(matchedPair.macroRuleId);
+        return macroRule ? eventOverlapsRule(peakDate, troughDate, macroRule) : false;
+    }
+
+    const scoreRatio = macroCandidate.score / primary.score;
+    return scoreRatio >= ENTANGLEMENT_MIN_SCORE_RATIO;
 }
 
 function buildCycleAwarePrimaryDriver(
@@ -4837,10 +5542,12 @@ function isCryptoExchangeBroadFrameworkRule(rule: AttributionMacroRule): boolean
 function rankAttributionRules(
     symbol: string,
     companyName: string | null,
-    peakDate: string,
-    troughDate: string,
-    newsItems: NewsItem[]
+    episode: Pick<DrawdownEpisodeForAttribution, 'peak_date' | 'trough_date' | 'onset_type'>,
+    newsItems: NewsItem[],
+    hasPeerSync: boolean
 ): RankedAttributionRule[] {
+    const peakDate = episode.peak_date;
+    const troughDate = episode.trough_date;
     const inferredArchetype = inferSymbolBusinessArchetype(symbol, companyName, newsItems);
     const inferredSubsector = inferSymbolSubsector(symbol, companyName, newsItems);
     const inferredCycleFamily = inferSymbolCycleFamily(symbol);
@@ -4905,6 +5612,27 @@ function rankAttributionRules(
                           0
                       )
                     : 0;
+            let velocityAdjustment = 0;
+            if (episode.onset_type === 'sharp' && rule.driver_type === 'macro') {
+                velocityAdjustment = -4;
+            }
+            if (episode.onset_type === 'gradual' && rule.driver_type === 'company') {
+                velocityAdjustment = -4;
+            }
+            let peerSyncAdjustment = 0;
+            if (hasPeerSync) {
+                if (rule.driver_type === 'company') {
+                    peerSyncAdjustment -= 20;
+                }
+                if (
+                    rule.driver_type === 'macro' ||
+                    rule.driver_type === 'policy' ||
+                    rule.driver_type === 'sector'
+                ) {
+                    peerSyncAdjustment += 12;
+                }
+            }
+
             return {
                 rule,
                 score:
@@ -4924,7 +5652,9 @@ function rankAttributionRules(
                     cryptoExchangeSignalBonus +
                     chinaPlatformSpecificityBonus +
                     chinaPlatformBroadPenalty +
-                    chinaPlatformSignalBonus
+                    chinaPlatformSignalBonus +
+                    velocityAdjustment +
+                    peerSyncAdjustment
             };
         })
         .sort((left, right) => right.score - left.score);
@@ -4933,12 +5663,14 @@ function rankAttributionRules(
 function buildStructuredFallbackAttribution(
     symbol: string,
     companyName: string | null,
-    peakDate: string,
-    troughDate: string,
+    episode: Pick<DrawdownEpisodeForAttribution, 'peak_date' | 'trough_date' | 'onset_type'>,
     businessArchetype: AttributionBusinessArchetype | null,
     subsector: string | null,
-    eventSignalDetails: EventSignalDetail[]
+    eventSignalDetails: EventSignalDetail[],
+    hasPeerSync: boolean
 ): StructuredAttributionReason {
+    const peakDate = episode.peak_date;
+    const troughDate = episode.trough_date;
     const issuer = normalizeIssuerName(symbol, companyName);
     const cycleFamily = inferSymbolCycleFamily(symbol);
     const eventSignals = eventSignalDetails.map((item) => item.tag);
@@ -4947,6 +5679,24 @@ function buildStructuredFallbackAttribution(
         subsector ??
         cycleFamily ??
         'generic';
+    let fallbackReasonZh: string;
+    let fallbackPrimaryDriverType: AttributionDriverType = 'company';
+    const dateLabel = formatAttributionDateLabel(peakDate);
+
+    if (hasPeerSync) {
+        fallbackReasonZh = `${dateLabel} ${issuer} 与同板块标的同步回调，或受共同宏观或行业因素驱动`;
+        fallbackPrimaryDriverType = 'sector';
+    } else if (episode.onset_type === 'sharp') {
+        fallbackReasonZh = buildVelocityFallbackReason(peakDate, issuer, 'sharp');
+        fallbackPrimaryDriverType = 'company';
+    } else if (episode.onset_type === 'gradual') {
+        fallbackReasonZh = buildVelocityFallbackReason(peakDate, issuer, 'gradual');
+        fallbackPrimaryDriverType = 'sector';
+    } else {
+        fallbackReasonZh = buildFallbackAttributionReason(symbol, companyName, peakDate);
+        fallbackPrimaryDriverType = 'company';
+    }
+
     const structured: StructuredAttributionReason = {
         business_archetype: businessArchetype,
         subsector,
@@ -4956,14 +5706,13 @@ function buildStructuredFallbackAttribution(
         event_signal_details: eventSignalDetails,
         reason_family: 'company-fundamental',
         background_regime: null,
-        primary_driver_type: 'company',
+        primary_driver_type: fallbackPrimaryDriverType,
         primary_driver: buildCycleAwarePrimaryDriver(issuer, businessArchetype, cycleFamily, eventSignals),
         secondary_driver: cycleFamily === 'crypto-cycle' ? null : '市场风险偏好回落放大跌幅',
-        reason_zh: buildFallbackAttributionReason(symbol, companyName, peakDate),
+        reason_zh: fallbackReasonZh,
         primary_rule_id: `fallback:${fallbackRuleKey}:${peakDate}:${troughDate}`,
         background_rule_id: null
     };
-    structured.reason_zh = renderStructuredAttributionReason(structured);
     return structured;
 }
 
@@ -5015,10 +5764,12 @@ function renderStructuredAttributionReason(reason: StructuredAttributionReason):
 function chooseHeuristicAttributionReason(
     symbol: string,
     companyName: string | null,
-    peakDate: string,
-    troughDate: string,
-    newsItems: NewsItem[]
+    episode: DrawdownEpisodeForAttribution,
+    newsItems: NewsItem[],
+    peerSync: { hasPeerSync: boolean; syncedPeerCount: number; totalPeers: number }
 ): StructuredAttributionReason {
+    const peakDate = episode.peak_date;
+    const troughDate = episode.trough_date;
     const inferredArchetype = inferSymbolBusinessArchetype(symbol, companyName, newsItems);
     const inferredSubsector = inferSymbolSubsector(symbol, companyName, newsItems);
     const inferredCycleFamily = inferSymbolCycleFamily(symbol);
@@ -5029,31 +5780,41 @@ function chooseHeuristicAttributionReason(
         inferredCycleFamily
     );
     const eventSignals = eventSignalDetails.map((item) => item.tag);
-    const candidates = rankAttributionRules(symbol, companyName, peakDate, troughDate, newsItems);
+    const candidates = rankAttributionRules(symbol, companyName, episode, newsItems, peerSync.hasPeerSync);
     const primary = candidates[0]?.rule;
     if (!primary) {
         return buildStructuredFallbackAttribution(
             symbol,
             companyName,
-            peakDate,
-            troughDate,
+            episode,
             inferredArchetype,
             inferredSubsector,
-            eventSignalDetails
+            eventSignalDetails,
+            peerSync.hasPeerSync
         );
     }
 
-    const background = candidates.find(
-        (candidate) =>
-            candidate.rule.id !== primary.id &&
-            ['macro', 'policy', 'geopolitical'].includes(candidate.rule.driver_type)
-    )?.rule;
+    const fedHikeBackgroundRule = getAttributionRuleById('fed-hike-2022');
+    const isDirectCryptoMacroEntanglement =
+        fedHikeBackgroundRule !== null &&
+        CRYPTO_MACRO_ENTANGLED_RULE_PAIRS.some((pair) => pair.cryptoRuleId === primary.id && pair.macroRuleId === 'fed-hike-2022') &&
+        eventOverlapsRule(peakDate, troughDate, fedHikeBackgroundRule);
+    const isCryptoMacroEntangled =
+        isDirectCryptoMacroEntanglement || isCryptoMacroEntangledEpisode(peakDate, troughDate, candidates);
+    const background =
+        candidates.find(
+            (candidate) =>
+                candidate.rule.id !== primary.id &&
+                ['macro', 'policy', 'geopolitical'].includes(candidate.rule.driver_type)
+        )?.rule ??
+        (isCryptoMacroEntangled ? fedHikeBackgroundRule : null);
     const suppressBackgroundNarrative =
         inferredCycleFamily === 'crypto-cycle' &&
         (primary.cycle_families?.includes('crypto-cycle') === true ||
             primary.archetypes?.includes('crypto-exchange-broker') === true ||
             primary.archetypes?.includes('bitcoin-leverage-proxy') === true ||
-            primary.archetypes?.includes('bitcoin-miner') === true);
+            primary.archetypes?.includes('bitcoin-miner') === true) &&
+        !isCryptoMacroEntangled;
 
     const structured: StructuredAttributionReason = {
         business_archetype: inferredArchetype,
@@ -5280,23 +6041,31 @@ async function buildEnrichedDrawdownAttributions(
         companyName ?? undefined
     );
 
-    const newsByEpisode = episodes.map((episode, index) => {
-        const window = episodeWindows[index];
-        const shouldEnrich = enrichedKeys.has(`${episode.peak_date}::${episode.trough_date}`);
-        const newsItems = shouldEnrich ? (batchedNews.get(`${window.from}:${window.to}`) ?? []) : [];
-        const heuristicReason = chooseHeuristicAttributionReason(
-            symbol,
-            companyName,
-            episode.peak_date,
-            episode.trough_date,
-            newsItems
-        );
-        return {
-            episode,
-            newsItems,
-            heuristicReason
-        };
-    });
+    const newsByEpisode = await Promise.all(
+        episodes.map(async (episode, index) => {
+            const window = episodeWindows[index];
+            const shouldEnrich = enrichedKeys.has(`${episode.peak_date}::${episode.trough_date}`);
+            const newsItems = shouldEnrich ? (batchedNews.get(`${window.from}:${window.to}`) ?? []) : [];
+            const peerSync = await detectPeerSync(
+                symbol,
+                episode.peak_date,
+                episode.trough_date,
+                episode.max_drawdown_pct
+            );
+            const heuristicReason = chooseHeuristicAttributionReason(
+                symbol,
+                companyName,
+                episode,
+                newsItems,
+                peerSync
+            );
+            return {
+                episode,
+                newsItems,
+                heuristicReason
+            };
+        })
+    );
 
     const llmReasons = await withSoftTimeout(
         refineDrawdownAttributionsWithLLM({
@@ -5395,16 +6164,26 @@ async function buildDrawdownAttributions(
 
             return left.max_drawdown_pct - right.max_drawdown_pct;
         });
-    const heuristicBaseline = episodes.map((episode) => ({
-        episode,
-        heuristicReason: chooseHeuristicAttributionReason(
-            normalizedSymbol,
-            companyName,
-            episode.peak_date,
-            episode.trough_date,
-            []
-        )
-    }));
+    const heuristicBaseline = await Promise.all(
+        episodes.map(async (episode) => {
+            const peerSync = await detectPeerSync(
+                normalizedSymbol,
+                episode.peak_date,
+                episode.trough_date,
+                episode.max_drawdown_pct
+            );
+            return {
+                episode,
+                heuristicReason: chooseHeuristicAttributionReason(
+                    normalizedSymbol,
+                    companyName,
+                    episode,
+                    [],
+                    peerSync
+                )
+            };
+        })
+    );
     const baselineValue = mapDrawdownAttributionRows(heuristicBaseline);
 
     const existingInFlight = drawdownAttributionInFlight.get(cacheKey);

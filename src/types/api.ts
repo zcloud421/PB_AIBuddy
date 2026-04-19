@@ -351,6 +351,8 @@ export interface DrawdownAttribution {
     peak_price: number;
     trough_date: string;
     max_drawdown_pct: number;
+    drawdown_velocity?: number;
+    onset_type?: 'sharp' | 'gradual' | 'moderate';
     primary_rule_id?: string | null;
     display_order?: number | null;
     recovery_days: number | null;
