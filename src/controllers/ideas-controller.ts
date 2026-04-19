@@ -69,7 +69,12 @@ export async function getSymbolNarrativeController(req: Request, res: Response):
 }
 
 export async function getSymbolPriceHistoryController(req: Request, res: Response): Promise<void> {
-    const payload = await getSymbolPriceHistory(req.params.symbol);
+    const strikePctRaw = typeof req.query.strike_pct === 'string' ? Number(req.query.strike_pct) : null;
+    const strikePct =
+        strikePctRaw !== null && Number.isFinite(strikePctRaw) && strikePctRaw > 0 && strikePctRaw <= 100
+            ? strikePctRaw
+            : null;
+    const payload = await getSymbolPriceHistory(req.params.symbol, strikePct);
     res.setHeader('Cache-Control', 'private, max-age=300');
     res.status(200).json(payload);
 }

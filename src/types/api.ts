@@ -374,6 +374,58 @@ export interface TailRiskStats {
     longest_recovery_episode: DrawdownEpisode | null;
 }
 
+export interface TailRiskFooterSummary {
+    max_drawdown_text: string;
+    longest_recovery_text: string;
+    has_unrecovered_drawdown: boolean;
+}
+
+export interface StrikeRiskMetricCard {
+    label: string;
+    value: string;
+    tone: 'default' | 'warning';
+}
+
+export interface StrikeRiskRecoveryDistributionItem {
+    label: string;
+    value: string;
+    count: number;
+    tone: 'fast' | 'mid' | 'slow' | 'unrecovered';
+}
+
+export interface StrikeRiskGroupedDrawdownEvent {
+    yearLabel: string;
+    max_drawdown_pct: number;
+    displayReason: string;
+    hasUnrecovered: boolean;
+    displayOrder: number | null;
+}
+
+export interface InteractiveStrikeRiskSummary {
+    breachCount: number;
+    thresholdPct: number;
+    medianRecoveryDays: number | null;
+    recoveryDaysSample: number[];
+    recoveredCount: number;
+    averageRecoveryDays: number | null;
+    longestRecoveryDays: number | null;
+    breachProbabilityPct: number | null;
+    maxOvershootPct: number | null;
+    unrecoveredCount: number;
+    conclusion: string;
+    conclusionStatsLine: string;
+    conclusionRiskLine: {
+        breachFrequencyLabel: '较低' | '中等' | '较高';
+        tailRiskLabel: '较低' | '中等' | '较高';
+    } | null;
+    conclusionQualifierLine: string | null;
+    currentPriceLabel: string;
+    strikePriceLabel: string;
+    metricCards: StrikeRiskMetricCard[];
+    recoveryDistribution: StrikeRiskRecoveryDistributionItem[];
+    groupedEvents: StrikeRiskGroupedDrawdownEvent[];
+}
+
 export interface SymbolIdeaResponse {
     symbol: string;
     exchange: string;
@@ -421,7 +473,10 @@ export interface SymbolPriceHistoryResponse {
     data_as_of_date: string | null;
     price_history: PriceHistoryPoint[];
     tail_risk: TailRiskStats | null;
+    tail_risk_footer_summary?: TailRiskFooterSummary | null;
     drawdown_attributions?: DrawdownAttribution[];
+    interactive_strike_risk_summary?: InteractiveStrikeRiskSummary | null;
+    display_drawdown_events?: StrikeRiskGroupedDrawdownEvent[];
 }
 
 export interface PairAnalysisResponse {
