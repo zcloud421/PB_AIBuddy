@@ -212,8 +212,32 @@ export interface ClientFocusDetailResponse {
     focus_secondary_price_history?: ClientFocusPriceHistoryPoint[] | null;
     gold_drivers?: ClientFocusDriverItem[] | null;
     theme_winners_losers?: ThemeWinnersLosersResult | null;
+    market_client_focus?: ClientFocusMarketClientFocus | null;
+    conversation_openers?: ClientFocusConversationOpener[] | null;
     daily_verdict?: ClientFocusDailyVerdict | null;
     disclaimer: string;
+}
+
+export interface ClientFocusMarketClientFocus {
+    items: Array<{
+        label: string;
+        content: string;
+    }>;
+}
+
+export interface ClientFocusConversationOpener {
+    scenario: 'ceasefire_window' | 'deal_scenario' | 'breakdown_scenario' | 'general';
+    question: string;
+}
+
+export interface ClientFocusMiddleEastSignals {
+    has_ceasefire: boolean;
+    has_escalation: boolean;
+    has_negotiation: boolean;
+    has_hormuz_blockade: boolean;
+    has_shipping_disruption: boolean;
+    has_deal_close: boolean;
+    has_breakdown: boolean;
 }
 
 export interface ClientFocusMarketSnapshotItem {

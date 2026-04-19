@@ -1,12 +1,15 @@
 import type {
+    ClientFocusConversationOpener,
     ClientFocusDailyVerdict,
     ClientFocusDriverItem,
     ClientFocusDetailResponse,
     ClientFocusHibor,
     ClientFocusListItem,
+    ClientFocusMarketClientFocus,
     ClientFocusMarketStateResponse,
     ClientFocusMarketChart,
     ClientFocusMarketSnapshot,
+    ClientFocusMiddleEastSignals,
     ClientFocusPolymarketMarket,
     ClientFocusPolymarketResponse,
     ClientFocusPriceHistoryPoint,
@@ -1053,6 +1056,25 @@ function buildMiddleEastStatus(newsItems: NewsItem[]): string {
     }
 
     return '持续发酵';
+}
+
+function extractMiddleEastSignals(newsItems: NewsItem[]): ClientFocusMiddleEastSignals {
+    const recentTitles = newsItems
+        .slice()
+        .sort((a, b) => new Date(b.published_at).getTime() - new Date(a.published_at).getTime())
+        .slice(0, 12)
+        .map((item) => item.title?.trim() ?? '');
+    const joined = recentTitles.join(' ').toLowerCase();
+
+    return {
+        has_ceasefire: /停火|ceasefire|truce|协议达成|停止敌对/.test(joined),
+        has_escalation: /空袭|导弹|地面行动|封锁|strike|missile|ground operation|escalation/.test(joined),
+        has_negotiation: /谈判|会谈|外交|斡旋|延长停火|间接谈判|阿曼|卡塔尔|巴基斯坦|indirect talks/.test(joined),
+        has_hormuz_blockade: recentTitles.some((t) => /封锁霍尔木兹|关闭霍尔木兹|hormuz.*block|blockade.*strait/i.test(t.toLowerCase())),
+        has_shipping_disruption: recentTitles.some((t) => /油轮|船只|航运|运费|tanker|freight|shipping.*disruption/i.test(t.toLowerCase())),
+        has_deal_close: /原则性协议|框架协议|接近达成|deal.*close|agreement.*near|framework deal/.test(joined),
+        has_breakdown: /谈判破裂|谈判失败|talks.*fail|breakdown|talks.*collapse|未达成协议/.test(joined),
+    };
 }
 
 function sanitizeLatestUpdates(
@@ -2384,6 +2406,214 @@ ${newsList}
         });
     } catch {
         console.warn(`[focus-client-questions] ${topic.slug}: exception`);
+        return null;
+    }
+}
+
+function describeMiddleEastSignals(signals: ClientFocusMiddleEastSignals): string {
+    const activeSignals = [
+        signals.has_ceasefire ? '出现停火或缓和信号' : null,
+        signals.has_escalation ? '仍有升级或军事打击信号' : null,
+        signals.has_negotiation ? '外交谈判仍在推进' : null,
+        signals.has_hormuz_blockade ? '霍尔木兹封锁风险被反复提及' : null,
+        signals.has_shipping_disruption ? '航运与运输扰动开始被市场定价' : null,
+        signals.has_deal_close ? '谈判接近达成的框架信号升温' : null,
+        signals.has_breakdown ? '谈判破裂或失败信号已经出现' : null,
+    ].filter((item): item is string => Boolean(item));
+
+    return activeSignals.length > 0 ? activeSignals.join('；') : '当前信号仍偏混合，没有形成单一主线。';
+}
+
+async function generateMiddleEastMarketClientFocus(
+    newsItems: NewsItem[],
+    signals: ClientFocusMiddleEastSignals
+): Promise<ClientFocusMarketClientFocus | null> {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) {
+        return null;
+    }
+
+    const recentNews = newsItems
+        .slice()
+        .sort((a, b) => new Date(b.published_at).getTime() - new Date(a.published_at).getTime())
+        .slice(0, 10);
+
+    if (recentNews.length === 0) {
+        return null;
+    }
+
+    const newsSection = recentNews
+        .map((item, index) => `${index + 1}. ${item.title}`)
+        .join('\n');
+
+    const userPrompt = `
+最新新闻标题列表：
+${newsSection}
+
+当前信号摘要：
+${describeMiddleEastSignals(signals)}
+
+生成 2 个条目，JSON 格式：
+[
+  { "label": "市场当前定价", "content": "..." },
+  { "label": "客户普遍在问", "content": "..." }
+]
+
+写作要求：
+- 市场当前定价：描述市场在押注什么，引用具体资产（油价/黄金/美债），不给方向判断
+- 客户普遍在问：描述客户当下最关心的 1 个核心问题，不含“建议”“应当”等词
+- 每条 content 25-40 字，客观陈述，主语为“市场”或“投资者”
+- 必须基于当前新闻，不能写通用模板
+- 禁止“风险升温”“情绪波动”“不确定性”等空泛表述
+- 只输出 JSON
+`.trim();
+
+    try {
+        const response = await fetch(`${process.env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: 'deepseek-chat',
+                messages: [
+                    { role: 'system', content: '你是香港私人银行市场沟通助手。' },
+                    { role: 'user', content: userPrompt }
+                ],
+                max_tokens: 220,
+                temperature: 0.3
+            })
+        });
+
+        if (!response.ok) {
+            return null;
+        }
+
+        const payload = (await response.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+        };
+        const parsed = safeParseJson(payload.choices?.[0]?.message?.content ?? '') as
+            | Array<{ label?: string; content?: string }>
+            | null;
+
+        const items = Array.isArray(parsed)
+            ? parsed
+                  .map((item) => ({
+                      label: typeof item?.label === 'string' ? item.label.trim() : '',
+                      content: typeof item?.content === 'string' ? item.content.trim() : ''
+                  }))
+                  .filter((item) => item.label.length > 0 && item.content.length > 0)
+                  .slice(0, 2)
+            : [];
+
+        return items.length > 0 ? { items } : null;
+    } catch {
+        return null;
+    }
+}
+
+async function generateMiddleEastConversationOpeners(
+    newsItems: NewsItem[],
+    signals: ClientFocusMiddleEastSignals
+): Promise<ClientFocusConversationOpener[] | null> {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) {
+        return null;
+    }
+
+    const recentNews = newsItems
+        .slice()
+        .sort((a, b) => new Date(b.published_at).getTime() - new Date(a.published_at).getTime())
+        .slice(0, 5);
+
+    if (recentNews.length === 0) {
+        return null;
+    }
+
+    const scenario: ClientFocusConversationOpener['scenario'] =
+        signals.has_breakdown
+            ? 'breakdown_scenario'
+            : signals.has_deal_close || (signals.has_ceasefire && signals.has_negotiation)
+                ? 'ceasefire_window'
+                : signals.has_ceasefire && !signals.has_escalation
+                    ? 'deal_scenario'
+                    : signals.has_escalation || signals.has_hormuz_blockade
+                        ? 'breakdown_scenario'
+                        : 'general';
+
+    const scenarioDescription: Record<ClientFocusConversationOpener['scenario'], string> = {
+        ceasefire_window: '停火窗口期，谈判接近达成',
+        deal_scenario: '缓和阶段，市场开始评估交易修复',
+        breakdown_scenario: '谈判破裂或升级风险上升',
+        general: '局势仍在拉锯，市场尚未形成单一主线'
+    };
+
+    const newsSection = recentNews
+        .map((item, index) => `${index + 1}. ${item.title}`)
+        .join('\n');
+
+    const userPrompt = `
+当前情景：${scenarioDescription[scenario]}
+最新新闻摘要：
+${newsSection}
+
+生成 2 个对话切入问题，JSON 格式：
+[
+  { "scenario": "${scenario}", "question": "..." },
+  { "scenario": "${scenario}", "question": "..." }
+]
+
+问题写作硬性约束：
+1. 主语必须是客户的组合或持仓，不能是“市场”或“油价”
+2. 问的是客户的认知和意图，不给任何方向性判断
+3. 每个问题能自然引出产品或资产配置讨论，但不直接点名产品
+4. 问题长度：20-35字
+5. 禁止：“您觉得油价会...” “您认为黄金会...”等市场走势类问题
+6. 只输出 JSON
+`.trim();
+
+    try {
+        const response = await fetch(`${process.env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: 'deepseek-chat',
+                messages: [
+                    { role: 'system', content: '你是香港私人银行资深RM培训师，帮助RM用一句问题开启客户对话。' },
+                    { role: 'user', content: userPrompt }
+                ],
+                max_tokens: 220,
+                temperature: 0.4
+            })
+        });
+
+        if (!response.ok) {
+            return null;
+        }
+
+        const payload = (await response.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+        };
+        const parsed = safeParseJson(payload.choices?.[0]?.message?.content ?? '') as
+            | Array<{ scenario?: string; question?: string }>
+            | null;
+
+        const openers = Array.isArray(parsed)
+            ? parsed
+                  .map((item) => ({
+                      scenario,
+                      question: typeof item?.question === 'string' ? item.question.trim() : ''
+                  }))
+                  .filter((item) => item.question.length > 0)
+                  .slice(0, 2)
+            : [];
+
+        return openers.length > 0 ? openers : null;
+    } catch {
         return null;
     }
 }
@@ -5361,6 +5591,15 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
             : topic.slug === 'private-credit-stress'
                 ? await generatePrivateCreditWhatChanged(newsItems)
                 : [];
+    const middleEastSignals = topic.slug === 'middle-east-tensions'
+        ? extractMiddleEastSignals(newsItems)
+        : null;
+    const [marketClientFocus, conversationOpeners] = topic.slug === 'middle-east-tensions' && middleEastSignals
+        ? await Promise.all([
+            generateMiddleEastMarketClientFocus(newsItems, middleEastSignals),
+            generateMiddleEastConversationOpeners(newsItems, middleEastSignals),
+        ])
+        : [null, null];
     const dynamicClientQuestions = await generateDynamicClientQuestions(topic, newsItems);
     const persistedDailyVerdict = await getLatestClientFocusDailyVerdict(topic.slug).catch(() => null);
     const dailyVerdict = persistedDailyVerdict?.verdict_json as ClientFocusDailyVerdict | null
@@ -5411,6 +5650,8 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         focus_secondary_price_history: focusSecondaryPriceHistory ?? undefined,
         gold_drivers: topic.slug === 'gold-repricing' ? buildGoldDrivers(newsItems) : undefined,
         theme_winners_losers: (themeResult?.result_json as ClientFocusDetailResponse['theme_winners_losers']) ?? null,
+        market_client_focus: marketClientFocus ?? null,
+        conversation_openers: conversationOpeners ?? null,
         daily_verdict: dailyVerdict ?? null,
         disclaimer: DEFAULT_DISCLAIMER
     };
