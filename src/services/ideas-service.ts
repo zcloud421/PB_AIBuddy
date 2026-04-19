@@ -44,6 +44,7 @@ import { buildThemeNarrative } from './theme-narrative';
 import {
     getClientFocusDetail as getClientFocusDetailPayload,
     getClientFocusList as getClientFocusListPayload,
+    getDailyMarketNarrative as getDailyMarketNarrativePayload,
     getClientFocusStatusesSnapshot,
     getClientFocusMarketState as getClientFocusMarketStatePayload,
     getMiddleEastPolymarket as getMiddleEastPolymarketPayload
@@ -55,6 +56,7 @@ import type {
     ClientFocusDetailResponse,
     ClientFocusListItem,
     ClientFocusMarketStateResponse,
+    DailyMarketNarrative,
     DailyBestCard,
     Flag,
     InteractiveStrikeRiskSummary,
@@ -126,7 +128,7 @@ const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
 const DRAWDOWN_PREWARM_COOLDOWN_MS = 30 * 60 * 1000;
 const DRAWDOWN_PREWARM_FRESHNESS_MS = 2 * 60 * 1000;
-const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 24;
+const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 25;
 const DRAWDOWN_TAIL_RISK_HISTORY_LIMIT = 1500;
 const DRAWDOWN_TAIL_RISK_LOOKBACK_DAYS = 365 * 5;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
@@ -161,6 +163,7 @@ type AttributionBusinessArchetype =
     | 'exploration-production'
     | 'oil-services'
     | 'industrial-machinery'
+    | 'power-utility'
     | 'diversified-industrial'
     | 'airline'
     | 'aerospace'
@@ -304,6 +307,7 @@ const SYMBOL_ARCHETYPE_MAP: Array<{ archetype: AttributionBusinessArchetype; sym
     { archetype: 'exploration-production', symbols: ['COP', 'EOG', 'OXY'] },
     { archetype: 'oil-services', symbols: ['SLB'] },
     { archetype: 'industrial-machinery', symbols: ['CAT', 'DE', 'CMI', 'DOV'] },
+    { archetype: 'power-utility', symbols: ['VST'] },
     { archetype: 'diversified-industrial', symbols: ['GE', 'GEV', 'HON', 'MMM'] },
     { archetype: 'airline', symbols: ['UAL', 'DAL'] },
     { archetype: 'aerospace', symbols: ['BA'] },
@@ -367,7 +371,7 @@ const SYMBOL_CYCLE_FAMILY_MAP: Array<{ cycle_family: AttributionCycleFamily; sym
     },
     {
         cycle_family: 'industrial-capex-cycle',
-        symbols: ['CAT', 'GE', 'GEV', 'BA', 'UAL', 'DAL', 'DE', 'HON', 'MMM', 'CMI', 'DOV']
+        symbols: ['CAT', 'GE', 'GEV', 'BA', 'UAL', 'DAL', 'DE', 'HON', 'MMM', 'CMI', 'DOV', 'VST']
     },
     {
         cycle_family: 'materials-cycle',
@@ -3015,6 +3019,188 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         event_signal_tags: ['capital-markets-slowdown', 'credit-loss-pressure'],
         keywords: ['tariff recession', 'credit losses', 'ipo freeze', 'deal freeze', 'provisions', 'card spending'],
         markers: ['关税衰退担忧', '信贷损失', '资本市场停摆', '准备金']
+    },
+    {
+        id: 'retail-brokerage-volume-compression-2024',
+        start: '2024-01-01',
+        end: '2026-12-31',
+        reason_zh: '风险偏好收缩叠加权益与加密交易量萎缩 → 零售券商手续费与订单流收入同步下滑 → 高弹性券商EPS预期与成长溢价被下修',
+        family: 'retail-brokerage-cycle',
+        driver_type: 'macro',
+        applies_to: 'all',
+        archetypes: ['investment-bank-broker', 'crypto-exchange-broker'],
+        cycle_families: ['banking-credit-cycle'],
+        event_signal_tags: ['trading-volume-compression', 'earnings-miss'],
+        keywords: ['trading volume', 'transaction revenue', 'options volume', 'retail sentiment', 'market activity', 'commission revenue'],
+        markers: ['零售交易量', '手续费收入', '风险偏好', '订单流']
+    },
+    {
+        id: 'retail-brokerage-crypto-revenue-reset-2022',
+        start: '2022-01-01',
+        end: '2023-06-30',
+        reason_zh: '加密熊市拖累数字资产交易量骤降 → 零售经纪用户活跃度与ARPU同步下滑 → 券商盈利时间表延后、成长估值倍数被压缩',
+        family: 'retail-brokerage-cycle',
+        driver_type: 'sector',
+        applies_to: 'all',
+        archetypes: ['investment-bank-broker', 'crypto-exchange-broker'],
+        cycle_families: ['banking-credit-cycle'],
+        event_signal_tags: ['crypto-volume-reset', 'earnings-miss'],
+        keywords: ['crypto trading', 'digital assets', 'monthly active users', 'crypto revenue', 'arpu', 'retail crypto'],
+        markers: ['加密交易量', '数字资产收入', '月活用户', '熊市萎缩']
+    },
+    {
+        id: 'fintech-brokerage-regulatory-reset-2021',
+        start: '2021-06-01',
+        end: '2023-12-31',
+        reason_zh: '监管审查PFOF与跨境开户资质合规性 → 订单流商业模式与市场准入风险抬升 → 金融科技经纪商估值折价持续扩大',
+        family: 'retail-brokerage-cycle',
+        driver_type: 'policy',
+        applies_to: 'all',
+        archetypes: ['investment-bank-broker', 'crypto-exchange-broker'],
+        cycle_families: ['banking-credit-cycle'],
+        event_signal_tags: ['regulatory-probe', 'pfof-risk'],
+        keywords: ['pfof', 'payment for order flow', 'sec', 'cross-border brokerage', 'account opening regulation', 'compliance risk'],
+        markers: ['PFOF监管', '跨境开户合规', '商业模式监管审查', 'SEC']
+    },
+    {
+        id: 'power-ai-demand-narrative-reset-2025',
+        start: '2025-01-01',
+        end: '2026-12-31',
+        reason_zh: 'AI推理效率突破削弱电力需求叙事 → 数据中心电力订单能见度与估值预期降温 → 电力设备商与独立发电商承受均值回归压力',
+        family: 'power-ai-demand',
+        driver_type: 'sector',
+        applies_to: 'all',
+        archetypes: ['power-utility', 'industrial-machinery', 'diversified-industrial'],
+        cycle_families: ['industrial-capex-cycle'],
+        event_signal_tags: ['capex-reset', 'ai-narrative-reset'],
+        keywords: ['deepseek', 'ai power demand', 'data center electricity', 'power consumption efficiency', 'inference efficiency'],
+        markers: ['AI推理效率', 'DeepSeek', '数据中心电力需求叙事', '电力基建估值']
+    },
+    {
+        id: 'clean-energy-policy-subsidy-reset-2025',
+        start: '2025-01-01',
+        end: '2026-12-31',
+        reason_zh: 'IRA补贴审查收紧清洁能源支持 → 风电核电项目融资成本与回报率被重估 → 设备商与发电商资本开支计划和盈利预期被下修',
+        family: 'power-ai-demand',
+        driver_type: 'policy',
+        applies_to: 'all',
+        archetypes: ['power-utility', 'industrial-machinery', 'diversified-industrial'],
+        cycle_families: ['industrial-capex-cycle'],
+        event_signal_tags: ['subsidy-risk', 'policy-uncertainty'],
+        keywords: ['ira', 'inflation reduction act', 'clean energy subsidies', 'tax credits', 'renewable policy', 'trump energy policy', 'nuclear subsidies'],
+        markers: ['IRA补贴', '清洁能源税收抵免', 'Trump能源政策', '可再生能源补贴']
+    },
+    {
+        id: 'capital-intensive-utility-rate-reset-2022',
+        start: '2022-01-01',
+        end: '2024-06-30',
+        reason_zh: '激进加息推升电力项目融资成本与折现率 → 长周期项目IRR下滑、资本回收期被拉长 → 发电商与电网设备公司估值倍数被压缩',
+        family: 'power-ai-demand',
+        driver_type: 'macro',
+        applies_to: 'all',
+        archetypes: ['power-utility', 'industrial-machinery', 'diversified-industrial'],
+        cycle_families: ['industrial-capex-cycle'],
+        event_signal_tags: ['rate-sensitivity', 'capex-reset'],
+        keywords: ['interest rates', 'financing costs', 'discount rate', 'interconnection queue', 'grid approval', 'project irr', 'utility capex'],
+        markers: ['融资成本', '折现率上行', '并网审批瓶颈', '项目IRR']
+    },
+    {
+        id: 'china-gaming-regulation-cycle-2021',
+        start: '2021-07-01',
+        end: '2023-06-30',
+        reason_zh: '版号审批与未成年限制收紧 → 新游上线与内容变现节奏放缓 → 中国游戏内容平台收入预期与估值倍数被下修',
+        family: 'china-gaming-regulation',
+        driver_type: 'policy',
+        applies_to: 'china_tech',
+        archetypes: ['china-online-gaming', 'china-content-platform'],
+        cycle_families: ['china-platform-cycle'],
+        event_signal_tags: ['regulatory-probe', 'guidance-cut'],
+        keywords: ['game license', 'version number', 'nppa', 'minor gaming', 'content regulation', 'game approval freeze', 'monetization rules'],
+        markers: ['游戏版号', '版号审批', '未成年游戏', '内容监管', 'NPPA']
+    },
+    {
+        id: 'china-content-platform-monetization-reset-2022',
+        start: '2022-01-01',
+        end: '2024-06-30',
+        reason_zh: '短视频平台持续分流用户时长与广告预算 → 内容平台广告增速放缓、会员与直播变现低于预期 → 盈利时间表后移、成长溢价被压缩',
+        family: 'china-gaming-regulation',
+        driver_type: 'sector',
+        applies_to: 'china_tech',
+        archetypes: ['china-online-gaming', 'china-content-platform'],
+        cycle_families: ['china-platform-cycle'],
+        event_signal_tags: ['user-growth-miss', 'earnings-miss'],
+        keywords: ['douyin', 'tiktok competition', 'short video', 'advertising budget', 'user engagement', 'arpu', 'live streaming monetization', 'membership'],
+        markers: ['短视频分流', '抖音竞争', '广告预算集中', '变现效率']
+    },
+    {
+        id: 'china-consumer-spending-platform-reset-2023',
+        start: '2023-01-01',
+        end: '2025-12-31',
+        reason_zh: '消费信心疲软与青年失业率高企 → 游戏充值、会员订阅与直播打赏走弱 → 内容平台ARPU增长乏力、盈利修复节奏慢于预期',
+        family: 'china-gaming-regulation',
+        driver_type: 'macro',
+        applies_to: 'china_tech',
+        archetypes: ['china-online-gaming', 'china-content-platform'],
+        cycle_families: ['china-platform-cycle'],
+        event_signal_tags: ['demand-slowdown', 'earnings-miss'],
+        keywords: ['china consumer confidence', 'youth unemployment', 'discretionary spending', 'entertainment spending', 'gaming arpu', 'video subscription'],
+        markers: ['中国消费信心', '青年失业率', '娱乐可选支出', '游戏充值']
+    },
+    {
+        id: 'mobile-semiconductor-down-cycle-2022',
+        start: '2022-01-01',
+        end: '2023-09-30',
+        reason_zh: '智能手机出货下行与5G换机透支 → 手机SoC订单取消、渠道库存去化延续多季度 → 移动芯片设计商收入预期与估值倍数被下修',
+        family: 'mobile-semi-cycle',
+        driver_type: 'sector',
+        applies_to: 'us_tech',
+        archetypes: ['broad-semiconductor', 'analog-chip'],
+        cycle_families: ['semiconductor-cycle'],
+        event_signal_tags: ['demand-slowdown', 'inventory-correction'],
+        keywords: ['smartphone shipments', '5g upgrade cycle', 'handset inventory', 'order cancellations', 'mobile demand', 'soc', 'channel inventory'],
+        markers: ['智能手机出货量', '5G换机周期', '手机SoC', '渠道库存去化']
+    },
+    {
+        id: 'hyperscaler-custom-asic-displacement-2024',
+        start: '2024-01-01',
+        end: '2026-12-31',
+        reason_zh: '云厂商加速自研定制AI芯片替代商用方案 → 第三方AI推理与网络芯片客户集中度风险上升 → 半导体设计公司收入能见度与黏性折价',
+        family: 'mobile-semi-cycle',
+        driver_type: 'sector',
+        applies_to: 'us_tech',
+        archetypes: ['broad-semiconductor', 'ai-infrastructure'],
+        cycle_families: ['semiconductor-cycle'],
+        event_signal_tags: ['customer-concentration-risk', 'pricing-pressure'],
+        keywords: ['custom asic', 'tpu', 'trainium', 'maia', 'hyperscaler silicon', 'vertical integration', 'merchant silicon displacement'],
+        markers: ['定制ASIC', '云厂商自研芯片', '垂直整合', '通用芯片替代风险']
+    },
+    {
+        id: 'semiconductor-equipment-export-control-2022',
+        start: '2022-10-01',
+        end: '2026-12-31',
+        reason_zh: 'BIS出口管制限制先进设备销往中国 → 设备商中国营收收缩、替代市场消化周期拉长 → 半导体设备商增长预期与估值被重估',
+        family: 'semcap-export-control',
+        driver_type: 'policy',
+        applies_to: 'us_tech',
+        archetypes: ['chip-equipment'],
+        cycle_families: ['semiconductor-cycle'],
+        event_signal_tags: ['export-control-risk', 'guidance-cut'],
+        keywords: ['export controls', 'bis', 'entity list', 'advanced equipment ban', 'china revenue', 'equipment restrictions', 'wafer fab equipment'],
+        markers: ['出口管制', 'BIS', '先进制程设备禁令', '中国收入敞口']
+    },
+    {
+        id: 'memory-wfe-down-cycle-2022',
+        start: '2022-01-01',
+        end: '2023-09-30',
+        reason_zh: 'DRAM/NAND下行触发内存厂削减设备资本开支 → 刻蚀沉积等新订单骤降、设备出货节奏受阻 → WFE行业收入预期被系统性下修',
+        family: 'semcap-export-control',
+        driver_type: 'sector',
+        applies_to: 'us_tech',
+        archetypes: ['chip-equipment'],
+        cycle_families: ['semiconductor-cycle'],
+        event_signal_tags: ['demand-slowdown', 'inventory-correction', 'capex-reset'],
+        keywords: ['wfe', 'wafer fab equipment', 'memory capex', 'dram prices', 'nand prices', 'samsung capex cut', 'hynix capex', 'etch equipment', 'deposition'],
+        markers: ['WFE周期', '内存资本开支削减', 'DRAM价格', '晶圆设备订单']
     }
 ];
 
@@ -3522,6 +3708,10 @@ export async function getClientFocusList(): Promise<ClientFocusListItem[]> {
 
 export async function getClientFocusMarketState(): Promise<ClientFocusMarketStateResponse> {
     return getClientFocusMarketStatePayload();
+}
+
+export async function getDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
+    return getDailyMarketNarrativePayload();
 }
 
 export async function getClientFocusDetail(slug: string): Promise<ClientFocusDetailResponse | null> {
