@@ -243,7 +243,7 @@ export interface ClientFocusMiddleEastSignals {
 export interface DailyMarketNarrative {
     primary_slug: string;
     narrative: string;
-    pitch_line: string;
+    rm_angle: string;
     ranked_slugs: string[];
     generated_at: string;
 }

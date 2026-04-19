@@ -2621,8 +2621,8 @@ ${newsSection}
     }
 }
 
-async function generateDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
-    const cachedTopics = FOCUS_TOPICS
+function collectNarrativeTopics() {
+    return FOCUS_TOPICS
         .map((topic) => {
             const cached = focusCache.get(topic.slug);
             return cached?.value
@@ -2638,9 +2638,20 @@ async function generateDailyMarketNarrative(): Promise<DailyMarketNarrative | nu
                 : null;
         })
         .filter((item): item is { slug: string; title: string; status: string; summary: string; latest_updates: string[] } => Boolean(item));
+}
+
+async function generateDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
+    let cachedTopics = collectNarrativeTopics();
 
     if (cachedTopics.length < 2) {
-        return null;
+        const uncachedSlugs = FOCUS_TOPICS
+            .filter((topic) => !focusCache.get(topic.slug)?.value)
+            .map((topic) => topic.slug);
+        await Promise.allSettled(uncachedSlugs.map((slug) => getClientFocusDetail(slug)));
+        cachedTopics = collectNarrativeTopics();
+        if (cachedTopics.length < 2) {
+            return null;
+        }
     }
 
     const apiKey = process.env.DEEPSEEK_API_KEY;
@@ -2663,21 +2674,21 @@ ${topicSection}
 任务：
 1. 判断今天哪个主题对风险资产定价影响最大（primary_slug）
 2. 用1-2句话描述今天市场在定价什么（narrative，25-40字，主语为“市场”或“投资者”）
-3. 生成一句对话切入问题（pitch_line，20-35字，主语为客户的组合或持仓，不给方向判断，能自然引出产品讨论）
+3. 生成一句 RM 今日分析视角（rm_angle，20-40字）：基于今天最关键的宏观信号，给 RM 一个分析框架或时机判断，让他们自己决定怎么跟客户展开。主语是市场或资产，不是客户组合，不给买卖方向，不用问句。
 4. 将所有主题按今日市场影响力从高到低排序（ranked_slugs）
 
 输出JSON：
 {
   "primary_slug": "...",
   "narrative": "...",
-  "pitch_line": "...",
+  "rm_angle": "...",
   "ranked_slugs": ["...", "..."]
 }
 
 写作约束：
 - narrative 禁止：“风险升温”“情绪波动”“不确定性”“引发关注”
-- pitch_line 主语必须是客户的组合/持仓，不能是“您觉得市场会...”
-- pitch_line 示例：“您目前黄金仓位的规模，是否已经反映了您对实际利率见顶的判断？”
+- rm_angle 禁止：问句、“建议”、“适合”、“应当”、“可以考虑”、方向性词汇
+- rm_angle 示例：“停火窗口临近叠加油价大跌，中东主题持仓的风险收益比正在重新定价。”
 - 只输出 JSON
 `.trim();
 
@@ -2711,7 +2722,7 @@ ${topicSection}
             !parsed
             || typeof parsed.primary_slug !== 'string'
             || typeof parsed.narrative !== 'string'
-            || typeof parsed.pitch_line !== 'string'
+            || typeof parsed.rm_angle !== 'string'
             || !Array.isArray(parsed.ranked_slugs)
         ) {
             return null;
@@ -2726,7 +2737,7 @@ ${topicSection}
         return {
             primary_slug: parsed.primary_slug,
             narrative: parsed.narrative.trim(),
-            pitch_line: parsed.pitch_line.trim(),
+            rm_angle: parsed.rm_angle.trim(),
             ranked_slugs,
             generated_at: new Date().toISOString(),
         };
