@@ -969,7 +969,13 @@ export async function ensureRiskFlagEnumValues(): Promise<void> {
         'NO_APPROVED_STRIKE',
         'HOUSE_OVERRIDE',
         'MATERIAL_NEWS_SHOCK',
-        'MATERIAL_NEWS_OVERHANG'
+        'MATERIAL_NEWS_OVERHANG',
+        'ACTIONABLE_CAUTION',
+        'ASSIGNMENT_QUALITY_CAP',
+        'FRAGILE_NARRATIVE',
+        'OVEREXTENDED_UPTREND',
+        'QUALITY_DIP_EXCEPTION',
+        'WEAK_RECOVERY_PROFILE'
     ];
 
     for (const value of values) {
@@ -1496,6 +1502,49 @@ export async function updateIdeaRunStatus(
     );
 }
 
+function deriveWaitReason(
+    grade: 'GO' | 'CAUTION' | 'AVOID',
+    flags: Flag[]
+): 'WAIT_EARNINGS_RISK' | 'WAIT_SETUP_RESET' | null {
+    if (grade === 'AVOID') {
+        if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
+            return 'WAIT_EARNINGS_RISK';
+        }
+
+        if (
+            flags.some((flag) =>
+                flag.type === 'ASSIGNMENT_QUALITY_CAP' ||
+                flag.type === 'OVEREXTENDED_UPTREND' ||
+                flag.type === 'BROKEN_TREND' ||
+                flag.type === 'LOWER_HIGH_RISK' ||
+                flag.type === 'BEARISH_STRUCTURE' ||
+                flag.type === 'MATERIAL_NEWS_SHOCK' ||
+                flag.type === 'MATERIAL_NEWS_OVERHANG'
+            )
+        ) {
+            return 'WAIT_SETUP_RESET';
+        }
+
+        return null;
+    }
+
+    if (grade === 'CAUTION') {
+        if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
+            return 'WAIT_EARNINGS_RISK';
+        }
+
+        if (flags.some((flag) => flag.type === 'OVEREXTENDED_UPTREND')) {
+            return 'WAIT_SETUP_RESET';
+        }
+    }
+
+    return null;
+}
+
+function hasActionableCaution(flags: Flag[]): boolean {
+    return flags.some((flag) => flag.type === 'ACTIONABLE_CAUTION' || flag.type === 'QUALITY_DIP_EXCEPTION');
+}
+
 export function mapTodayIdeasResponse(
     run: LatestCompletedRun,
     ideas: TodayIdeaRow[],
@@ -1524,7 +1573,9 @@ export function mapTodayIdeasResponse(
         daily_best: dailyBest,
         recommended: ideas
             .filter((idea) => idea.overall_grade === 'GO')
-            .map((idea) => ({
+            .map((idea) => {
+                const flags = flagsBySymbol.get(idea.symbol) ?? [];
+                return {
                 symbol: idea.symbol,
                 exchange: idea.exchange,
                 company_name: idea.company_name,
@@ -1549,17 +1600,24 @@ export function mapTodayIdeasResponse(
                       }
                     : null,
                 news_items: idea.news_items ?? [],
-                flags: flagsBySymbol.get(idea.symbol) ?? [],
+                flags,
+                actionable_caution: false,
+                wait_reason: null,
+                assignment_quality_score: null,
+                assignment_quality_label: null,
                 current_price: parseNumeric(idea.current_price),
                 pct_from_52w_high: parseNumeric(idea.pct_from_52w_high),
                 ma50: parseNumeric(idea.ma50),
                 ma200: parseNumeric(idea.ma200),
                 implied_volatility: parseNumeric(idea.selected_implied_volatility),
                 sentiment_score: parseNumeric(idea.sentiment_score)
-            })),
+            };
+            }),
         caution: ideas
             .filter((idea) => idea.overall_grade === 'CAUTION')
-            .map((idea) => ({
+            .map((idea) => {
+                const flags = flagsBySymbol.get(idea.symbol) ?? [];
+                return {
                 symbol: idea.symbol,
                 exchange: idea.exchange,
                 company_name: idea.company_name,
@@ -1584,22 +1642,29 @@ export function mapTodayIdeasResponse(
                       }
                     : null,
                 news_items: idea.news_items ?? [],
-                flags: flagsBySymbol.get(idea.symbol) ?? [],
+                flags,
+                actionable_caution: hasActionableCaution(flags),
+                wait_reason: deriveWaitReason('CAUTION', flags),
+                assignment_quality_score: null,
+                assignment_quality_label: null,
                 current_price: parseNumeric(idea.current_price),
                 pct_from_52w_high: parseNumeric(idea.pct_from_52w_high),
                 ma50: parseNumeric(idea.ma50),
                 ma200: parseNumeric(idea.ma200),
                 implied_volatility: parseNumeric(idea.selected_implied_volatility),
                 sentiment_score: parseNumeric(idea.sentiment_score)
-            })),
+            };
+            }),
         not_recommended: ideas
             .filter((idea) => idea.overall_grade === 'AVOID')
             .map((idea) => {
-                const primaryFlag = (flagsBySymbol.get(idea.symbol) ?? [])[0];
+                const flags = flagsBySymbol.get(idea.symbol) ?? [];
+                const primaryFlag = flags[0];
                 return {
                     symbol: idea.symbol,
                     primary_flag_type: primaryFlag?.type ?? 'NO_APPROVED_STRIKE',
-                    primary_flag_detail: primaryFlag?.message ?? 'No primary block reason recorded'
+                    primary_flag_detail: primaryFlag?.message ?? 'No primary block reason recorded',
+                    wait_reason: deriveWaitReason('AVOID', flags)
                 };
             })
     };

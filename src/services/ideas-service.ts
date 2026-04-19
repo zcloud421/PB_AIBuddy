@@ -2447,6 +2447,10 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             narrative,
             news_items: newsItems,
             flags: effectiveFlags,
+            actionable_caution: hasActionableCaution(effectiveFlags),
+            wait_reason: deriveWaitReason(cachedRow.overall_grade, effectiveFlags),
+            assignment_quality_score: null,
+            assignment_quality_label: null,
             sentiment_score: narrative?.sentiment_score ?? toNullableNumber(cachedRow.sentiment_score),
             signals: buildSignalsFromCachedRow({
                 current_price: effectiveCurrentPrice,
@@ -3110,6 +3114,10 @@ function mapScoringResultToSymbolIdea(
         narrative,
         news_items: newsItems,
         flags,
+        actionable_caution: Boolean(scoring.actionable_caution),
+        wait_reason: scoring.wait_reason ?? deriveWaitReason(scoring.overall_grade, flags),
+        assignment_quality_score: scoring.assignment_quality_score ?? null,
+        assignment_quality_label: scoring.assignment_quality_label ?? null,
         sentiment_score: narrative?.sentiment_score ?? null,
         signals: buildSignals(symbolData, scoring),
         price_context: {
@@ -3635,6 +3643,49 @@ function generateVerdictSub(grade: 'GO' | 'CAUTION' | 'AVOID', flags: Flag[]): s
         return 'Setup is usable, but requires tighter strike discipline and client suitability screening.';
     }
     return 'Current setup does not meet PB FCN risk standards.';
+}
+
+function deriveWaitReason(
+    grade: 'GO' | 'CAUTION' | 'AVOID',
+    flags: Flag[]
+): 'WAIT_EARNINGS_RISK' | 'WAIT_SETUP_RESET' | null {
+    if (grade === 'AVOID') {
+        if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
+            return 'WAIT_EARNINGS_RISK';
+        }
+
+        if (
+            flags.some((flag) =>
+                flag.type === 'ASSIGNMENT_QUALITY_CAP' ||
+                flag.type === 'OVEREXTENDED_UPTREND' ||
+                flag.type === 'BROKEN_TREND' ||
+                flag.type === 'LOWER_HIGH_RISK' ||
+                flag.type === 'BEARISH_STRUCTURE' ||
+                flag.type === 'MATERIAL_NEWS_SHOCK' ||
+                flag.type === 'MATERIAL_NEWS_OVERHANG'
+            )
+        ) {
+            return 'WAIT_SETUP_RESET';
+        }
+
+        return null;
+    }
+
+    if (grade === 'CAUTION') {
+        if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
+            return 'WAIT_EARNINGS_RISK';
+        }
+
+        if (flags.some((flag) => flag.type === 'OVEREXTENDED_UPTREND')) {
+            return 'WAIT_SETUP_RESET';
+        }
+    }
+
+    return null;
+}
+
+function hasActionableCaution(flags: Flag[]): boolean {
+    return flags.some((flag) => flag.type === 'ACTIONABLE_CAUTION' || flag.type === 'QUALITY_DIP_EXCEPTION');
 }
 
 function mergeUniqueFlags(...flagGroups: Flag[][]): Flag[] {

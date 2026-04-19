@@ -3,13 +3,18 @@ import { fetchStockNewsContext, getCompanyName } from './data/news-fetcher';
 export type HouseOverrideType = 'FORCE_AVOID' | 'FORCE_CAUTION' | 'WHITELIST_ONLY';
 
 export type OverallGrade = 'GO' | 'CAUTION' | 'AVOID';
+export type WaitReason = 'WAIT_EARNINGS_RISK' | 'WAIT_SETUP_RESET';
+export type AssignmentQualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
 
 export type FlagSeverity = 'INFO' | 'WARN' | 'BLOCK';
 
 export type FlagType =
+    | 'ACTIONABLE_CAUTION'
+    | 'ASSIGNMENT_QUALITY_CAP'
     | 'BROKEN_TREND'
     | 'COMMODITY_BETA_CAUTION'
     | 'EARNINGS_PROXIMITY'
+    | 'FRAGILE_NARRATIVE'
     | 'HIGH_BETA_THEME_CAUTION'
     | 'HIGH_VOL_LOW_STRIKE'
     | 'HIGH_COUPON_OVERRIDE'
@@ -22,7 +27,10 @@ export type FlagType =
     | 'LOW_COUPON'
     | 'LOW_LIQUIDITY'
     | 'NO_APPROVED_TENOR'
-    | 'NO_APPROVED_STRIKE';
+    | 'NO_APPROVED_STRIKE'
+    | 'OVEREXTENDED_UPTREND'
+    | 'QUALITY_DIP_EXCEPTION'
+    | 'WEAK_RECOVERY_PROFILE';
 
 export interface Flag {
     type: FlagType;
@@ -101,6 +109,10 @@ export interface ScoringResult {
     ma50: number | null;
     ma200: number | null;
     pct_from_52w_high: number | null;
+    assignment_quality_score?: number | null;
+    assignment_quality_label?: AssignmentQualityLabel | null;
+    actionable_caution?: boolean;
+    wait_reason?: WaitReason | null;
     reasoning_text: string;
     flags: Flag[];
 }
@@ -156,9 +168,328 @@ const COMMODITY_BETA_STRIKE_SELECTION: StrikeSelectionConfig = {
 
 const COMMODITY_BETA_SYMBOLS = new Set(['GDX', 'USO']);
 const HIGH_BETA_THEME_SYMBOLS = new Set(['PLTR', 'TSLA', 'MSTR', 'CRCL', 'COIN', 'LI', 'FUTU']);
+const PB_CORE_ASSET_TIER_1 = new Set([
+    'SPY',
+    'IVV',
+    'VOO',
+    'QQQ',
+    'AAPL',
+    'MSFT',
+    'AMZN',
+    'GOOGL',
+    'GOOG',
+    'META',
+    'NVDA',
+    'AVGO',
+    'TSM',
+    'ASML',
+    'BABA',
+    'JD',
+    'TCEHY',
+    'NTES',
+    'V',
+    'MA'
+]);
+const PB_CORE_ASSET_TIER_2 = new Set([
+    'AMD',
+    'ORCL',
+    'NFLX',
+    'ADBE',
+    'CRM',
+    'NOW',
+    'MU',
+    'QCOM',
+    'TXN',
+    'AMAT',
+    'LRCX',
+    'BIDU',
+    'UNH',
+    'LLY',
+    'NVO',
+    'XOM',
+    'CAT'
+]);
+const VERY_FRAGILE_NARRATIVE_SYMBOLS = new Set([
+    'COIN',
+    'MSTR',
+    'MARA',
+    'RIOT',
+    'CLSK',
+    'CRCL',
+    'ASTS',
+    'PLTR',
+    'APP',
+    'FUTU',
+    'LI'
+]);
+const MODERATELY_FRAGILE_NARRATIVE_SYMBOLS = new Set([
+    'TSLA',
+    'HOOD',
+    'BILI',
+    'IQ',
+    'TME',
+    'BEKE',
+    'VIPS'
+]);
+
+const PB_ASSIGNMENT_CONFIG = {
+    goMinScore: 0.64,
+    cautionCapScore: 0.62,
+    actionableCautionMinScore: 0.72,
+    highCouponOverrideMinScore: 0.68,
+    highCouponOverrideMinCoreScore: 0.78,
+    highCouponOverrideMinNarrativeScore: 0.55,
+    overextendedReturn20d: 0.15,
+    overextendedNearHighPct: -10,
+    highBetaOverextendedReturn20d: 0.1,
+    highBetaOverextendedNearHighPct: -15,
+    qualityDipMinScore: 0.72,
+    qualityDipMinCouponPct: 8,
+    qualityDipMaxIv: 0.7
+} as const;
+
+interface AssignmentQualityBreakdown {
+    score: number;
+    label: AssignmentQualityLabel;
+    coreAssetQualityScore: number;
+    recoveryAbilityScore: number;
+    narrativeStabilityScore: number;
+}
 
 function clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
+}
+
+function daysBetween(fromDate: string, toDate: string): number | null {
+    const from = Date.parse(fromDate);
+    const to = Date.parse(toDate);
+    if (Number.isNaN(from) || Number.isNaN(to)) {
+        return null;
+    }
+
+    return Math.round((to - from) / DAY_IN_MS);
+}
+
+function median(values: number[]): number | null {
+    if (values.length === 0) {
+        return null;
+    }
+
+    const sorted = [...values].sort((left, right) => left - right);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 1
+        ? sorted[middle]
+        : Math.round((sorted[middle - 1] + sorted[middle]) / 2);
+}
+
+function trailingReturn(symbolData: SymbolData, lookbackDays: number): number | null {
+    const history = symbolData.price_history;
+    if (history.length <= lookbackDays) {
+        return null;
+    }
+
+    const latestClose = history[history.length - 1]?.close;
+    const priorClose = history[history.length - 1 - lookbackDays]?.close;
+    if (!latestClose || !priorClose) {
+        return null;
+    }
+
+    return (latestClose / priorClose) - 1;
+}
+
+function coreAssetQualityScore(symbol: string): number {
+    const normalized = symbol.toUpperCase();
+    if (PB_CORE_ASSET_TIER_1.has(normalized)) {
+        return 0.95;
+    }
+    if (PB_CORE_ASSET_TIER_2.has(normalized)) {
+        return 0.8;
+    }
+    if (COMMODITY_BETA_SYMBOLS.has(normalized)) {
+        return 0.45;
+    }
+    if (VERY_FRAGILE_NARRATIVE_SYMBOLS.has(normalized)) {
+        return 0.35;
+    }
+    if (MODERATELY_FRAGILE_NARRATIVE_SYMBOLS.has(normalized)) {
+        return 0.5;
+    }
+    return 0.6;
+}
+
+function narrativeStabilityScore(symbol: string): number {
+    const normalized = symbol.toUpperCase();
+    if (PB_CORE_ASSET_TIER_1.has(normalized)) {
+        return 0.92;
+    }
+    if (PB_CORE_ASSET_TIER_2.has(normalized)) {
+        return 0.78;
+    }
+    if (VERY_FRAGILE_NARRATIVE_SYMBOLS.has(normalized)) {
+        return 0.15;
+    }
+    if (MODERATELY_FRAGILE_NARRATIVE_SYMBOLS.has(normalized)) {
+        return 0.35;
+    }
+    if (COMMODITY_BETA_SYMBOLS.has(normalized)) {
+        return 0.4;
+    }
+    return 0.65;
+}
+
+function buildThresholdRecoveryObservations(
+    priceHistory: Array<{ date: string; close: number }>,
+    thresholdPct: number
+): Array<{ recovered: boolean; recoveryDays: number | null }> {
+    if (priceHistory.length < 2) {
+        return [];
+    }
+
+    const observations: Array<{ recovered: boolean; recoveryDays: number | null }> = [];
+    let peakPrice = priceHistory[0].close;
+    let inThresholdBreach = false;
+    let breachDate: string | null = null;
+
+    for (let index = 1; index < priceHistory.length; index += 1) {
+        const point = priceHistory[index];
+        if (point.close >= peakPrice) {
+            if (inThresholdBreach && breachDate) {
+                observations.push({
+                    recovered: true,
+                    recoveryDays: daysBetween(breachDate, point.date)
+                });
+                inThresholdBreach = false;
+                breachDate = null;
+            }
+            peakPrice = point.close;
+            continue;
+        }
+
+        const drawdownPct = ((point.close / peakPrice) - 1) * 100;
+        if (!inThresholdBreach && drawdownPct <= -thresholdPct) {
+            inThresholdBreach = true;
+            breachDate = point.date;
+        }
+    }
+
+    if (inThresholdBreach) {
+        observations.push({
+            recovered: false,
+            recoveryDays: null
+        });
+    }
+
+    return observations;
+}
+
+function recoverySpeedScore(thresholdPct: number, medianRecoveryDays: number | null): number {
+    if (medianRecoveryDays === null) {
+        return 0.2;
+    }
+
+    if (thresholdPct <= 10) {
+        if (medianRecoveryDays <= 30) return 1;
+        if (medianRecoveryDays <= 90) return 0.8;
+        if (medianRecoveryDays <= 180) return 0.6;
+        if (medianRecoveryDays <= 365) return 0.4;
+        return 0.2;
+    }
+
+    if (thresholdPct <= 20) {
+        if (medianRecoveryDays <= 60) return 1;
+        if (medianRecoveryDays <= 180) return 0.75;
+        if (medianRecoveryDays <= 365) return 0.5;
+        return 0.25;
+    }
+
+    if (medianRecoveryDays <= 120) return 1;
+    if (medianRecoveryDays <= 240) return 0.7;
+    if (medianRecoveryDays <= 480) return 0.45;
+    return 0.2;
+}
+
+function recoveryAbilityScore(symbolData: SymbolData): number {
+    const thresholds = [
+        { thresholdPct: 10, weight: 0.45 },
+        { thresholdPct: 20, weight: 0.35 },
+        { thresholdPct: 30, weight: 0.2 }
+    ];
+
+    let weightedScore = 0;
+    let totalWeight = 0;
+
+    for (const { thresholdPct, weight } of thresholds) {
+        const observations = buildThresholdRecoveryObservations(symbolData.price_history, thresholdPct);
+        if (observations.length === 0) {
+            weightedScore += 0.75 * weight;
+            totalWeight += weight;
+            continue;
+        }
+
+        const recovered = observations.filter((item) => item.recovered);
+        const recoveryRate = recovered.length / observations.length;
+        const medianRecoveryDays = median(
+            recovered
+                .map((item) => item.recoveryDays)
+                .filter((value): value is number => value !== null)
+        );
+        const speedScore = recoverySpeedScore(thresholdPct, medianRecoveryDays);
+        const thresholdScore = clamp((recoveryRate * 0.6) + (speedScore * 0.4), 0, 1);
+
+        weightedScore += thresholdScore * weight;
+        totalWeight += weight;
+    }
+
+    return totalWeight > 0 ? Number((weightedScore / totalWeight).toFixed(4)) : 0.5;
+}
+
+function deriveAssignmentQualityLabel(score: number): AssignmentQualityLabel {
+    if (score >= 0.72) {
+        return 'HIGH';
+    }
+    if (score >= 0.5) {
+        return 'MEDIUM';
+    }
+    return 'LOW';
+}
+
+function buildAssignmentQuality(symbol: string, symbolData: SymbolData): AssignmentQualityBreakdown {
+    const coreScore = coreAssetQualityScore(symbol);
+    const recoveryScore = recoveryAbilityScore(symbolData);
+    const narrativeScore = narrativeStabilityScore(symbol);
+    const score = clamp(
+        (coreScore * 0.45) + (recoveryScore * 0.35) + (narrativeScore * 0.2),
+        0,
+        1
+    );
+
+    return {
+        score: Number(score.toFixed(4)),
+        label: deriveAssignmentQualityLabel(score),
+        coreAssetQualityScore: coreScore,
+        recoveryAbilityScore: recoveryScore,
+        narrativeStabilityScore: narrativeScore
+    };
+}
+
+function isOverextendedUptrend(symbol: string, symbolData: SymbolData): boolean {
+    const recentReturn20d = trailingReturn(symbolData, 20);
+    if (recentReturn20d === null) {
+        return false;
+    }
+
+    const normalized = symbol.toUpperCase();
+    if (HIGH_BETA_THEME_SYMBOLS.has(normalized) || VERY_FRAGILE_NARRATIVE_SYMBOLS.has(normalized)) {
+        return (
+            recentReturn20d >= PB_ASSIGNMENT_CONFIG.highBetaOverextendedReturn20d &&
+            symbolData.pct_from_52w_high >= PB_ASSIGNMENT_CONFIG.highBetaOverextendedNearHighPct
+        );
+    }
+
+    return (
+        recentReturn20d >= PB_ASSIGNMENT_CONFIG.overextendedReturn20d &&
+        symbolData.pct_from_52w_high >= PB_ASSIGNMENT_CONFIG.overextendedNearHighPct
+    );
 }
 
 function getTargetCouponPct(historicalVolatility: number, symbol?: string): number {
@@ -458,6 +789,9 @@ export function scoreAndGrade(candidate: {
 }): ScoringResult {
     const { symbol, symbolData, tenorData, strikeData } = candidate;
     const flags: Flag[] = [];
+    const assignmentQuality = buildAssignmentQuality(symbol, symbolData);
+    const overextendedUptrend = isOverextendedUptrend(symbol, symbolData);
+    const normalizedSymbol = symbol.toUpperCase();
 
     const ivRankScore = clamp(strikeData.iv, 0, 1);
 
@@ -554,6 +888,35 @@ export function scoreAndGrade(candidate: {
     }
 
     let compositeScore = baseCompositeScore;
+    if (overextendedUptrend) {
+        compositeScore = clamp(
+            compositeScore - (HIGH_BETA_THEME_SYMBOLS.has(normalizedSymbol) ? 0.08 : 0.05),
+            0,
+            1
+        );
+        flags.push({
+            type: 'OVEREXTENDED_UPTREND',
+            severity: 'WARN',
+            message: '短期涨幅偏快且股价接近阶段高位，PB FCN更应防范高位卖出认沽的拥挤风险'
+        });
+    }
+
+    if (assignmentQuality.narrativeStabilityScore < 0.4) {
+        flags.push({
+            type: 'FRAGILE_NARRATIVE',
+            severity: 'WARN',
+            message: 'Underlying remains dependent on a more fragile narrative, reducing PB ownability if assigned'
+        });
+    }
+
+    if (assignmentQuality.recoveryAbilityScore < 0.45) {
+        flags.push({
+            type: 'WEAK_RECOVERY_PROFILE',
+            severity: 'WARN',
+            message: 'Historical recovery after drawdowns has been slower or less reliable than PB core holdings'
+        });
+    }
+
     const oneDayMovePct = latestOneDayMovePct(symbolData);
     const hasMaterialNewsShock =
         (candidate.hasMaterialNegativeNews ?? false) &&
@@ -597,10 +960,14 @@ export function scoreAndGrade(candidate: {
             refCouponPct !== null &&
             refCouponPct >= 20 &&
             moneynessThresholdMet &&
-        strikeData.open_interest >= 10 &&
+            strikeData.open_interest >= 10 &&
             daysToEarnings !== null &&
             daysToEarnings > 3 &&
-            (candidate.sentimentProxy ?? 0) >= 0.35;
+            (candidate.sentimentProxy ?? 0) >= 0.35 &&
+            assignmentQuality.score >= PB_ASSIGNMENT_CONFIG.highCouponOverrideMinScore &&
+            assignmentQuality.coreAssetQualityScore >= PB_ASSIGNMENT_CONFIG.highCouponOverrideMinCoreScore &&
+            assignmentQuality.narrativeStabilityScore >= PB_ASSIGNMENT_CONFIG.highCouponOverrideMinNarrativeScore &&
+            !COMMODITY_BETA_SYMBOLS.has(normalizedSymbol);
 
         if (highCouponOverride) {
             compositeScore = clamp(compositeScore, 0.45, 0.55);
@@ -674,6 +1041,57 @@ export function scoreAndGrade(candidate: {
         overallGrade = 'CAUTION';
     }
 
+    if (overextendedUptrend && overallGrade === 'GO') {
+        compositeScore = Math.min(compositeScore, isHighBetaTheme ? 0.58 : 0.62);
+        overallGrade = 'CAUTION';
+    }
+
+    if (assignmentQuality.score < PB_ASSIGNMENT_CONFIG.goMinScore && overallGrade === 'GO') {
+        compositeScore = Math.min(compositeScore, PB_ASSIGNMENT_CONFIG.cautionCapScore);
+        overallGrade = 'CAUTION';
+        flags.push({
+            type: 'ASSIGNMENT_QUALITY_CAP',
+            severity: 'WARN',
+            message: 'Assignment quality is below PB GO threshold, so the setup is capped at CAUTION even if short-term setup quality looks strong'
+        });
+    }
+
+    const qualityDipCandidate =
+        assignmentQuality.score >= PB_ASSIGNMENT_CONFIG.qualityDipMinScore &&
+        !(candidate.hasMaterialNegativeNews ?? false) &&
+        !hardAvoidTriggered &&
+        !overextendedUptrend &&
+        (daysToEarnings === null || daysToEarnings > 14) &&
+        (refCouponPct ?? 0) >= PB_ASSIGNMENT_CONFIG.qualityDipMinCouponPct &&
+        strikeData.iv <= PB_ASSIGNMENT_CONFIG.qualityDipMaxIv &&
+        symbolData.pct_from_52w_high <= -10 &&
+        symbolData.pct_from_52w_high >= -35 &&
+        (
+            symbolData.current_price >= symbolData.ma50 ||
+            (symbolData.current_price >= symbolData.ma200 && macdScore >= 0.55) ||
+            (symbolData.current_price >= symbolData.ma20 && symbolData.ma20 >= symbolData.ma200)
+        );
+
+    let actionableCaution = false;
+    if (qualityDipCandidate && (overallGrade === 'AVOID' || overallGrade === 'CAUTION')) {
+        actionableCaution = true;
+        flags.push({
+            type: 'QUALITY_DIP_EXCEPTION',
+            severity: 'INFO',
+            message: 'High-quality PB underlying has pulled back but is stabilizing, so the setup is eligible for tactical CAUTION treatment'
+        });
+        flags.push({
+            type: 'ACTIONABLE_CAUTION',
+            severity: 'INFO',
+            message: 'Treat as actionable CAUTION only with tighter strike selection and more selective client suitability'
+        });
+
+        if (overallGrade === 'AVOID') {
+            compositeScore = clamp(Math.max(compositeScore, 0.49), 0, 0.58);
+            overallGrade = 'CAUTION';
+        }
+    }
+
     const reasoningText = buildReasoningText(
         symbol,
         overallGrade,
@@ -705,6 +1123,10 @@ export function scoreAndGrade(candidate: {
         ma50: symbolData.ma50,
         ma200: symbolData.ma200,
         pct_from_52w_high: symbolData.pct_from_52w_high,
+        assignment_quality_score: assignmentQuality.score,
+        assignment_quality_label: assignmentQuality.label,
+        actionable_caution: actionableCaution,
+        wait_reason: deriveWaitReason(overallGrade, flags),
         reasoning_text: reasoningText,
         flags
     };
@@ -746,6 +1168,42 @@ function shouldAvoidResult(input: {
     }
 
     return false;
+}
+
+function deriveWaitReason(grade: OverallGrade, flags: Flag[]): WaitReason | null {
+    if (grade === 'AVOID') {
+        if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
+            return 'WAIT_EARNINGS_RISK';
+        }
+
+        if (
+            flags.some((flag) =>
+                flag.type === 'ASSIGNMENT_QUALITY_CAP' ||
+                flag.type === 'OVEREXTENDED_UPTREND' ||
+                flag.type === 'BROKEN_TREND' ||
+                flag.type === 'LOWER_HIGH_RISK' ||
+                flag.type === 'BEARISH_STRUCTURE' ||
+                flag.type === 'MATERIAL_NEWS_SHOCK' ||
+                flag.type === 'MATERIAL_NEWS_OVERHANG'
+            )
+        ) {
+            return 'WAIT_SETUP_RESET';
+        }
+
+        return null;
+    }
+
+    if (grade === 'CAUTION') {
+        if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
+            return 'WAIT_EARNINGS_RISK';
+        }
+
+        if (flags.some((flag) => flag.type === 'OVEREXTENDED_UPTREND')) {
+            return 'WAIT_SETUP_RESET';
+        }
+    }
+
+    return null;
 }
 
 function applyHighVolCautionOverride(input: {
