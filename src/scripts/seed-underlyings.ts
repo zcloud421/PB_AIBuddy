@@ -33,7 +33,7 @@ const UNDERLYINGS: SeedUnderlying[] = [
     { symbol: 'VRT', exchange: 'NYSE', sector: 'Industrials', currency: 'USD', themes: ['AI Infrastructure'], tier: 2, active: true },
     { symbol: 'GEV', exchange: 'NYSE', sector: 'Industrials', currency: 'USD', themes: ['Power Infrastructure', 'Grid'], tier: 2, active: true },
     { symbol: 'VST', exchange: 'NYSE', sector: 'Utilities', currency: 'USD', themes: ['Power Demand', 'Energy'], tier: 2, active: true },
-    { symbol: 'AXP', exchange: 'NYSE', sector: 'Financials', currency: 'USD', themes: ['Payments'], tier: 1, active: false },
+    { symbol: 'AXP', exchange: 'NYSE', sector: 'Financials', currency: 'USD', themes: ['Payments', 'Consumer Finance'], tier: 1, active: true },
     { symbol: 'HOOD', exchange: 'NASDAQ', sector: 'Financials', currency: 'USD', themes: ['High Volatility', 'Crypto'], tier: 2, active: true },
     { symbol: 'FUTU', exchange: 'NASDAQ', sector: 'Financials', currency: 'USD', themes: ['China Brokerage', 'High Volatility'], tier: 2, active: true },
     { symbol: 'BABA', exchange: 'NYSE', sector: 'Consumer Discretionary', currency: 'USD', themes: ['China Tech'], tier: 1, active: true },
@@ -46,13 +46,26 @@ const UNDERLYINGS: SeedUnderlying[] = [
     { symbol: 'CRCL', exchange: 'NYSE', sector: 'Technology', currency: 'USD', themes: ['Crypto', 'High Volatility'], tier: 2, active: true },
     { symbol: 'GDX', exchange: 'NYSEARCA', sector: 'Materials', currency: 'USD', themes: ['Gold', 'Defensive'], tier: 2, active: true },
     { symbol: 'XOM', exchange: 'NYSE', sector: 'Energy', currency: 'USD', themes: ['Energy'], tier: 1, active: true },
-    { symbol: 'USO', exchange: 'NYSEARCA', sector: 'Energy', currency: 'USD', themes: ['Energy'], tier: 2, active: true },
-    { symbol: 'GLD', exchange: 'NYSE', sector: 'Commodities', currency: 'USD', themes: ['Gold', 'Defensive'], tier: 1, active: false },
+    { symbol: 'USO', exchange: 'NYSEARCA', sector: 'Energy', currency: 'USD', themes: ['Energy'], tier: 2, active: false },
+    { symbol: 'GLD', exchange: 'NYSE', sector: 'Commodities', currency: 'USD', themes: ['Gold', 'Defensive'], tier: 1, active: true },
     { symbol: 'NEM', exchange: 'NYSE', sector: 'Materials', currency: 'USD', themes: ['Gold'], tier: 2, active: false },
     { symbol: 'CEG', exchange: 'NASDAQ', sector: 'Energy', currency: 'USD', themes: ['Nuclear', 'Energy'], tier: 2, active: false },
     { symbol: 'UNH', exchange: 'NYSE', sector: 'Healthcare', currency: 'USD', themes: ['Defensive'], tier: 1, active: true },
     { symbol: 'INTC', exchange: 'NASDAQ', sector: 'Technology', currency: 'USD', themes: ['Semiconductors'], tier: 1, active: true },
-    { symbol: 'LI', exchange: 'NASDAQ', sector: 'Consumer Discretionary', currency: 'USD', themes: ['China EV', 'High Volatility'], tier: 2, active: true }
+    { symbol: 'LI', exchange: 'NASDAQ', sector: 'Consumer Discretionary', currency: 'USD', themes: ['China EV', 'High Volatility'], tier: 2, active: true },
+    // Software
+    { symbol: 'ADBE', exchange: 'NASDAQ', sector: 'Technology', currency: 'USD', themes: ['Software', 'AI Disruption'], tier: 1, active: true },
+    { symbol: 'CRM', exchange: 'NYSE', sector: 'Technology', currency: 'USD', themes: ['Software', 'Enterprise AI'], tier: 2, active: true },
+    // Healthcare
+    { symbol: 'LLY', exchange: 'NYSE', sector: 'Healthcare', currency: 'USD', themes: ['Healthcare', 'GLP-1'], tier: 1, active: true },
+    // Consumer
+    { symbol: 'NKE', exchange: 'NYSE', sector: 'Consumer Discretionary', currency: 'USD', themes: ['Consumer', 'China Exposure'], tier: 1, active: true },
+    { symbol: 'LULU', exchange: 'NASDAQ', sector: 'Consumer Discretionary', currency: 'USD', themes: ['Consumer', 'High Volatility'], tier: 2, active: true },
+    // China ADR
+    { symbol: 'BILI', exchange: 'NASDAQ', sector: 'Communication', currency: 'USD', themes: ['China Tech', 'Gaming'], tier: 2, active: true },
+    { symbol: 'XPEV', exchange: 'NYSE', sector: 'Consumer Discretionary', currency: 'USD', themes: ['China EV', 'High Volatility'], tier: 2, active: true },
+    // Financials
+    { symbol: 'GS', exchange: 'NYSE', sector: 'Financials', currency: 'USD', themes: ['Financials', 'Investment Banking'], tier: 1, active: true },
 ];
 
 async function main(): Promise<void> {
