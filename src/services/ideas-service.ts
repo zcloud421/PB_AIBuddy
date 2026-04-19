@@ -893,6 +893,32 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['芯片出口禁令', '供应链重构', '算力管控', '设备限制']
     },
     {
+        id: 'nvda-china-partial-restoration-2026',
+        start: '2026-01-01',
+        end: '2026-12-31',
+        reason_zh: 'NVDA中国芯片出口条件性开放：H200/MI325X恢复有限出货但需缴纳15%中国营收，合规成本与地缘政治逆转风险并存',
+        family: 'chip-export-control',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['NVDA', 'AMD'],
+        archetypes: ['broad-semiconductor'],
+        subsectors: ['semiconductor'],
+        cycle_families: ['semiconductor-cycle'],
+        keywords: [
+            'china export',
+            'h200',
+            'revenue sharing',
+            'export license',
+            'china shipments',
+            'compliance cost',
+            'geopolitical',
+            'restricted sales',
+            'mi325x'
+        ],
+        event_signal_tags: ['export-control-escalation'],
+        markers: ['H200中国出货', '营收分成', '合规成本', '条件性开放']
+    },
+    {
         id: 'chip-equipment-downcycle-2023',
         start: '2022-07-01',
         end: '2024-06-30',
@@ -1045,8 +1071,8 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
     {
         id: 'tesla-political-risk-2025',
         start: '2025-06-01',
-        end: '2025-07-15',
-        reason_zh: '马斯克与特朗普公开决裂引发政策与监管风险重估，叠加交付压力拖累Tesla估值',
+        end: '2026-12-31',
+        reason_zh: 'Tesla品牌价值持续受损：马斯克政治立场引发消费者抵制，2025年品牌价值下跌36%，全球EV领导地位被比亚迪超越',
         family: 'tesla-political-risk',
         driver_type: 'company',
         applies_to: 'symbols_only',
@@ -1054,7 +1080,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         archetypes: ['ev-oem'],
         subsectors: ['ev-oem'],
         cycle_families: ['consumer-discretionary-cycle'],
-        keywords: ['trump', 'musk', 'feud', 'government contracts', 'subsidies', 'deliveries'],
+        keywords: ['trump', 'musk', 'feud', 'government contracts', 'subsidies', 'deliveries', 'byd', 'brand damage', 'consumer boycott', 'ev market share', 'brand value'],
         event_signal_tags: ['political-risk', 'demand-slowdown'],
         markers: ['Tesla', '特朗普', '马斯克', '政策风险', '交付压力']
     },
@@ -1648,6 +1674,31 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['Copilot', 'Azure AI', '企业渗透率', 'AI溢价', '变现节奏']
     },
     {
+        id: 'msft-openai-dependency-reset-2026',
+        start: '2026-01-01',
+        end: '2026-12-31',
+        reason_zh: 'Microsoft与OpenAI关系破裂风险：违约诉讼威胁、自研MAI-1替代GPT，AI合作结构动摇压制Copilot估值溢价',
+        family: 'msft-ai-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['MSFT'],
+        archetypes: ['cloud-platform'],
+        subsectors: ['cloud-platform'],
+        keywords: [
+            'openai',
+            'breach of contract',
+            'mai-1',
+            'gpt replacement',
+            'partnership risk',
+            'copilot',
+            'ai dependency',
+            'proprietary model',
+            'amazon openai deal'
+        ],
+        event_signal_tags: ['partnership-risk', 'capex-reset'],
+        markers: ['OpenAI违约', 'MAI-1', 'AI合作破裂', 'Copilot溢价', 'GPT替代']
+    },
+    {
         id: 'amzn-retail-margin-reset-2022',
         start: '2022-01-01',
         end: '2023-06-30',
@@ -1770,6 +1821,32 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['Meta', 'AI投入', '广告主线', '资本开支']
     },
     {
+        id: 'meta-regulatory-safety-reset-2025',
+        start: '2025-10-01',
+        end: '2026-12-31',
+        reason_zh: 'Meta监管与安全风险扩大：FTC投诉AI聊天机器人广告数据滥用、参议院调查未成年人保护，3.72亿罚款判决压制估值',
+        family: 'meta-regulatory',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['META'],
+        archetypes: ['ad-platform-internet'],
+        subsectors: ['ad-platform-internet'],
+        keywords: [
+            'ftc',
+            'child safety',
+            'chatbot',
+            'ad data',
+            'privacy',
+            'senate investigation',
+            'penalty',
+            'minor protection',
+            'ai chatbot',
+            'consumer protection'
+        ],
+        event_signal_tags: ['regulatory-probe', 'antitrust-overhang'],
+        markers: ['FTC投诉', '儿童安全', 'AI聊天机器人', '广告数据', '监管罚款']
+    },
+    {
         id: 'avgo-vmware-enterprise-reset-2022',
         start: '2022-01-01',
         end: '2024-06-30',
@@ -1879,15 +1956,30 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
     {
         id: 'google-search-challenge-2025',
         start: '2025-05-01',
-        end: '2025-10-31',
-        reason_zh: 'Alphabet搜索主业受AI替代与反垄断压力挑战，默认入口与搜索变现预期受压',
+        end: '2026-12-31',
+        reason_zh: 'Alphabet搜索反垄断判决落地：法院禁止独家协议、苹果默认协议存废、搜索市占率跌破90%，EU同步调查AI Overviews',
         family: 'google-search',
         driver_type: 'company',
         applies_to: 'symbols_only',
         symbols: ['GOOG', 'GOOGL'],
         archetypes: ['ad-platform-internet'],
         subsectors: ['ad-platform-internet'],
-        keywords: ['search', 'safari', 'apple', 'eddie cue', 'antitrust', 'ai search', 'default'],
+        keywords: [
+            'search',
+            'safari',
+            'apple',
+            'eddie cue',
+            'antitrust',
+            'ai search',
+            'default',
+            'antitrust remedy',
+            'default agreement',
+            'apple deal',
+            'search market share',
+            'doj remedy',
+            'ai overviews',
+            'eu probe'
+        ],
         event_signal_tags: ['search-disruption', 'regulatory-probe'],
         markers: ['Alphabet', '搜索', 'Safari', 'AI搜索', '反垄断']
     },
@@ -1940,6 +2032,30 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         keywords: ['hfcaa', 'delisting', 'watchlist', 'sec', 'audit inspections', 'ant group'],
         event_signal_tags: ['hfcaa-delisting-risk', 'ant-rectification-overhang'],
         markers: ['HFCAA', 'SEC观察名单', '退市风险', 'Ant整改']
+    },
+    {
+        id: 'china-adr-delisting-risk-2025',
+        start: '2025-01-01',
+        end: '2026-12-31',
+        reason_zh: '中概股退市风险重燃：约300家中国公司面临ADR合规压力，中美贸易摩擦升级叠加审计监管不确定性压制估值',
+        family: 'china-delisting',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['BABA', 'JD', 'PDD', 'BIDU', 'NTES', 'TME', 'BILI', 'TCEHY', 'BEKE'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: [
+            'delisting',
+            'adr',
+            'hfcaa',
+            'audit compliance',
+            'sec',
+            'trade war',
+            'chinese stocks',
+            'forced delisting',
+            'us listing risk'
+        ],
+        event_signal_tags: ['hfcaa-delisting-risk'],
+        markers: ['中概退市', 'ADR风险', 'HFCAA', '审计合规', '贸易摩擦']
     },
     {
         id: 'china-platform-overhang-2021',
@@ -2095,6 +2211,33 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         keywords: ['temu', 'competition', 'global business', 'refunds', 'merchant', 'revenue miss', 'uncertain market', 'de minimis'],
         event_signal_tags: ['earnings-miss', 'pricing-pressure', 'regulatory-probe'],
         markers: ['拼多多', 'Temu', '竞争加剧', '商家政策', '全球业务前景']
+    },
+    {
+        id: 'pdd-temu-tariff-reset-2025',
+        start: '2025-04-01',
+        end: '2026-12-31',
+        reason_zh: 'PDD/Temu受美国关税重创：de minimis豁免取消叠加145%关税，Temu美国用户从3400万跌至800万，营收增速从59%降至个位数',
+        family: 'pdd-temu-tariff',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['PDD'],
+        archetypes: ['china-ecommerce-platform'],
+        subsectors: ['china-ecommerce-platform'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: [
+            'de minimis',
+            'tariff',
+            'temu',
+            'us users',
+            'cross-border',
+            '145%',
+            'import duty',
+            'local fulfillment',
+            'us sourcing',
+            'trade war'
+        ],
+        event_signal_tags: ['tariff-shock', 'demand-slowdown'],
+        markers: ['Temu关税', 'de minimis取消', '145%关税', '美国用户流失']
     },
     {
         id: 'banking-profitability-reset-2024',
