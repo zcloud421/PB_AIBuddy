@@ -2171,7 +2171,22 @@ export async function selectDailyBest(candidates: ScoringResult[]): Promise<{
         const tierBonus = underlying?.tier === 1 ? 0.05 : 0;
         const freshnessPenalty = calculateFreshnessPenalty(candidate.symbol, recentHistory);
         const macroPenalty = applyMacroSensitivityPenalty(candidate, underlying, activeFocusStatuses);
-        const adjustedScore = candidate.composite_score + tierBonus - freshnessPenalty - macroPenalty;
+        const latestRunDate = recentHistory[0]?.run_date ?? null;
+        const wasYesterdayHero =
+            latestRunDate !== null &&
+            recentHistory.some(
+                (entry) =>
+                    entry.run_date === latestRunDate &&
+                    entry.symbol === candidate.symbol &&
+                    entry.placement === 'HERO'
+            );
+
+        const adjustedScore =
+            candidate.composite_score +
+            tierBonus -
+            freshnessPenalty -
+            macroPenalty -
+            (wasYesterdayHero ? 0.06 : 0);
 
         if (!bestChoice || adjustedScore > bestChoice.adjustedScore) {
             bestChoice = {
@@ -3923,20 +3938,14 @@ function calculateFreshnessPenalty(
     symbol: string,
     history: Array<{ symbol: string; run_date: string; placement: 'HERO' | 'RECOMMENDED'; slot_rank: number }>
 ): number {
-    const appearances = history.filter((entry) => entry.symbol === symbol).length;
+    const weightedAppearances = history
+        .filter((entry) => entry.symbol === symbol)
+        .reduce((sum, entry) => sum + (entry.placement === 'HERO' ? 1.8 : 1.0), 0);
 
-    if (appearances <= 1) {
-        return 0;
-    }
-    if (appearances === 2) {
-        return 0.04;
-    }
-    if (appearances === 3) {
-        return 0.08;
-    }
-    if (appearances === 4) {
-        return 0.12;
-    }
+    if (weightedAppearances <= 1.5) return 0;
+    if (weightedAppearances <= 3.0) return 0.04;
+    if (weightedAppearances <= 5.0) return 0.08;
+    if (weightedAppearances <= 7.0) return 0.12;
     return 0.16;
 }
 
