@@ -2702,6 +2702,51 @@ function buildDailyNarrativeMarketSignalsSection(
     return `今日跨资产变动（仅供叙事归因，不代表方向建议）：\n${lines.join('\n')}`;
 }
 
+const DAILY_NARRATIVE_ALLOWED_SAA_BUCKETS = ['美股', '港股', '美债', '现金管理', '黄金', '汇率', '另类', '贵金属'] as const;
+const DAILY_NARRATIVE_BANNED_DIRECT_ASSETS = ['原油', 'WTI', 'Brent', '布伦特', '天然气', '白银', '铜'] as const;
+
+function buildFallbackConversationFrame(primarySlug: string): string {
+    switch (primarySlug) {
+        case 'middle-east-tensions':
+            return '适合和客户回顾美股与美债的仓位，确认它们是否仍然反映其对地缘风险溢价与利率路径的判断。';
+        case 'gold-repricing':
+            return '适合和客户回顾黄金与汇率的仓位，确认它们是否仍然反映其对实际利率路径与美元方向的判断。';
+        case 'usd-strength':
+            return '适合和客户回顾汇率与港股的仓位，确认它们是否仍然反映其对美元路径与中国风险偏好的判断。';
+        case 'hk-market-sentiment':
+            return '适合和客户回顾港股与现金管理仓位，确认它们是否仍然反映其对中国风险偏好与流动性节奏的判断。';
+        case 'private-credit-stress':
+            return '适合和客户回顾美债与美股的仓位，确认它们是否仍然反映其对信用压力与风险偏好的判断。';
+        default:
+            return '适合和客户回顾股票与债券的仓位，确认它们是否仍然反映其对增长路径与利率环境的判断。';
+    }
+}
+
+function normalizeConversationFrame(
+    frame: string,
+    primarySlug: string
+): string {
+    const normalized = frame
+        .trim()
+        .replace(/^现在是和客户(回顾|核对)/u, '适合和客户$1')
+        .replace(/^现在适合和客户/u, '适合和客户');
+
+    const startsWithValidVerb =
+        normalized.startsWith('适合和客户回顾') || normalized.startsWith('适合和客户核对');
+    const hasAllowedBucket = DAILY_NARRATIVE_ALLOWED_SAA_BUCKETS.some((bucket) =>
+        normalized.includes(bucket)
+    );
+    const hasBannedDirectAsset = DAILY_NARRATIVE_BANNED_DIRECT_ASSETS.some((asset) =>
+        normalized.includes(asset)
+    );
+
+    if (!startsWithValidVerb || !hasAllowedBucket || hasBannedDirectAsset) {
+        return buildFallbackConversationFrame(primarySlug);
+    }
+
+    return normalized;
+}
+
 async function generateDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
     let cachedTopics = collectNarrativeTopics();
 
@@ -2752,14 +2797,16 @@ ${narrativeHistorySection}
 2. 用 1-2 句话描述今天市场在定价什么（narrative，25-40字，主语为“市场”或“投资者”）
    - 禁止：“风险升温” “情绪波动” “不确定性” “引发关注”
 3. 生成一句 RM 沟通抓手（conversation_frame，25-50字）
-   - 基于今日跨资产变动，选出对客户 SAA 组合影响最大的 1-2 个大类资产
-     （不局限于 primary_slug 的资产，可以是股票、债券、黄金、美元任意组合）
+   - 基于今日跨资产变动，选出对客户 SAA 组合影响最大的 1-2 个资产桶
+   - 沟通重点优先从以下资产桶中选择：美股、港股、美债、现金管理、黄金、汇率、另类
+   - 黄金/贵金属可单列视作独立资产桶；汇率重点优先考虑 USDCNH、USDJPY、USDCHF 这类香港客户高频关注对
+   - 原油、天然气、单一商品价格只能作为驱动变量，不能直接写成客户默认持仓对象
    - 必须使用 SAA 回顾句型：
-     “现在是和客户回顾 [大类资产A] 与 [大类资产B] 的仓位，
+     “适合和客户回顾 [资产桶A] 与 [资产桶B] 的仓位，
       确认它们是否仍然反映客户对 [底层判断] 的信念”
    - 如果今日变动与近5日趋势方向相反（如5日连涨但今日回落），
      需要在 conversation_frame 里体现这个转折，引导客户确认原先判断是否仍然成立
-   - 禁止：问句、“建议”、“适合”、“应当”、“可以考虑”、方向性词汇
+   - 禁止：问句、“建议”、“应当”、“可以考虑”、方向性词汇
 4. 生成 2-3 条情景映射（scenario_map，字符串数组）
    - 格式：“如果 [事件/条件] → [先看哪类资产/传导方向]”
    - 每条 15-30 字，只描述传导路径，不给结论或建议
@@ -2775,11 +2822,12 @@ ${narrativeHistorySection}
 }
 
 示例（好的）：
-  “现在是和客户回顾股票与黄金仓位的比例，确认它是否仍然反映其对地缘风险溢价与实际利率路径的判断”
-  “美股近5日连创新高而今日油价大幅回落，现在是和客户核对风险资产占比，确认组合是否仍承载原先的地缘风险预期”
+  “适合和客户回顾美股与美债的仓位，确认它们是否仍然反映其对地缘风险溢价与利率路径的判断”
+  “适合和客户回顾汇率与黄金的仓位，确认它们是否仍然反映其对美元路径与避险需求的判断”
+  “适合和客户回顾港股与现金管理仓位，确认它们是否仍然反映其对中国风险偏好与流动性节奏的判断”
 
 示例（不好的，太窄）：
-  “现在是和客户回顾原油及黄金相关敞口...”
+  “适合和客户回顾原油及黄金相关敞口...”
 `.trim();
 
     try {
@@ -2845,7 +2893,7 @@ ${narrativeHistorySection}
         return {
             primary_slug: parsed.primary_slug,
             narrative: parsed.narrative.trim(),
-            conversation_frame: parsed.conversation_frame.trim(),
+            conversation_frame: normalizeConversationFrame(parsed.conversation_frame, parsed.primary_slug),
             scenario_map: parsed.scenario_map.filter((s): s is string => typeof s === 'string').map((s) => s.trim()),
             ranked_slugs,
             rank_changes,
@@ -5970,7 +6018,19 @@ export async function getClientFocusMarketState(): Promise<ClientFocusMarketStat
 
 export async function getDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
     if (dailyNarrativeCache.value && dailyNarrativeCache.expiresAt > Date.now()) {
-        if (!dailyNarrativeCache.value.conversation_frame || typeof dailyNarrativeCache.value.momentum_days !== 'number') {
+        const normalizedCachedFrame = dailyNarrativeCache.value.conversation_frame
+            ? normalizeConversationFrame(
+                dailyNarrativeCache.value.conversation_frame,
+                dailyNarrativeCache.value.primary_slug
+            )
+            : null;
+
+        if (
+            !dailyNarrativeCache.value.conversation_frame
+            || typeof dailyNarrativeCache.value.momentum_days !== 'number'
+            || !normalizedCachedFrame
+            || normalizedCachedFrame !== dailyNarrativeCache.value.conversation_frame
+        ) {
             dailyNarrativeCache.value = null;
             dailyNarrativeCache.expiresAt = 0;
         } else {
