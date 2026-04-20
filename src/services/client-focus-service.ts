@@ -2684,31 +2684,53 @@ function buildFallbackDailyNarrative(
 
     const usEquitySignal = [formatNarrativeMarketMove(spx), formatNarrativeMarketMove(ndx)].filter(Boolean).join('，');
     if (usEquitySignal) {
+        const spxPct = spx?.change_pct ?? null;
+        const spx5d = spx?.change_5d_pct ?? null;
+        let usImplication = '若客户持有美股，复核行业分布是否与当前宏观主线一致。';
+        if (typeof spx5d === 'number' && spx5d >= 4) {
+            usImplication = '美股近5日累计涨幅已较大，持仓客户可评估是否锁定部分获利；没有仓位的客户此时追高风险偏大，等待回调机会更合适。';
+        } else if (typeof spxPct === 'number' && spxPct <= -1.5) {
+            usImplication = '美股今日明显下跌，需判断是地缘/宏观催化还是技术性回调，与客户确认持仓目的是否仍成立。';
+        } else if (typeof spxPct === 'number' && spxPct >= 1) {
+            usImplication = '美股今日上涨，可与持仓客户确认增长逻辑是否仍与当前地缘及宏观背景一致。';
+        }
         assetBuckets.push({
             bucket: '美股',
-            thesis_check: '客户持有美股的增长逻辑是否仍然成立？',
+            thesis_check: '客户持有美股是基于AI增长逻辑还是地缘缓和逻辑？',
             today_signal: usEquitySignal,
-            portfolio_implication: '若客户持仓偏成长，需复核美股仓位是否仍匹配其风险预算。'
+            portfolio_implication: usImplication
         });
     }
 
     const hkSignal = [formatNarrativeMarketMove(hsi), formatNarrativeMarketMove(hstech)].filter(Boolean).join('，');
     if (hkSignal) {
+        const hsi5d = hsi?.change_5d_pct ?? null;
+        let hkImplication = '复核客户港股持仓的核心驱动是否仍在：南向资金、政策预期还是个别板块行情。';
+        if (typeof hsi5d === 'number' && hsi5d >= 3) {
+            hkImplication = '港股近5日累计上涨，可与客户讨论当前行情主要由哪些板块驱动（AI次新股/南向资金），判断是否有结构性持续性。';
+        } else if (typeof hsi5d === 'number' && hsi5d <= -3) {
+            hkImplication = '港股近期持续偏弱，复核客户EM/港股持仓的核心逻辑是否已发生变化，必要时讨论减少敞口。';
+        }
         assetBuckets.push({
             bucket: '港股',
-            thesis_check: '客户持有港股的修复逻辑是否仍然成立？',
+            thesis_check: '客户持有港股是基于南向资金趋势还是中国复苏逻辑？',
             today_signal: hkSignal,
-            portfolio_implication: '若客户持仓偏中国修复，可复核港股仓位是否仍承载原先判断。'
+            portfolio_implication: hkImplication
         });
     }
 
     const goldSignal = formatNarrativeMarketMove(gold);
     if (goldSignal) {
+        const goldPct = gold?.change_pct ?? null;
+        let goldImplication = '复核客户黄金持仓的原始买入逻辑：若为避险，需评估当前地缘情绪是否仍支撑；若为实际利率对冲，需看利率走向。';
+        if (typeof goldPct === 'number' && goldPct <= -0.8) {
+            goldImplication = '黄金今日下跌，若客户配置目的是避险，需与客户讨论当前地缘缓和是否削弱了这一逻辑；避险溢价弱化时黄金持仓目的需重新确认。';
+        }
         assetBuckets.push({
             bucket: '黄金',
-            thesis_check: '客户持有黄金的避险逻辑是否仍然成立？',
+            thesis_check: '客户持有黄金是为了避险保护还是对冲实际利率下行？',
             today_signal: goldSignal,
-            portfolio_implication: '若客户持仓偏避险保护，需复核黄金配置是否仍服务当前组合目标。'
+            portfolio_implication: goldImplication
         });
     }
 
@@ -2717,9 +2739,11 @@ function buildFallbackDailyNarrative(
         assetBuckets.push(treasuryBucket);
     }
 
+    // 汇率是PB客户核心关注（FX carry trade），在fallback中始终包含
     const fxBucket = buildFxBucket(marketSnapshot);
-    if (fxBucket && assetBuckets.length < 5) {
-        assetBuckets.push(fxBucket);
+    const fxBucketToAdd = fxBucket ?? buildDefaultFxBucket(marketSnapshot);
+    if (fxBucketToAdd && assetBuckets.length < 5) {
+        assetBuckets.push(fxBucketToAdd);
     }
 
     const commoditySignal = formatNarrativeMarketMove(oil);
@@ -2897,6 +2921,39 @@ function normalizeAssetBuckets(
             today_signal: item.today_signal.trim(),
             portfolio_implication: item.portfolio_implication.trim()
         }));
+}
+
+function buildDefaultFxBucket(
+    marketSnapshot: ClientFocusMarketStateResponse | null
+): DailyMarketNarrative['asset_buckets'][number] | null {
+    const indices = marketSnapshot?.indices ?? [];
+    const byCode = new Map(indices.map((item) => [item.code, item]));
+    const dxy = byCode.get('DXY');
+    const usdcnh = byCode.get('USDCNH');
+    const usdjpy = byCode.get('USDJPY');
+
+    const signalParts: string[] = [];
+    if (dxy?.change_pct !== null && dxy?.change_pct !== undefined) {
+        signalParts.push(`美元指数今日${dxy.change_pct >= 0 ? '+' : ''}${dxy.change_pct.toFixed(2)}%`);
+    }
+    if (usdcnh?.change_pct !== null && usdcnh?.change_pct !== undefined) {
+        signalParts.push(`USDCNH今日${usdcnh.change_pct >= 0 ? '+' : ''}${usdcnh.change_pct.toFixed(2)}%`);
+    }
+    if (usdjpy?.change_pct !== null && usdjpy?.change_pct !== undefined) {
+        signalParts.push(`USDJPY今日${usdjpy.change_pct >= 0 ? '+' : ''}${usdjpy.change_pct.toFixed(2)}%`);
+    }
+
+    if (signalParts.length === 0) {
+        return null;
+    }
+
+    const dxyDir = typeof dxy?.change_5d_pct === 'number' && dxy.change_5d_pct > 1 ? '走强' : typeof dxy?.change_5d_pct === 'number' && dxy.change_5d_pct < -1 ? '走弱' : '偏稳';
+    return {
+        bucket: '汇率',
+        thesis_check: '客户的FX敞口（JPY/CHF套息或CNH持仓）是否与当前美元走势方向一致？',
+        today_signal: signalParts.join('；') + '。',
+        portfolio_implication: `美元目前${dxyDir}，持有JPY/CHF套息仓位的客户需关注carry逻辑是否仍成立；USDCNH走向影响港股及中资资产的汇兑收益。`
+    };
 }
 
 function buildTreasuryBucket(
