@@ -2668,46 +2668,38 @@ function buildDailyNarrativeMarketSignalsSection(
         return '';
     }
 
-    const significantSignals = indices
-        .filter((item) => {
-            const change = item.change_pct;
-            if (change === null || change === undefined || Number.isNaN(change)) {
-                return false;
-            }
-
-            if (item.code === 'TNX') {
-                return Math.abs(change) >= 5;
-            }
-
-            if (['SPX', 'NDX', 'HSI', 'HSTECH'].includes(item.code)) {
-                return Math.abs(change) >= 1.0;
-            }
-
-            if (['GOLD', 'SILVER', 'OIL', 'BRENT', 'NATGAS'].includes(item.code)) {
-                return Math.abs(change) >= 2.0;
-            }
-
-            if (['USDCNH', 'USDJPY', 'USDCHF', 'DXY'].includes(item.code)) {
-                return Math.abs(change) >= 0.3;
-            }
-
-            return false;
-        })
+    const sortedSignals = indices
         .sort((left, right) => Math.abs(right.change_pct ?? 0) - Math.abs(left.change_pct ?? 0));
 
-    if (significantSignals.length === 0) {
+    if (sortedSignals.length === 0) {
         return '';
     }
 
-    const lines = significantSignals.map((item) => {
-        const change = item.change_pct ?? 0;
+    const lines = sortedSignals.map((item) => {
+        const todayChange = item.change_pct;
+        const fiveDayChange = item.change_5d_pct;
+        const parts: string[] = [item.name];
+
         if (item.code === 'TNX') {
-            return `${item.name} ${change >= 0 ? '+' : ''}${change.toFixed(1)}bps`;
+            if (todayChange !== null && todayChange !== undefined && !Number.isNaN(todayChange)) {
+                parts.push(`今日 ${todayChange >= 0 ? '+' : ''}${todayChange.toFixed(1)}bps`);
+            }
+            if (fiveDayChange !== null && fiveDayChange !== undefined && !Number.isNaN(fiveDayChange)) {
+                parts.push(`5日 ${fiveDayChange >= 0 ? '+' : ''}${fiveDayChange.toFixed(1)}bps`);
+            }
+        } else {
+            if (todayChange !== null && todayChange !== undefined && !Number.isNaN(todayChange)) {
+                parts.push(`今日 ${todayChange >= 0 ? '+' : ''}${todayChange.toFixed(2)}%`);
+            }
+            if (fiveDayChange !== null && fiveDayChange !== undefined && !Number.isNaN(fiveDayChange)) {
+                parts.push(`5日 ${fiveDayChange >= 0 ? '+' : ''}${fiveDayChange.toFixed(2)}%`);
+            }
         }
-        return `${item.name} ${change >= 0 ? '+' : ''}${change.toFixed(2)}%`;
+
+        return parts.join('  ');
     });
 
-    return `今日显著市场信号（change_pct 仅供归因，不代表方向建议）：\n${lines.join('\n')}`;
+    return `今日跨资产变动（仅供叙事归因，不代表方向建议）：\n${lines.join('\n')}`;
 }
 
 async function generateDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
@@ -2759,10 +2751,15 @@ ${narrativeHistorySection}
    - 单日价格跳动不足以触发叙事切换，除非同时有多个资产类别同向确认
 2. 用 1-2 句话描述今天市场在定价什么（narrative，25-40字，主语为“市场”或“投资者”）
    - 禁止：“风险升温” “情绪波动” “不确定性” “引发关注”
-3. 生成一句 RM 沟通抓手（conversation_frame，20-40字）
-   - 必须使用 SAA 回顾句型：“现在是和客户回顾/核对 [资产类别]，确认它是否仍然反映客户对 [判断/thesis] 的信念”
-   - 禁止：问句、“建议”、“适合”、“应当”、“可以考虑”、方向性词汇、新的配置建议
-   - 示例：“现在是和客户核对黄金仓位，确认它是否仍然反映其对实际利率路径的判断”
+3. 生成一句 RM 沟通抓手（conversation_frame，25-50字）
+   - 基于今日跨资产变动，选出对客户 SAA 组合影响最大的 1-2 个大类资产
+     （不局限于 primary_slug 的资产，可以是股票、债券、黄金、美元任意组合）
+   - 必须使用 SAA 回顾句型：
+     “现在是和客户回顾 [大类资产A] 与 [大类资产B] 的仓位，
+      确认它们是否仍然反映客户对 [底层判断] 的信念”
+   - 如果今日变动与近5日趋势方向相反（如5日连涨但今日回落），
+     需要在 conversation_frame 里体现这个转折，引导客户确认原先判断是否仍然成立
+   - 禁止：问句、“建议”、“适合”、“应当”、“可以考虑”、方向性词汇
 4. 生成 2-3 条情景映射（scenario_map，字符串数组）
    - 格式：“如果 [事件/条件] → [先看哪类资产/传导方向]”
    - 每条 15-30 字，只描述传导路径，不给结论或建议
@@ -2776,6 +2773,13 @@ ${narrativeHistorySection}
   "scenario_map": ["如果 ... → ...", "如果 ... → ..."],
   "ranked_slugs": ["...", "..."]
 }
+
+示例（好的）：
+  “现在是和客户回顾股票与黄金仓位的比例，确认它是否仍然反映其对地缘风险溢价与实际利率路径的判断”
+  “美股近5日连创新高而今日油价大幅回落，现在是和客户核对风险资产占比，确认组合是否仍承载原先的地缘风险预期”
+
+示例（不好的，太窄）：
+  “现在是和客户回顾原油及黄金相关敞口...”
 `.trim();
 
     try {
