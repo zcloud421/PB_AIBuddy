@@ -2772,7 +2772,7 @@ function normalizeAssetBuckets(
                 && item.today_signal.trim().length > 0
                 && item.portfolio_implication.trim().length > 0
         )
-        .slice(0, 4)
+        .slice(0, 5)
         .map((item) => ({
             bucket: item.bucket,
             thesis_check: item.thesis_check.trim(),
@@ -2832,32 +2832,121 @@ function buildTreasuryBucket(
     };
 }
 
+function buildFxBucket(
+    marketSnapshot: ClientFocusMarketStateResponse | null
+): DailyMarketNarrative['asset_buckets'][number] | null {
+    const indices = marketSnapshot?.indices ?? [];
+    const usdjpy = indices.find((item) => item.code === 'USDJPY');
+    const usdchf = indices.find((item) => item.code === 'USDCHF');
+    const usdcnh = indices.find((item) => item.code === 'USDCNH');
+    const dxy = indices.find((item) => item.code === 'DXY');
+
+    const jpySignificant =
+        (typeof usdjpy?.change_pct === 'number' && Math.abs(usdjpy.change_pct) >= 0.5)
+        || (typeof usdjpy?.change_5d_pct === 'number' && Math.abs(usdjpy.change_5d_pct) >= 1.5);
+    const chfSignificant =
+        (typeof usdchf?.change_pct === 'number' && Math.abs(usdchf.change_pct) >= 0.5)
+        || (typeof usdchf?.change_5d_pct === 'number' && Math.abs(usdchf.change_5d_pct) >= 1.5);
+    const cnhSignificant =
+        (typeof usdcnh?.change_pct === 'number' && Math.abs(usdcnh.change_pct) >= 0.3)
+        || (typeof usdcnh?.change_5d_pct === 'number' && Math.abs(usdcnh.change_5d_pct) >= 0.8);
+    const dxyTrending =
+        (typeof dxy?.change_5d_pct === 'number' && Math.abs(dxy.change_5d_pct) >= 1.5);
+
+    if (!jpySignificant && !chfSignificant && !cnhSignificant && !dxyTrending) {
+        return null;
+    }
+
+    // Build signal string from most significant movers
+    const signalParts: string[] = [];
+    if (usdjpy?.change_pct !== null && usdjpy?.change_pct !== undefined && jpySignificant) {
+        const dir = usdjpy.change_pct < 0 ? '日元升值' : '日元走弱';
+        signalParts.push(`USDJPY今日${usdjpy.change_pct >= 0 ? '+' : ''}${usdjpy.change_pct.toFixed(2)}%（${dir}）`);
+    }
+    if (usdchf?.change_pct !== null && usdchf?.change_pct !== undefined && chfSignificant) {
+        const dir = usdchf.change_pct < 0 ? '瑞郎升值' : '瑞郎走弱';
+        signalParts.push(`USDCHF今日${usdchf.change_pct >= 0 ? '+' : ''}${usdchf.change_pct.toFixed(2)}%（${dir}）`);
+    }
+    if (usdcnh?.change_pct !== null && usdcnh?.change_pct !== undefined && cnhSignificant) {
+        const dir = usdcnh.change_pct < 0 ? '人民币升值' : '人民币走弱';
+        signalParts.push(`USDCNH今日${usdcnh.change_pct >= 0 ? '+' : ''}${usdcnh.change_pct.toFixed(2)}%（${dir}）`);
+    }
+    if (signalParts.length === 0 && dxy?.change_5d_pct !== null && dxy?.change_5d_pct !== undefined) {
+        signalParts.push(`美元指数5日${dxy.change_5d_pct >= 0 ? '+' : ''}${dxy.change_5d_pct.toFixed(2)}%`);
+    }
+
+    const todaySignal = signalParts.join('；') + '。';
+
+    // Determine primary FX narrative
+    let thesisCheck = '客户外汇持仓是基于收益套利还是避险对冲？';
+    let portfolioImplication = '复核客户FX敞口，确认当前汇率走势是否改变原始配置逻辑。';
+
+    const jpyAppreciating = typeof usdjpy?.change_pct === 'number' && usdjpy.change_pct < -0.5;
+    const chfAppreciating = typeof usdchf?.change_pct === 'number' && usdchf.change_pct < -0.5;
+    const cnhStrengthening = typeof usdcnh?.change_pct === 'number' && usdcnh.change_pct < -0.3;
+    const cnhWeakening = typeof usdcnh?.change_pct === 'number' && usdcnh.change_pct > 0.3;
+
+    if (jpyAppreciating || chfAppreciating) {
+        thesisCheck = '客户持有JPY/CHF套息仓位（借低息货币做多高息资产）？';
+        const currencies = [jpyAppreciating && '日元', chfAppreciating && '瑞郎'].filter(Boolean).join('、');
+        portfolioImplication = `${currencies}升值是carry unwind信号，需复核客户套息仓位是否已面临亏损压力，必要时控制敞口。`;
+    } else if (cnhStrengthening) {
+        thesisCheck = '客户持有USD计价资产，是否已考虑人民币升值带来的汇兑收益/成本？';
+        portfolioImplication = '人民币升值利好港股及CNH计价资产，可与客户确认是否需要调整USD/CNH敞口比例。';
+    } else if (cnhWeakening) {
+        thesisCheck = '客户港股或中资资产的人民币汇率敞口是否已对冲？';
+        portfolioImplication = '人民币走弱对中资美元债及港股造成额外汇兑压力，复核客户是否需要汇率对冲。';
+    } else if (dxyTrending && dxy && typeof dxy.change_5d_pct === 'number') {
+        if (dxy.change_5d_pct > 0) {
+            thesisCheck = '客户新兴市场及港股仓位是否已考虑美元走强的系统性压力？';
+            portfolioImplication = '美元持续走强对EM资产形成压力，复核客户持有的港股及EM债券是否需要减少敞口。';
+        } else {
+            thesisCheck = '美元走弱是否为客户的非美资产创造了再配置机会？';
+            portfolioImplication = '美元走弱利好EM及港股，可与客户讨论是否适当增加非美货币计价资产的配置。';
+        }
+    }
+
+    return { bucket: '汇率', thesis_check: thesisCheck, today_signal: todaySignal, portfolio_implication: portfolioImplication };
+}
+
 function ensurePriorityAssetBuckets(
     assetBuckets: DailyMarketNarrative['asset_buckets'],
     primarySlug: string,
     marketSnapshot: ClientFocusMarketStateResponse | null
 ): DailyMarketNarrative['asset_buckets'] {
+    const nextBuckets = [...assetBuckets];
+
+    // Deterministically inject 美债 if needed
     const treasuryBucket = buildTreasuryBucket(marketSnapshot, primarySlug);
-    if (!treasuryBucket || assetBuckets.some((item) => item.bucket === '美债')) {
-        return assetBuckets;
+    if (treasuryBucket && !nextBuckets.some((item) => item.bucket === '美债')) {
+        if (nextBuckets.length < 5) {
+            nextBuckets.push(treasuryBucket);
+        } else {
+            const commodityIndex = nextBuckets.findIndex((item) => item.bucket === '大宗商品');
+            if (commodityIndex !== -1) {
+                nextBuckets.splice(commodityIndex, 1, treasuryBucket);
+            }
+        }
     }
 
-    const nextBuckets = [...assetBuckets];
-    if (nextBuckets.length < 4) {
-        nextBuckets.push(treasuryBucket);
-    } else {
-        const commodityIndex = nextBuckets.findIndex((item) => item.bucket === '大宗商品');
-        if (commodityIndex !== -1) {
-            nextBuckets.splice(commodityIndex, 1, treasuryBucket);
+    // Deterministically inject 汇率 if FX has significant signal
+    const fxBucket = buildFxBucket(marketSnapshot);
+    if (fxBucket && !nextBuckets.some((item) => item.bucket === '汇率')) {
+        if (nextBuckets.length < 5) {
+            nextBuckets.push(fxBucket);
         } else {
-            nextBuckets.splice(nextBuckets.length - 1, 1, treasuryBucket);
+            // Replace 大宗商品 if present, otherwise don't force it in
+            const commodityIndex = nextBuckets.findIndex((item) => item.bucket === '大宗商品');
+            if (commodityIndex !== -1) {
+                nextBuckets.splice(commodityIndex, 1, fxBucket);
+            }
         }
     }
 
     return DAILY_NARRATIVE_BUCKETS
         .filter((bucket) => nextBuckets.some((item) => item.bucket === bucket))
         .map((bucket) => nextBuckets.find((item) => item.bucket === bucket)!)
-        .slice(0, 4);
+        .slice(0, 5);
 }
 
 async function generateDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
@@ -3044,9 +3133,12 @@ ${narrativeHistorySection}
    - 框架：是否符合机构 house view 的久期配置方向
    - 禁止："确认久期配置是否服务原先的判断"这类空话
 
-   汇率：
-   - 聚焦美元指数方向对客户实际持仓的影响（美元走强 = 港股/EM 承压；走弱 = 有利）
-   - 如有USDCNH数据，提及人民币方向
+   汇率（触发条件：USDJPY或USDCHF单日变动≥0.5%，或USDCNH单日变动≥0.3%，或DXY 5日变动≥1.5%）：
+   - 香港PB高净值客户常做FX carry trade（借低息货币JPY/CHF做多高息资产），汇率大幅变动是carry unwind风险信号
+   - USDJPY/USDCHF走低 = 日元/瑞郎升值 = carry trade亏损压力上升，需提示客户复核套息仓位
+   - USDCNH走低 = 人民币升值 = 利好港股及CNH资产；走高 = 人民币贬值 = 对中资资产增加汇兑压力
+   - DXY趋势方向对EM/港股有系统性影响
+   - portfolio_implication必须明确指出：是carry unwind风险、是人民币方向变化的配置含义，还是美元趋势对EM的影响
 
    大宗商品（仅在commodity-led场景生成）：
    - 原油：地缘溢价 vs 基本面，两个逻辑对应完全不同的持仓目的
