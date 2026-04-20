@@ -2650,11 +2650,13 @@ function formatNarrativeMarketMove(
         return null;
     }
 
+    const timeLabel = ['SPX', 'NDX', 'TNX', 'DXY'].includes(item.code) ? '昨日收盘' : '今日';
+
     if (item.code === 'TNX') {
-        return `${item.name}今日${todayChange >= 0 ? '+' : ''}${todayChange.toFixed(1)}bps`;
+        return `${item.name}${timeLabel}${todayChange >= 0 ? '+' : ''}${todayChange.toFixed(1)}bps`;
     }
 
-    return `${item.name}今日${todayChange >= 0 ? '+' : ''}${todayChange.toFixed(2)}%`;
+    return `${item.name}${timeLabel}${todayChange >= 0 ? '+' : ''}${todayChange.toFixed(2)}%`;
 }
 
 function buildFallbackDailyNarrative(
@@ -2686,13 +2688,13 @@ function buildFallbackDailyNarrative(
     if (usEquitySignal) {
         const spxPct = spx?.change_pct ?? null;
         const spx5d = spx?.change_5d_pct ?? null;
-        let usImplication = '若客户持有美股，复核行业分布是否与当前宏观主线一致。';
+        let usImplication = '若客户持有美股，可确认这轮反弹被理解为风险偏好修复，还是长期增长逻辑延续。';
         if (typeof spx5d === 'number' && spx5d >= 4) {
-            usImplication = '美股近5日累计涨幅已较大，持仓客户可评估是否锁定部分获利；没有仓位的客户此时追高风险偏大，等待回调机会更合适。';
+            usImplication = '若客户美股仓位已偏高，可讨论是否先锁定部分获利；没有仓位的客户此时不宜追高。';
         } else if (typeof spxPct === 'number' && spxPct <= -1.5) {
-            usImplication = '美股今日明显下跌，需判断是地缘/宏观催化还是技术性回调，与客户确认持仓目的是否仍成立。';
+            usImplication = '若昨日收盘美股回落明显，需先判断是宏观催化还是技术性回调，再核对持仓逻辑。';
         } else if (typeof spxPct === 'number' && spxPct >= 1) {
-            usImplication = '美股今日上涨，可与持仓客户确认增长逻辑是否仍与当前地缘及宏观背景一致。';
+            usImplication = '若客户持有美股，可确认昨日这轮上涨被视为地缘缓和后的风险偏好修复，还是增长逻辑延续。';
         }
         assetBuckets.push({
             bucket: '美股',
@@ -2705,11 +2707,13 @@ function buildFallbackDailyNarrative(
     const hkSignal = [formatNarrativeMarketMove(hsi), formatNarrativeMarketMove(hstech)].filter(Boolean).join('，');
     if (hkSignal) {
         const hsi5d = hsi?.change_5d_pct ?? null;
-        let hkImplication = '复核客户港股持仓的核心驱动是否仍在：南向资金、政策预期还是个别板块行情。';
+        let hkImplication = '若客户近期增配港股，可确认其依据是资金回流预期，还是政策与盈利修复判断。';
         if (typeof hsi5d === 'number' && hsi5d >= 3) {
-            hkImplication = '港股近5日累计上涨，可与客户讨论当前行情主要由哪些板块驱动（AI次新股/南向资金），判断是否有结构性持续性。';
+            hkImplication = '若客户近期追入港股，可确认这轮上行依赖的是南向资金与科技主题，还是更广泛的盈利修复。';
         } else if (typeof hsi5d === 'number' && hsi5d <= -3) {
-            hkImplication = '港股近期持续偏弱，复核客户EM/港股持仓的核心逻辑是否已发生变化，必要时讨论减少敞口。';
+            hkImplication = '若客户港股仓位偏重，可先核对中国修复判断是否仍成立，而不是把单日反弹当成趋势反转。';
+        } else if (typeof (hsi?.change_pct) === 'number' && Math.abs(hsi.change_pct) < 1) {
+            hkImplication = '若客户持有港股，当前反弹仍偏温和，更适合核对原先配置逻辑，而非把它当成强趋势确认。';
         }
         assetBuckets.push({
             bucket: '港股',
@@ -2720,11 +2724,24 @@ function buildFallbackDailyNarrative(
     }
 
     const goldSignal = formatNarrativeMarketMove(gold);
-    if (goldSignal) {
+    const equityRiskOn =
+        (typeof spx?.change_pct === 'number' && spx.change_pct >= 1)
+        || (typeof ndx?.change_pct === 'number' && ndx.change_pct >= 1);
+    const strongTreasuryMove = typeof tnx?.change_pct === 'number' && Math.abs(tnx.change_pct) >= 5;
+    const shouldShowGold =
+        Boolean(goldSignal)
+        && (
+            primaryTopic.slug === 'gold-repricing'
+            || (typeof gold?.change_pct === 'number' && Math.abs(gold.change_pct) >= 1)
+            || (equityRiskOn && strongTreasuryMove)
+        );
+    if (goldSignal && shouldShowGold) {
         const goldPct = gold?.change_pct ?? null;
-        let goldImplication = '复核客户黄金持仓的原始买入逻辑：若为避险，需评估当前地缘情绪是否仍支撑；若为实际利率对冲，需看利率走向。';
-        if (typeof goldPct === 'number' && goldPct <= -0.8) {
-            goldImplication = '黄金今日下跌，若客户配置目的是避险，需与客户讨论当前地缘缓和是否削弱了这一逻辑；避险溢价弱化时黄金持仓目的需重新确认。';
+        let goldImplication = '若客户持有黄金，可结合美债与风险资产表现，确认它承担的是避险还是实际利率对冲角色。';
+        if (typeof goldPct === 'number' && goldPct <= -1) {
+            goldImplication = '若客户黄金配置以避险为主，可确认当前回落是否意味着地缘溢价正在被挤出。';
+        } else if (Math.abs(goldPct ?? 0) < 1 && equityRiskOn && strongTreasuryMove) {
+            goldImplication = '若客户持有黄金，当前波动本身不足以单独触发调整，更应结合美债与风险资产同步变化复核其角色。';
         }
         assetBuckets.push({
             bucket: '黄金',
@@ -2747,12 +2764,15 @@ function buildFallbackDailyNarrative(
     }
 
     const commoditySignal = formatNarrativeMarketMove(oil);
-    if (commoditySignal && assetBuckets.length < 5) {
+    const commodityLed =
+        (typeof oil?.change_pct === 'number' && Math.abs(oil.change_pct) >= 3)
+        || primaryTopic.slug === 'middle-east-tensions';
+    if (commoditySignal && commodityLed && assetBuckets.length < 5) {
         assetBuckets.push({
             bucket: '大宗商品',
             thesis_check: '客户持有商品的通胀或地缘逻辑是否仍然成立？',
             today_signal: commoditySignal,
-            portfolio_implication: '若客户持有商品相关资产，可复核其持仓目的是否仍与市场主线一致。'
+            portfolio_implication: '若客户持有商品相关资产，可确认其配置逻辑押注的是地缘溢价，还是供需基本面。'
         });
     }
 
@@ -2947,12 +2967,15 @@ function buildDefaultFxBucket(
         return null;
     }
 
-    const dxyDir = typeof dxy?.change_5d_pct === 'number' && dxy.change_5d_pct > 1 ? '走强' : typeof dxy?.change_5d_pct === 'number' && dxy.change_5d_pct < -1 ? '走弱' : '偏稳';
+    if (signalParts.length === 0) {
+        return null;
+    }
+
     return {
         bucket: '汇率',
         thesis_check: '客户的FX敞口（JPY/CHF套息或CNH持仓）是否与当前美元走势方向一致？',
         today_signal: signalParts.join('；') + '。',
-        portfolio_implication: `美元目前${dxyDir}，持有JPY/CHF套息仓位的客户需关注carry逻辑是否仍成立；USDCNH走向影响港股及中资资产的汇兑收益。`
+        portfolio_implication: '当前美元波动有限，若客户持有JPY/CHF carry或CNH敞口，更适合继续观察USDJPY、USDCHF与USDCNH是否形成明确方向。'
     };
 }
 
@@ -2974,7 +2997,7 @@ function buildTreasuryBucket(
 
     const signalParts: string[] = [];
     if (typeof todayChange === 'number' && !Number.isNaN(todayChange)) {
-        signalParts.push(`美债10Y今日${todayChange >= 0 ? '+' : ''}${todayChange.toFixed(1)}bps`);
+        signalParts.push(`美债10Y昨日收盘${todayChange >= 0 ? '+' : ''}${todayChange.toFixed(1)}bps`);
     }
     if (typeof fiveDayChange === 'number' && !Number.isNaN(fiveDayChange)) {
         signalParts.push(`5日${fiveDayChange >= 0 ? '+' : ''}${fiveDayChange.toFixed(1)}bps`);
@@ -3066,11 +3089,11 @@ function buildFxBucket(
         const currencies = [jpyAppreciating && '日元', chfAppreciating && '瑞郎'].filter(Boolean).join('、');
         portfolioImplication = `${currencies}升值是carry unwind信号，需复核客户套息仓位是否已面临亏损压力，必要时控制敞口。`;
     } else if (cnhStrengthening) {
-        thesisCheck = '客户持有USD计价资产，是否已考虑人民币升值带来的汇兑收益/成本？';
-        portfolioImplication = '人民币升值利好港股及CNH计价资产，可与客户确认是否需要调整USD/CNH敞口比例。';
+        thesisCheck = '客户持有USD或CNH资产时，是否已把人民币回升纳入判断？';
+        portfolioImplication = '人民币走强更利于港股与CNH资产表现，可与客户核对其美元与人民币敞口比例是否仍匹配原先判断。';
     } else if (cnhWeakening) {
         thesisCheck = '客户港股或中资资产的人民币汇率敞口是否已对冲？';
-        portfolioImplication = '人民币走弱对中资美元债及港股造成额外汇兑压力，复核客户是否需要汇率对冲。';
+        portfolioImplication = '人民币走弱会加大港股和中资资产的汇率压力，可先核对客户是否已有相应对冲。';
     } else if (dxyTrending && dxy && typeof dxy.change_5d_pct === 'number') {
         if (dxy.change_5d_pct > 0) {
             thesisCheck = '客户新兴市场及港股仓位是否已考虑美元走强的系统性压力？';
@@ -3194,12 +3217,14 @@ ${narrativeHistorySection}
 2. 用 1 句话描述今天市场在定价什么（narrative，≤40字）
 3. 生成 3-5 个资产桶审视卡片（asset_buckets）
    - bucket 只能从：美股、港股、黄金、美债、汇率、大宗商品 中选择
-   - 必须至少生成 3 个桶（美股、港股、黄金 是 PB 客户持仓最重的资产，除非无任何市场数据否则都应包含）
+   - 必须至少生成 3 个桶（美股、港股、黄金 是 PB 客户持仓最重的资产，除非信号极弱且没有任何复核意义才可省略）
    - 每个 bucket 必须包含：
      - thesis_check：疑问句，≤25字，帮助 RM 问出”客户当初买这个资产的 thesis 还成立吗”，必须以”客户”开头，禁止使用”您”
      - today_signal：≤30字，必须包含今日真实数字，且数字必须来自上方市场数据
      - portfolio_implication：≤35字，必须是持仓复核动作，不是市场评论
    - 不生成通用分析；每条都要对应一个具体的持仓复核场景
+   - 香港白天语境下，美股/美债/美元指数默认表述为“昨日收盘”或“隔夜”，不要写成“今日上涨/今日下跌”
+   - 若单日波动很小（例如黄金<1%、汇率信号未达显著阈值），不要硬写成“今天需要review”，可省略该 bucket，或明确说明“当前不足以单独触发复核”
 4. 选择今日信号最强的资产类别作为 default_expanded_bucket
 5. 将所有主题按今日客户关注度排序（ranked_slugs）
 
@@ -3289,6 +3314,7 @@ ${narrativeHistorySection}
      → implication应判断"高位持仓是否应该锁定部分获利"或"没有仓位的客户此时不建议追高，等待回调机会"
    - 如果SPX/NDX今日下跌：
      → 判断是否是地缘/宏观催化，还是技术性回调
+   - 香港白天默认写“昨日收盘标普/纳指…”，不是“今日上涨/今日下跌”
    - 禁止："复核行业分布是否过度暴露于某板块"这类无方向判断
 
    港股：
@@ -3296,17 +3322,20 @@ ${narrativeHistorySection}
    - 如果提到AI/科技次新股或南向资金，直接引用
    - 停火后港股作为EM资金回流受益标的，这个角度要体现
    - 禁止：用单日涨幅微小来判断"拖累弹性"这类无意义评论
+   - 如果只是温和反弹，应写成“确认原先配置逻辑”，不要写成强趋势判断
 
    黄金：
    - 必须判断：当前避险逻辑是否仍然成立（地缘缓和 = 避险逻辑弱化）
    - 如果黄金今日下跌而风险资产上涨：直接点出"避险溢价正在被挤出"
    - 如果输入的topic摘要中有"黄金逻辑重估"相关内容：引用其核心传导逻辑
+   - 如果黄金单日波动小于1%，且没有与美债/风险资产形成明显背离，不要强行写成“今天需要review”
    - 禁止："结合美元走势评估相对吸引力"这类模糊判断
 
    美债：
    - 必须说清楚 TNX 变动对不同久期产品的含义（收益率下行 = 债券价格上涨 = 久期敞口受益）
    - 点出受益的具体资产类型：IG债券、债券基金、长期国债ETF
    - 框架：是否符合机构 house view 的久期配置方向
+   - 香港白天默认写“昨日收盘10Y收益率…”，不是“今日收益率…”
    - 禁止："确认久期配置是否服务原先的判断"这类空话
 
    汇率（触发条件：USDJPY或USDCHF单日变动≥0.5%，或USDCNH单日变动≥0.3%，或DXY 5日变动≥1.5%）：
@@ -3314,6 +3343,8 @@ ${narrativeHistorySection}
    - USDJPY/USDCHF走低 = 日元/瑞郎升值 = carry trade亏损压力上升，需提示客户复核套息仓位
    - USDCNH走低 = 人民币升值 = 利好港股及CNH资产；走高 = 人民币贬值 = 对中资资产增加汇兑压力
    - DXY趋势方向对EM/港股有系统性影响
+   - 若提到carry，必须尽量同时引用USDJPY与USDCHF；若提到人民币方向，必须把USDCNH对港股/中资资产的含义写清楚
+   - 若当日FX波动很小，不要伪造紧迫感
    - portfolio_implication必须明确指出：是carry unwind风险、是人民币方向变化的配置含义，还是美元趋势对EM的影响
 
    大宗商品（仅在commodity-led场景生成）：
