@@ -2747,6 +2747,85 @@ function normalizeAssetBuckets(
         }));
 }
 
+function buildTreasuryBucket(
+    marketSnapshot: ClientFocusMarketStateResponse | null,
+    primarySlug: string
+): DailyMarketNarrative['asset_buckets'][number] | null {
+    const tnx = marketSnapshot?.indices.find((item) => item.code === 'TNX');
+    const todayChange = tnx?.change_pct;
+    const fiveDayChange = tnx?.change_5d_pct;
+    const hasSignal =
+        (typeof todayChange === 'number' && !Number.isNaN(todayChange) && Math.abs(todayChange) >= 3)
+        || (typeof fiveDayChange === 'number' && !Number.isNaN(fiveDayChange) && Math.abs(fiveDayChange) >= 5)
+        || ['middle-east-tensions', 'gold-repricing', 'usd-strength', 'private-credit-stress'].includes(primarySlug);
+
+    if (!hasSignal) {
+        return null;
+    }
+
+    const signalParts: string[] = [];
+    if (typeof todayChange === 'number' && !Number.isNaN(todayChange)) {
+        signalParts.push(`美债10Y今日${todayChange >= 0 ? '+' : ''}${todayChange.toFixed(1)}bps`);
+    }
+    if (typeof fiveDayChange === 'number' && !Number.isNaN(fiveDayChange)) {
+        signalParts.push(`5日${fiveDayChange >= 0 ? '+' : ''}${fiveDayChange.toFixed(1)}bps`);
+    }
+
+    const todaySignal =
+        signalParts.length > 0
+            ? `${signalParts.join('，')}，利率路径重新定价。`
+            : '美债收益率路径出现变化，利率预期重新定价。';
+
+    let thesisCheck = '客户配置美债是基于避险保护，还是押注降息路径兑现？';
+    let portfolioImplication = '复核美债仓位，确认其久期配置是否仍服务原先的避险或利率判断。';
+
+    if (primarySlug === 'usd-strength') {
+        thesisCheck = '客户配置美债是基于美元避险，还是押注实际利率回落？';
+        portfolioImplication = '复核美债与美元敞口，确认利率与汇率判断是否仍然一致。';
+    } else if (primarySlug === 'gold-repricing') {
+        thesisCheck = '客户配置美债是为了对冲实际利率，还是承接避险仓位？';
+        portfolioImplication = '核对美债与黄金的分工，确认避险与利率保护逻辑是否仍然成立。';
+    } else if (primarySlug === 'private-credit-stress') {
+        thesisCheck = '客户配置美债是为了流动性缓冲，还是信用风险对冲？';
+        portfolioImplication = '复核美债久期与信用资产比例，确认防守仓位是否仍匹配当前压力源。';
+    }
+
+    return {
+        bucket: '美债',
+        thesis_check: thesisCheck,
+        today_signal: todaySignal,
+        portfolio_implication: portfolioImplication
+    };
+}
+
+function ensurePriorityAssetBuckets(
+    assetBuckets: DailyMarketNarrative['asset_buckets'],
+    primarySlug: string,
+    marketSnapshot: ClientFocusMarketStateResponse | null
+): DailyMarketNarrative['asset_buckets'] {
+    const treasuryBucket = buildTreasuryBucket(marketSnapshot, primarySlug);
+    if (!treasuryBucket || assetBuckets.some((item) => item.bucket === '美债')) {
+        return assetBuckets;
+    }
+
+    const nextBuckets = [...assetBuckets];
+    if (nextBuckets.length < 4) {
+        nextBuckets.push(treasuryBucket);
+    } else {
+        const commodityIndex = nextBuckets.findIndex((item) => item.bucket === '大宗商品');
+        if (commodityIndex !== -1) {
+            nextBuckets.splice(commodityIndex, 1, treasuryBucket);
+        } else {
+            nextBuckets.splice(nextBuckets.length - 1, 1, treasuryBucket);
+        }
+    }
+
+    return DAILY_NARRATIVE_BUCKETS
+        .filter((bucket) => nextBuckets.some((item) => item.bucket === bucket))
+        .map((bucket) => nextBuckets.find((item) => item.bucket === bucket)!)
+        .slice(0, 4);
+}
+
 async function generateDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
     let cachedTopics = collectNarrativeTopics();
 
@@ -2901,7 +2980,11 @@ ${narrativeHistorySection}
         if (!validSlugs.has(parsed.primary_slug)) {
             throw new Error('Invalid primary slug');
         }
-        const asset_buckets = normalizeAssetBuckets((parsed as any).asset_buckets);
+        const asset_buckets = ensurePriorityAssetBuckets(
+            normalizeAssetBuckets((parsed as any).asset_buckets),
+            parsed.primary_slug,
+            marketSnapshot
+        );
         if (asset_buckets.length < 1) {
             throw new Error('Missing asset buckets');
         }
