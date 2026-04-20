@@ -302,6 +302,7 @@ const focusMarketChartCache = new Map<string, { expiresAt: number; value: Client
 const polymarketCache = new Map<string, { expiresAt: number; value: ClientFocusPolymarketResponse }>();
 const focusMarketStateCache = new Map<string, { expiresAt: number; value: ClientFocusMarketStateResponse }>();
 const dailyNarrativeCache = { expiresAt: 0, value: null as DailyMarketNarrative | null };
+let dailyNarrativeRefreshPromise: Promise<DailyMarketNarrative | null> | null = null;
 let previousRankedSlugs: string[] = [];
 let narrativeHistory: Array<{ date: string; primary_slug: string }> = [];
 const DAILY_NARRATIVE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
@@ -2702,7 +2703,7 @@ function buildDailyNarrativeMarketSignalsSection(
     return `今日跨资产变动（仅供叙事归因，不代表方向建议）：\n${lines.join('\n')}`;
 }
 
-const DAILY_NARRATIVE_BUCKETS = ['美股', '黄金', '美债', '汇率', '大宗商品'] as const;
+const DAILY_NARRATIVE_BUCKETS = ['美股', '港股', '黄金', '美债', '汇率', '大宗商品'] as const;
 
 function isValidDailyNarrativeBucket(
     value: unknown
@@ -2794,11 +2795,11 @@ ${narrativeHistorySection}
    - 如果当前 primary_slug 已连续主导多天，需要有新的强信号才能切换，否则保持原叙事
    - 单日价格跳动不足以触发叙事切换，除非同时有多个资产类别同向确认
 2. 用 1 句话描述今天市场在定价什么（narrative，≤40字）
-3. 生成 1-4 个资产桶审视卡片（asset_buckets）
-   - bucket 只能从：美股、黄金、美债、汇率、大宗商品 中选择
-   - 只保留今日有真实信号的资产桶，不强行凑满 5 个
+3. 生成 3-5 个资产桶审视卡片（asset_buckets）
+   - bucket 只能从：美股、港股、黄金、美债、汇率、大宗商品 中选择
+   - 必须至少生成 3 个桶（美股、港股、黄金 是 PB 客户持仓最重的资产，除非无任何市场数据否则都应包含）
    - 每个 bucket 必须包含：
-     - thesis_check：疑问句，≤25字，帮助 RM 问出“客户当初买这个资产的 thesis 还成立吗”
+     - thesis_check：疑问句，≤25字，帮助 RM 问出”客户当初买这个资产的 thesis 还成立吗”，必须以”客户”开头，禁止使用”您”
      - today_signal：≤30字，必须包含今日真实数字，且数字必须来自上方市场数据
      - portfolio_implication：≤35字，必须是持仓复核动作，不是市场评论
    - 不生成通用分析；每条都要对应一个具体的持仓复核场景
@@ -2816,10 +2817,10 @@ ${narrativeHistorySection}
   "default_expanded_bucket": "今日信号最强的资产类别",
   "asset_buckets": [
     {
-      "bucket": "美股|黄金|美债|汇率|大宗商品",
-      "thesis_check": "RM问客户的核心问题，疑问句，≤25字",
-      "today_signal": "必须包含今日真实数字的1句话，≤30字",
-      "portfolio_implication": "持仓行动含义，≤35字，以“若...”或动词开头"
+      “bucket”: “美股|港股|黄金|美债|汇率|大宗商品”,
+      “thesis_check”: “以'客户'开头的疑问句，≤25字，例如：客户持仓港股是基于南向资金还是盈利复苏逻辑？”,
+      “today_signal”: “必须包含今日真实数字的1句话，≤30字”,
+      “portfolio_implication”: “持仓行动含义，≤35字，以”若...”或动词开头”
     }
   ]
 }
@@ -2856,22 +2857,22 @@ ${narrativeHistorySection}
   "default_expanded_bucket": "今日信号最强的资产类别",
   "asset_buckets": [
     {
-      "bucket": "美股|黄金|美债|汇率|大宗商品",
-      "thesis_check": "RM问客户的核心问题，疑问句，≤25字",
-      "today_signal": "必须包含今日真实数字的1句话，≤30字",
-      "portfolio_implication": "持仓行动含义，≤35字，以若或动词开头"
+      “bucket”: “美股|港股|黄金|美债|汇率|大宗商品”,
+      “thesis_check”: “以客户开头的疑问句，≤25字”,
+      “today_signal”: “必须包含今日真实数字的1句话，≤30字”,
+      “portfolio_implication”: “持仓行动含义，≤35字，以若或动词开头”
     }
   ]
 }
 
 规则：
-- asset_buckets只包含今日有真实信号的资产（1-4个，不强行填满5个）
-- thesis_check必须是问句，引导RM思考客户的原始买入逻辑是否还成立
+- asset_buckets至少3个（美股、港股、黄金是PB客户核心持仓，除非无市场数据否则必须包含）
+- thesis_check必须以”客户”开头，禁止使用”您”，引导RM思考客户的原始买入逻辑是否还成立
 - today_signal中的数字必须来自下方提供的市场数据，不可编造
-- portfolio_implication不能是“关注走势”这类无行动含义的废话` },
+- portfolio_implication不能是”关注走势”这类无行动含义的废话` },
                     { role: 'user', content: userPrompt }
                 ],
-                max_tokens: 500,
+                max_tokens: 650,
                 temperature: 0.3
             })
         });
@@ -6052,47 +6053,76 @@ export async function getClientFocusMarketState(): Promise<ClientFocusMarketStat
     };
 }
 
-export async function getDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
-    const previousCache = dailyNarrativeCache.value;
+function isRenderableDailyNarrative(value: DailyMarketNarrative | null | undefined): value is DailyMarketNarrative {
+    return Boolean(
+        value
+        && Array.isArray((value as any).asset_buckets)
+        && (value as any).asset_buckets.length > 0
+        && typeof value.momentum_days === 'number'
+    );
+}
 
-    if (dailyNarrativeCache.value && dailyNarrativeCache.expiresAt > Date.now()) {
-        if (
-            !Array.isArray((dailyNarrativeCache.value as any).asset_buckets)
-            || typeof dailyNarrativeCache.value.momentum_days !== 'number'
-        ) {
-            dailyNarrativeCache.value = null;
-            dailyNarrativeCache.expiresAt = 0;
-        } else {
-            return dailyNarrativeCache.value;
+async function refreshDailyMarketNarrative(
+    fallback: DailyMarketNarrative | null
+): Promise<DailyMarketNarrative | null> {
+    if (dailyNarrativeRefreshPromise) {
+        return dailyNarrativeRefreshPromise;
+    }
+
+    dailyNarrativeRefreshPromise = (async () => {
+        if (dailyNarrativeCache.value?.ranked_slugs?.length) {
+            previousRankedSlugs = [...dailyNarrativeCache.value.ranked_slugs];
         }
-    }
 
-    if (dailyNarrativeCache.value?.ranked_slugs?.length) {
-        previousRankedSlugs = [...dailyNarrativeCache.value.ranked_slugs];
-    }
+        try {
+            const result = await generateDailyMarketNarrative();
+            if (!result) {
+                return fallback;
+            }
 
-    try {
-        const result = await generateDailyMarketNarrative();
-        if (result) {
             const today = new Date().toISOString().slice(0, 10);
             narrativeHistory = [
                 ...narrativeHistory.filter((record) => record.date !== today),
                 { date: today, primary_slug: result.primary_slug }
             ].slice(-7);
-            dailyNarrativeCache.value = {
+
+            const nextValue: DailyMarketNarrative = {
                 ...result,
                 momentum_days: computeMomentumDays(result.primary_slug, narrativeHistory),
                 generated_at: new Date().toISOString()
             };
+
+            dailyNarrativeCache.value = nextValue;
             dailyNarrativeCache.expiresAt = Date.now() + DAILY_NARRATIVE_CACHE_TTL_MS;
+            return nextValue;
+        } catch {
+            return fallback;
+        } finally {
+            dailyNarrativeRefreshPromise = null;
         }
-    } catch {
-        if (previousCache && Array.isArray((previousCache as any).asset_buckets)) {
-            return previousCache;
-        }
+    })();
+
+    return dailyNarrativeRefreshPromise;
+}
+
+export async function getDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
+    const cached = isRenderableDailyNarrative(dailyNarrativeCache.value) ? dailyNarrativeCache.value : null;
+
+    if (dailyNarrativeCache.value && !cached) {
+        dailyNarrativeCache.value = null;
+        dailyNarrativeCache.expiresAt = 0;
     }
 
-    return dailyNarrativeCache.value;
+    if (cached && dailyNarrativeCache.expiresAt > Date.now()) {
+        return cached;
+    }
+
+    if (cached) {
+        void refreshDailyMarketNarrative(cached);
+        return cached;
+    }
+
+    return refreshDailyMarketNarrative(null);
 }
 
 export async function getClientFocusDetail(slug: string): Promise<ClientFocusDetailResponse | null> {
