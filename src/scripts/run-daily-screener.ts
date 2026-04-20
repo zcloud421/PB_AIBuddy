@@ -297,7 +297,9 @@ async function main(): Promise<void> {
         }
 
         try {
+            console.log('[focus-daily] prewarm started');
             await getClientFocusList();
+            console.log('[focus-daily] focus topics cache warmed');
             const dailyNarrative = await getDailyMarketNarrative();
             if (dailyNarrative) {
                 console.log(
