@@ -243,8 +243,11 @@ export interface ClientFocusMiddleEastSignals {
 export interface DailyMarketNarrative {
     primary_slug: string;
     narrative: string;
-    rm_angle: string;
+    conversation_frame: string;
+    scenario_map: string[];
     ranked_slugs: string[];
+    rank_changes: Record<string, 'up' | 'down' | 'stable'>;
+    momentum_days: number;
     generated_at: string;
 }
 

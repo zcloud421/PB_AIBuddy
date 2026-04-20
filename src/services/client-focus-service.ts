@@ -302,6 +302,8 @@ const focusMarketChartCache = new Map<string, { expiresAt: number; value: Client
 const polymarketCache = new Map<string, { expiresAt: number; value: ClientFocusPolymarketResponse }>();
 const focusMarketStateCache = new Map<string, { expiresAt: number; value: ClientFocusMarketStateResponse }>();
 const dailyNarrativeCache = { expiresAt: 0, value: null as DailyMarketNarrative | null };
+let previousRankedSlugs: string[] = [];
+let narrativeHistory: Array<{ date: string; primary_slug: string }> = [];
 const DAILY_NARRATIVE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 interface EastMoneySouthboundRow {
@@ -2640,6 +2642,74 @@ function collectNarrativeTopics() {
         .filter((item): item is { slug: string; title: string; status: string; summary: string; latest_updates: string[] } => Boolean(item));
 }
 
+function computeMomentumDays(
+    slug: string,
+    history: Array<{ date: string; primary_slug: string }>
+): number {
+    const sorted = [...history].sort((a, b) => b.date.localeCompare(a.date));
+    let count = 0;
+
+    for (const record of sorted) {
+        if (record.primary_slug === slug) {
+            count += 1;
+        } else {
+            break;
+        }
+    }
+
+    return Math.max(1, count);
+}
+
+function buildDailyNarrativeMarketSignalsSection(
+    marketSnapshot: ClientFocusMarketStateResponse | null
+): string {
+    const indices = marketSnapshot?.indices ?? [];
+    if (indices.length === 0) {
+        return '';
+    }
+
+    const significantSignals = indices
+        .filter((item) => {
+            const change = item.change_pct;
+            if (change === null || change === undefined || Number.isNaN(change)) {
+                return false;
+            }
+
+            if (item.code === 'TNX') {
+                return Math.abs(change) >= 5;
+            }
+
+            if (['SPX', 'NDX', 'HSI', 'HSTECH'].includes(item.code)) {
+                return Math.abs(change) >= 1.0;
+            }
+
+            if (['GOLD', 'SILVER', 'OIL', 'BRENT', 'NATGAS'].includes(item.code)) {
+                return Math.abs(change) >= 2.0;
+            }
+
+            if (['USDCNH', 'USDJPY', 'USDCHF', 'DXY'].includes(item.code)) {
+                return Math.abs(change) >= 0.3;
+            }
+
+            return false;
+        })
+        .sort((left, right) => Math.abs(right.change_pct ?? 0) - Math.abs(left.change_pct ?? 0));
+
+    if (significantSignals.length === 0) {
+        return '';
+    }
+
+    const lines = significantSignals.map((item) => {
+        const change = item.change_pct ?? 0;
+        if (item.code === 'TNX') {
+            return `${item.name} ${change >= 0 ? '+' : ''}${change.toFixed(1)}bps`;
+        }
+        return `${item.name} ${change >= 0 ? '+' : ''}${change.toFixed(2)}%`;
+    });
+
+    return `今日显著市场信号（change_pct 仅供归因，不代表方向建议）：\n${lines.join('\n')}`;
+}
+
 async function generateDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
     let cachedTopics = collectNarrativeTopics();
 
@@ -2659,37 +2729,53 @@ async function generateDailyMarketNarrative(): Promise<DailyMarketNarrative | nu
         return null;
     }
 
+    const marketSnapshot = await fetchClientFocusMarketStateSnapshot().catch(() => null);
+
     const topicSection = cachedTopics
         .map(
             (item, index) =>
                 `${index + 1}. slug=${item.slug}\n标题=${item.title}\n状态=${item.status || '无'}\n摘要=${item.summary || '无'}\n最新事件=${item.latest_updates.join('；') || '无'}`
         )
         .join('\n\n');
+    const marketSignalsSection = buildDailyNarrativeMarketSignalsSection(marketSnapshot);
+    const narrativeHistorySection =
+        narrativeHistory.map((record) => `${record.date}: ${record.primary_slug}`).join('\n') || '暂无历史';
 
     const userPrompt = `
-当前所有活跃客户焦点主题摘要如下：
+你是香港私人银行资深策略师，职责是帮助 RM 每天识别真正影响客户 SAA 组合的结构性变量，而不是追逐 headline。
+
+当前活跃客户焦点主题：
 
 ${topicSection}
 
-任务：
-1. 判断今天哪个主题对风险资产定价影响最大（primary_slug）
-2. 用1-2句话描述今天市场在定价什么（narrative，25-40字，主语为“市场”或“投资者”）
-3. 生成一句 RM 今日分析视角（rm_angle，20-40字）：基于今天最关键的宏观信号，给 RM 一个分析框架或时机判断，让他们自己决定怎么跟客户展开。主语是市场或资产，不是客户组合，不给买卖方向，不用问句。
-4. 将所有主题按今日市场影响力从高到低排序（ranked_slugs）
+${marketSignalsSection}
 
-输出JSON：
+叙事连续主导天数参考（用于判断结构性 vs 噪音）：
+${narrativeHistorySection}
+
+任务：
+1. 基于上述跨资产信号，判断今天哪个叙事框架解释力最强（primary_slug）
+   - 如果当前 primary_slug 已连续主导多天，需要有新的强信号才能切换，否则保持原叙事
+   - 单日价格跳动不足以触发叙事切换，除非同时有多个资产类别同向确认
+2. 用 1-2 句话描述今天市场在定价什么（narrative，25-40字，主语为“市场”或“投资者”）
+   - 禁止：“风险升温” “情绪波动” “不确定性” “引发关注”
+3. 生成一句 RM 沟通抓手（conversation_frame，20-40字）
+   - 必须使用 SAA 回顾句型：“现在是和客户回顾/核对 [资产类别]，确认它是否仍然反映客户对 [判断/thesis] 的信念”
+   - 禁止：问句、“建议”、“适合”、“应当”、“可以考虑”、方向性词汇、新的配置建议
+   - 示例：“现在是和客户核对黄金仓位，确认它是否仍然反映其对实际利率路径的判断”
+4. 生成 2-3 条情景映射（scenario_map，字符串数组）
+   - 格式：“如果 [事件/条件] → [先看哪类资产/传导方向]”
+   - 每条 15-30 字，只描述传导路径，不给结论或建议
+5. 将所有主题按今日市场影响力从高到低排序（ranked_slugs）
+
+输出 JSON（只输出 JSON，不加其他文字）：
 {
   "primary_slug": "...",
   "narrative": "...",
-  "rm_angle": "...",
+  "conversation_frame": "...",
+  "scenario_map": ["如果 ... → ...", "如果 ... → ..."],
   "ranked_slugs": ["...", "..."]
 }
-
-写作约束：
-- narrative 禁止：“风险升温”“情绪波动”“不确定性”“引发关注”
-- rm_angle 禁止：问句、“建议”、“适合”、“应当”、“可以考虑”、方向性词汇
-- rm_angle 示例：“停火窗口临近叠加油价大跌，中东主题持仓的风险收益比正在重新定价。”
-- 只输出 JSON
 `.trim();
 
     try {
@@ -2705,7 +2791,7 @@ ${topicSection}
                     { role: 'system', content: '你是香港私人银行首席市场策略师，每天早上为RM团队提供一句话市场定性。' },
                     { role: 'user', content: userPrompt }
                 ],
-                max_tokens: 260,
+                max_tokens: 400,
                 temperature: 0.3
             })
         });
@@ -2722,7 +2808,8 @@ ${topicSection}
             !parsed
             || typeof parsed.primary_slug !== 'string'
             || typeof parsed.narrative !== 'string'
-            || typeof parsed.rm_angle !== 'string'
+            || typeof parsed.conversation_frame !== 'string'
+            || !Array.isArray(parsed.scenario_map)
             || !Array.isArray(parsed.ranked_slugs)
         ) {
             return null;
@@ -2734,11 +2821,31 @@ ${topicSection}
             return null;
         }
 
+        const rank_changes: Record<string, 'up' | 'down' | 'stable'> = {};
+        if (previousRankedSlugs.length > 0) {
+            for (const slug of ranked_slugs) {
+                const prev = previousRankedSlugs.indexOf(slug);
+                const curr = ranked_slugs.indexOf(slug);
+                if (prev === -1) {
+                    rank_changes[slug] = 'stable';
+                } else if (curr < prev) {
+                    rank_changes[slug] = 'up';
+                } else if (curr > prev) {
+                    rank_changes[slug] = 'down';
+                } else {
+                    rank_changes[slug] = 'stable';
+                }
+            }
+        }
+
         return {
             primary_slug: parsed.primary_slug,
             narrative: parsed.narrative.trim(),
-            rm_angle: parsed.rm_angle.trim(),
+            conversation_frame: parsed.conversation_frame.trim(),
+            scenario_map: parsed.scenario_map.filter((s): s is string => typeof s === 'string').map((s) => s.trim()),
             ranked_slugs,
+            rank_changes,
+            momentum_days: 1,
             generated_at: new Date().toISOString(),
         };
     } catch {
@@ -5859,12 +5966,30 @@ export async function getClientFocusMarketState(): Promise<ClientFocusMarketStat
 
 export async function getDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
     if (dailyNarrativeCache.value && dailyNarrativeCache.expiresAt > Date.now()) {
-        return dailyNarrativeCache.value;
+        if (!dailyNarrativeCache.value.conversation_frame || typeof dailyNarrativeCache.value.momentum_days !== 'number') {
+            dailyNarrativeCache.value = null;
+            dailyNarrativeCache.expiresAt = 0;
+        } else {
+            return dailyNarrativeCache.value;
+        }
+    }
+
+    if (dailyNarrativeCache.value?.ranked_slugs?.length) {
+        previousRankedSlugs = [...dailyNarrativeCache.value.ranked_slugs];
     }
 
     const result = await generateDailyMarketNarrative();
     if (result) {
-        dailyNarrativeCache.value = { ...result, generated_at: new Date().toISOString() };
+        const today = new Date().toISOString().slice(0, 10);
+        narrativeHistory = [
+            ...narrativeHistory.filter((record) => record.date !== today),
+            { date: today, primary_slug: result.primary_slug }
+        ].slice(-7);
+        dailyNarrativeCache.value = {
+            ...result,
+            momentum_days: computeMomentumDays(result.primary_slug, narrativeHistory),
+            generated_at: new Date().toISOString()
+        };
         dailyNarrativeCache.expiresAt = Date.now() + DAILY_NARRATIVE_CACHE_TTL_MS;
     }
 
