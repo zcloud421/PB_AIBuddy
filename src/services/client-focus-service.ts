@@ -2702,49 +2702,48 @@ function buildDailyNarrativeMarketSignalsSection(
     return `今日跨资产变动（仅供叙事归因，不代表方向建议）：\n${lines.join('\n')}`;
 }
 
-const DAILY_NARRATIVE_ALLOWED_SAA_BUCKETS = ['美股', '港股', '美债', '现金管理', '黄金', '汇率', '另类', '贵金属'] as const;
-const DAILY_NARRATIVE_BANNED_DIRECT_ASSETS = ['原油', 'WTI', 'Brent', '布伦特', '天然气', '白银', '铜'] as const;
+const DAILY_NARRATIVE_BUCKETS = ['美股', '黄金', '美债', '汇率', '大宗商品'] as const;
 
-function buildFallbackConversationFrame(primarySlug: string): string {
-    switch (primarySlug) {
-        case 'middle-east-tensions':
-            return '适合和客户回顾美股与美债的仓位，确认它们是否仍然反映其对地缘风险溢价与利率路径的判断。';
-        case 'gold-repricing':
-            return '适合和客户回顾黄金与汇率的仓位，确认它们是否仍然反映其对实际利率路径与美元方向的判断。';
-        case 'usd-strength':
-            return '适合和客户回顾汇率与港股的仓位，确认它们是否仍然反映其对美元路径与中国风险偏好的判断。';
-        case 'hk-market-sentiment':
-            return '适合和客户回顾港股与现金管理仓位，确认它们是否仍然反映其对中国风险偏好与流动性节奏的判断。';
-        case 'private-credit-stress':
-            return '适合和客户回顾美债与美股的仓位，确认它们是否仍然反映其对信用压力与风险偏好的判断。';
-        default:
-            return '适合和客户回顾股票与债券的仓位，确认它们是否仍然反映其对增长路径与利率环境的判断。';
-    }
+function isValidDailyNarrativeBucket(
+    value: unknown
+): value is DailyMarketNarrative['default_expanded_bucket'] {
+    return typeof value === 'string' && DAILY_NARRATIVE_BUCKETS.includes(value as typeof DAILY_NARRATIVE_BUCKETS[number]);
 }
 
-function normalizeConversationFrame(
-    frame: string,
-    primarySlug: string
-): string {
-    const normalized = frame
-        .trim()
-        .replace(/^现在是和客户(回顾|核对)/u, '适合和客户$1')
-        .replace(/^现在适合和客户/u, '适合和客户');
-
-    const startsWithValidVerb =
-        normalized.startsWith('适合和客户回顾') || normalized.startsWith('适合和客户核对');
-    const hasAllowedBucket = DAILY_NARRATIVE_ALLOWED_SAA_BUCKETS.some((bucket) =>
-        normalized.includes(bucket)
-    );
-    const hasBannedDirectAsset = DAILY_NARRATIVE_BANNED_DIRECT_ASSETS.some((asset) =>
-        normalized.includes(asset)
-    );
-
-    if (!startsWithValidVerb || !hasAllowedBucket || hasBannedDirectAsset) {
-        return buildFallbackConversationFrame(primarySlug);
+function normalizeAssetBuckets(
+    assetBuckets: unknown
+): DailyMarketNarrative['asset_buckets'] {
+    if (!Array.isArray(assetBuckets)) {
+        return [];
     }
 
-    return normalized;
+    return assetBuckets
+        .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+        .map((item) => ({
+            bucket: item.bucket,
+            thesis_check: item.thesis_check,
+            today_signal: item.today_signal,
+            portfolio_implication: item.portfolio_implication
+        }))
+        .filter(
+            (
+                item
+            ): item is DailyMarketNarrative['asset_buckets'][number] =>
+                isValidDailyNarrativeBucket(item.bucket)
+                && typeof item.thesis_check === 'string'
+                && typeof item.today_signal === 'string'
+                && typeof item.portfolio_implication === 'string'
+                && item.thesis_check.trim().length > 0
+                && item.today_signal.trim().length > 0
+                && item.portfolio_implication.trim().length > 0
+        )
+        .slice(0, 4)
+        .map((item) => ({
+            bucket: item.bucket,
+            thesis_check: item.thesis_check.trim(),
+            today_signal: item.today_signal.trim(),
+            portfolio_implication: item.portfolio_implication.trim()
+        }));
 }
 
 async function generateDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
@@ -2794,68 +2793,36 @@ ${narrativeHistorySection}
 1. 基于上述跨资产信号，判断今天哪个叙事框架解释力最强（primary_slug）
    - 如果当前 primary_slug 已连续主导多天，需要有新的强信号才能切换，否则保持原叙事
    - 单日价格跳动不足以触发叙事切换，除非同时有多个资产类别同向确认
-2. 用 1-2 句话描述今天市场在定价什么（narrative，25-40字，主语为“市场”或“投资者”）
-   - 禁止：“风险升温” “情绪波动” “不确定性” “引发关注”
-3. 生成一句 RM 沟通抓手（conversation_frame，30-55字）
-   结构必须是两段：
-   第一段（10-15字）：引用今日跨资产变动中幅度最大、对 SAA 组合最有意义的一个具体信号，
-     用数字或方向词描述（如“油价今日跌逾12%”、“美股近5日连创新高”、“黄金今日跌1.5%”），
-     作为 RM 今天打电话的理由。
-   第二段（20-40字）：SAA 回顾句型——
-     “是和客户核对 [资产桶A] 与 [资产桶B] 仓位背后判断是否仍然成立的时机，
-      不是让客户操作，而是确认原先的配置 thesis 是基于 [判断A] 还是 [判断B]。”
+2. 用 1 句话描述今天市场在定价什么（narrative，≤40字）
+3. 生成 1-4 个资产桶审视卡片（asset_buckets）
+   - bucket 只能从：美股、黄金、美债、汇率、大宗商品 中选择
+   - 只保留今日有真实信号的资产桶，不强行凑满 5 个
+   - 每个 bucket 必须包含：
+     - thesis_check：疑问句，≤25字，帮助 RM 问出“客户当初买这个资产的 thesis 还成立吗”
+     - today_signal：≤30字，必须包含今日真实数字，且数字必须来自上方市场数据
+     - portfolio_implication：≤35字，必须是持仓复核动作，不是市场评论
+   - 不生成通用分析；每条都要对应一个具体的持仓复核场景
+4. 选择今日信号最强的资产类别作为 default_expanded_bucket
+5. 将所有主题按今日客户关注度排序（ranked_slugs）
 
-   资产桶白名单（第二段只能用这些）：
-     美股、港股、美债、黄金、汇率、现金管理、另类资产
-   原油、白银、天然气等单一商品只能出现在第一段作为信号驱动词，
-     不能出现在第二段作为客户持仓对象。
-
-   禁止：问句、“建议”、“适合”、“应当”、“可以考虑”、方向性词汇
-
-   示例（好的）：
-     “油价今日跌逾12%，是和客户核对黄金与美债仓位背后判断是否仍然成立的时机，
-      不是让客户操作，而是确认原先的配置 thesis 是基于地缘风险溢价还是实际利率保护。”
-     “美股近5日连创新高而今日黄金同步回落，是和客户核对股票与黄金仓位比例的时机，
-      确认原先的判断是基于避险需求还是增长预期的相对权重。”
-
-   示例（不好的）：
-     “适合和客户回顾黄金与汇率的仓位...” ← 没有今日锚点，任何一天都成立，不 actionable
-     “现在是和客户核对黄金仓位...” ← 缺少今日具体信号，RM 不知道为什么今天要打电话
-4. 生成 2-3 条情景映射（scenario_map，字符串数组）
-   格式：如果 [情景条件] → [这是和客户核对哪类仓位 thesis 的时机]
-
-   重要：不是写宏观传导路径，而是写组合 review 触发条件。
-   每条的后半句必须是“是和客户核对 [资产桶] 的配置逻辑/判断是否仍然成立的时机”，
-   而不是“先看 [资产] 的传导至 [另一资产]”。
-
-   每条 20-35 字。
-
-   示例（好的）：
-     “如果油价维持低位超过5日 → 是和客户核对通胀保护资产配置逻辑是否仍然成立的时机”
-     “如果美伊谈判取得实质进展 → 是和客户核对黄金仓位背后避险 thesis 是否需要重新审视的时机”
-     “如果美股继续新高而港股继续分化 → 是和客户核对中美股票仓位比例是否仍反映原先判断的时机”
-
-   示例（不好的）：
-     “如果霍尔木兹海峡航运中断 → 先看原油价格与美元指数传导至通胀预期”
-     ← 这是宏观课本语言，RM 无法直接拿来用
-5. 将所有主题按今日市场影响力从高到低排序（ranked_slugs）
-
-输出 JSON（只输出 JSON，不加其他文字）：
+输出 JSON（只输出 JSON，不加任何额外文字）：
 {
-  "primary_slug": "...",
-  "narrative": "...",
-  "conversation_frame": "...",
-  "scenario_map": ["如果 ... → ...", "如果 ... → ..."],
-  "ranked_slugs": ["...", "..."]
+  "regime_label": "2-4字的宏观环境标签，例如：地缘重燃、滞胀担忧、流动性收紧",
+  "primary_slug": "最能解释当前跨资产走势的focus topic slug",
+  "narrative": "一句话解释今日跨资产走势的统一宏观逻辑（≤40字）",
+  "ranked_slugs": ["slug1", "slug2"],
+  "rank_changes": {"slug": "up|down|stable"},
+  "momentum_days": 2,
+  "default_expanded_bucket": "今日信号最强的资产类别",
+  "asset_buckets": [
+    {
+      "bucket": "美股|黄金|美债|汇率|大宗商品",
+      "thesis_check": "RM问客户的核心问题，疑问句，≤25字",
+      "today_signal": "必须包含今日真实数字的1句话，≤30字",
+      "portfolio_implication": "持仓行动含义，≤35字，以“若...”或动词开头"
+    }
+  ]
 }
-
-示例（好的）：
-  “适合和客户回顾美股与美债的仓位，确认它们是否仍然反映其对地缘风险溢价与利率路径的判断”
-  “适合和客户回顾汇率与黄金的仓位，确认它们是否仍然反映其对美元路径与避险需求的判断”
-  “适合和客户回顾港股与现金管理仓位，确认它们是否仍然反映其对中国风险偏好与流动性节奏的判断”
-
-示例（不好的，太窄）：
-  “适合和客户回顾原油及黄金相关敞口...”
 `.trim();
 
     try {
@@ -2868,10 +2835,43 @@ ${narrativeHistorySection}
             body: JSON.stringify({
                 model: 'deepseek-chat',
                 messages: [
-                    { role: 'system', content: '你是香港私人银行首席市场策略师，每天早上为RM团队提供一句话市场定性。' },
+                    { role: 'system', content: `你是一位私人银行策略师，为RM（关系经理）准备客户面谈前的资产审视工具。
+
+你的输出将渲染成一个按大类资产折叠的卡片，RM根据客户持仓选择展开哪个资产类别。
+
+核心哲学：
+- 这是SAA持仓审视工具，不是交易信号
+- 每个资产类别的内容必须帮助RM问出"客户当初买这个资产的thesis还成立吗"
+- today_signal必须锚定今日真实数据点（使用提供的市场数据中的具体数字）
+- 不生成通用分析；每条都要对应一个具体的持仓复核场景
+
+输出格式（严格JSON，不加任何额外文字）：
+{
+  "regime_label": "2-4字的宏观环境标签，例如：地缘重燃、滞胀担忧、流动性收紧",
+  "primary_slug": "最能解释当前跨资产走势的focus topic slug",
+  "narrative": "一句话解释今日跨资产走势的统一宏观逻辑（≤40字）",
+  "ranked_slugs": ["slug1", "slug2", "按客户关注度排序"],
+  "rank_changes": {"slug": "up|down|stable"},
+  "momentum_days": 2,
+  "default_expanded_bucket": "今日信号最强的资产类别",
+  "asset_buckets": [
+    {
+      "bucket": "美股|黄金|美债|汇率|大宗商品",
+      "thesis_check": "RM问客户的核心问题，疑问句，≤25字",
+      "today_signal": "必须包含今日真实数字的1句话，≤30字",
+      "portfolio_implication": "持仓行动含义，≤35字，以若或动词开头"
+    }
+  ]
+}
+
+规则：
+- asset_buckets只包含今日有真实信号的资产（1-4个，不强行填满5个）
+- thesis_check必须是问句，引导RM思考客户的原始买入逻辑是否还成立
+- today_signal中的数字必须来自下方提供的市场数据，不可编造
+- portfolio_implication不能是“关注走势”这类无行动含义的废话` },
                     { role: 'user', content: userPrompt }
                 ],
-                max_tokens: 400,
+                max_tokens: 500,
                 temperature: 0.3
             })
         });
@@ -2886,20 +2886,27 @@ ${narrativeHistorySection}
         const parsed = safeParseJson(payload.choices?.[0]?.message?.content ?? '') as Partial<DailyMarketNarrative> | null;
         if (
             !parsed
+            || typeof parsed.regime_label !== 'string'
             || typeof parsed.primary_slug !== 'string'
             || typeof parsed.narrative !== 'string'
-            || typeof parsed.conversation_frame !== 'string'
-            || !Array.isArray(parsed.scenario_map)
             || !Array.isArray(parsed.ranked_slugs)
+            || !Array.isArray((parsed as any).asset_buckets)
         ) {
-            return null;
+            throw new Error('Invalid daily narrative schema');
         }
 
         const validSlugs = new Set(FOCUS_TOPICS.map((topic) => topic.slug));
         const ranked_slugs = parsed.ranked_slugs.filter((slug): slug is string => typeof slug === 'string' && validSlugs.has(slug));
         if (!validSlugs.has(parsed.primary_slug)) {
-            return null;
+            throw new Error('Invalid primary slug');
         }
+        const asset_buckets = normalizeAssetBuckets((parsed as any).asset_buckets);
+        if (asset_buckets.length < 1) {
+            throw new Error('Missing asset buckets');
+        }
+        const default_expanded_bucket = isValidDailyNarrativeBucket(parsed.default_expanded_bucket)
+            ? parsed.default_expanded_bucket
+            : asset_buckets[0].bucket;
 
         const rank_changes: Record<string, 'up' | 'down' | 'stable'> = {};
         if (previousRankedSlugs.length > 0) {
@@ -2920,16 +2927,17 @@ ${narrativeHistorySection}
 
         return {
             primary_slug: parsed.primary_slug,
+            regime_label: parsed.regime_label.trim(),
             narrative: parsed.narrative.trim(),
-            conversation_frame: normalizeConversationFrame(parsed.conversation_frame, parsed.primary_slug),
-            scenario_map: parsed.scenario_map.filter((s): s is string => typeof s === 'string').map((s) => s.trim()),
             ranked_slugs,
             rank_changes,
             momentum_days: 1,
+            asset_buckets,
+            default_expanded_bucket,
             generated_at: new Date().toISOString(),
         };
-    } catch {
-        return null;
+    } catch (error) {
+        throw error;
     }
 }
 
@@ -6045,19 +6053,12 @@ export async function getClientFocusMarketState(): Promise<ClientFocusMarketStat
 }
 
 export async function getDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
-    if (dailyNarrativeCache.value && dailyNarrativeCache.expiresAt > Date.now()) {
-        const normalizedCachedFrame = dailyNarrativeCache.value.conversation_frame
-            ? normalizeConversationFrame(
-                dailyNarrativeCache.value.conversation_frame,
-                dailyNarrativeCache.value.primary_slug
-            )
-            : null;
+    const previousCache = dailyNarrativeCache.value;
 
+    if (dailyNarrativeCache.value && dailyNarrativeCache.expiresAt > Date.now()) {
         if (
-            !dailyNarrativeCache.value.conversation_frame
+            !Array.isArray((dailyNarrativeCache.value as any).asset_buckets)
             || typeof dailyNarrativeCache.value.momentum_days !== 'number'
-            || !normalizedCachedFrame
-            || normalizedCachedFrame !== dailyNarrativeCache.value.conversation_frame
         ) {
             dailyNarrativeCache.value = null;
             dailyNarrativeCache.expiresAt = 0;
@@ -6070,19 +6071,25 @@ export async function getDailyMarketNarrative(): Promise<DailyMarketNarrative | 
         previousRankedSlugs = [...dailyNarrativeCache.value.ranked_slugs];
     }
 
-    const result = await generateDailyMarketNarrative();
-    if (result) {
-        const today = new Date().toISOString().slice(0, 10);
-        narrativeHistory = [
-            ...narrativeHistory.filter((record) => record.date !== today),
-            { date: today, primary_slug: result.primary_slug }
-        ].slice(-7);
-        dailyNarrativeCache.value = {
-            ...result,
-            momentum_days: computeMomentumDays(result.primary_slug, narrativeHistory),
-            generated_at: new Date().toISOString()
-        };
-        dailyNarrativeCache.expiresAt = Date.now() + DAILY_NARRATIVE_CACHE_TTL_MS;
+    try {
+        const result = await generateDailyMarketNarrative();
+        if (result) {
+            const today = new Date().toISOString().slice(0, 10);
+            narrativeHistory = [
+                ...narrativeHistory.filter((record) => record.date !== today),
+                { date: today, primary_slug: result.primary_slug }
+            ].slice(-7);
+            dailyNarrativeCache.value = {
+                ...result,
+                momentum_days: computeMomentumDays(result.primary_slug, narrativeHistory),
+                generated_at: new Date().toISOString()
+            };
+            dailyNarrativeCache.expiresAt = Date.now() + DAILY_NARRATIVE_CACHE_TTL_MS;
+        }
+    } catch {
+        if (previousCache && Array.isArray((previousCache as any).asset_buckets)) {
+            return previousCache;
+        }
     }
 
     return dailyNarrativeCache.value;
