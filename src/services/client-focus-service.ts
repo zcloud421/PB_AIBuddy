@@ -301,7 +301,7 @@ const focusChainCache = new Map<string, { expiresAt: number; value: ClientFocusT
 const focusMarketChartCache = new Map<string, { expiresAt: number; value: ClientFocusMarketChart | null }>();
 const polymarketCache = new Map<string, { expiresAt: number; value: ClientFocusPolymarketResponse }>();
 const focusMarketStateCache = new Map<string, { expiresAt: number; value: ClientFocusMarketStateResponse }>();
-const DAILY_NARRATIVE_CACHE_SCHEMA_VERSION = 2;
+const DAILY_NARRATIVE_CACHE_SCHEMA_VERSION = 3;
 const dailyNarrativeCache = {
     expiresAt: 0,
     schemaVersion: DAILY_NARRATIVE_CACHE_SCHEMA_VERSION,
