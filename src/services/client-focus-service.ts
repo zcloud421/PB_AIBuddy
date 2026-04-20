@@ -3086,6 +3086,10 @@ function buildTreasuryBucket(
     primarySlug: string
 ): DailyMarketNarrative['asset_buckets'][number] | null {
     const tnx = marketSnapshot?.indices.find((item) => item.code === 'TNX');
+    if (!tnx) {
+        return null;
+    }
+
     const oil = marketSnapshot?.indices.find((item) => item.code === 'OIL') ?? marketSnapshot?.indices.find((item) => item.code === 'BRENT');
     const spx = marketSnapshot?.indices.find((item) => item.code === 'SPX');
     const ndx = marketSnapshot?.indices.find((item) => item.code === 'NDX');
@@ -3097,14 +3101,10 @@ function buildTreasuryBucket(
         || (typeof fiveDayChange === 'number' && !Number.isNaN(fiveDayChange) && Math.abs(fiveDayChange) >= 5)
         || ['middle-east-tensions', 'gold-repricing', 'usd-strength', 'private-credit-stress'].includes(primarySlug);
 
-    if (!hasSignal) {
-        return null;
-    }
-
     const todaySignal = formatMonitoringContext(tnx) ?? '美债收益率路径出现变化，利率预期重新定价。';
 
     let thesisCheck = '客户配置美债是基于避险保护，还是押注降息路径兑现？';
-    let portfolioImplication = '若客户持有美债，收益率回落意味着久期压力阶段性缓解，可先确认债券基金与长期国债ETF是否仍服务防守配置。';
+    let portfolioImplication = '若客户持有美债，可把它先当作组合里的核心利率桶，确认债券基金与长期国债ETF是否仍承担防守与票息配置角色。';
 
     const oilDown = typeof oil?.change_pct === 'number' && oil.change_pct <= -3;
     const oilUp = typeof oil?.change_pct === 'number' && oil.change_pct >= 3;
@@ -3117,22 +3117,36 @@ function buildTreasuryBucket(
     const tnxDown = typeof todayChange === 'number' && todayChange <= -4;
     const tnxUp = typeof todayChange === 'number' && todayChange >= 4;
     const dxyUp = typeof dxy?.change_pct === 'number' && dxy.change_pct >= 0.25;
+    const dxyDown = typeof dxy?.change_pct === 'number' && dxy.change_pct <= -0.25;
+    const longEndStillElevated = typeof tnx?.change_ytd_pct === 'number' && tnx.change_ytd_pct >= 25;
+    const longEndSoftenedYtd = typeof tnx?.change_ytd_pct === 'number' && tnx.change_ytd_pct <= -15;
+    const strongFiveDayRelief = typeof fiveDayChange === 'number' && fiveDayChange <= -8;
+    const strongFiveDayBackup = typeof fiveDayChange === 'number' && fiveDayChange >= 8;
 
-    if ((primarySlug === 'middle-east-tensions' && tnxDown) || (equityRiskOff && tnxDown)) {
-        thesisCheck = '客户配置美债是为了避险缓冲，还是提前布局久期反弹？';
-        portfolioImplication = '若客户持有美债，当前更像避险买盘压低收益率，IG债券、债券基金与长期国债ETF的防守价值重新抬升。';
-    } else if (oilDown && tnxDown) {
-        thesisCheck = '客户配置美债是押注通胀回落，还是为了阶段性久期修复？';
-        portfolioImplication = '若客户持有美债，当前更像油价回落后通胀压力缓解，久期资产的阶段性压力正在释放。';
-    } else if (oilUp && tnxUp) {
-        thesisCheck = '客户配置美债时，是否低估了油价重新推升通胀预期的风险？';
-        portfolioImplication = '若客户持有美债，需先判断这轮收益率反弹是否由油价与通胀担忧驱动，长久期债券回撤会更直接。';
-    } else if (tnxUp && dxyUp && !oilUp) {
-        thesisCheck = '客户配置美债是基于降息判断，还是默认长端供给压力会回落？';
+    if (!hasSignal) {
+        thesisCheck = '客户配置美债时，更看重票息防守，还是中期久期判断？';
+        portfolioImplication = '若客户持有美债，当前利率波动仍温和，更适合作为核心配置桶持续跟踪，而不是仅在大波动日才复核。';
+    } else if (oilDown && (tnxDown || strongFiveDayRelief)) {
+        thesisCheck = '客户配置美债时，押注的是通胀回落，还是单纯把它当防守仓位？';
+        portfolioImplication = '若客户持有美债，当前更像油价回落后通胀溢价缓解，久期压力阶段性释放，IG债券与长期国债ETF更直接受益。';
+    } else if (oilUp && (tnxUp || strongFiveDayBackup)) {
+        thesisCheck = '客户配置美债时，是否低估了油价反弹对通胀与久期的再压制？';
+        portfolioImplication = '若客户持有美债，当前更像油价重新推升通胀担忧，长久期回撤会更直接，不宜把利率上行简单理解为噪音。';
+    } else if ((primarySlug === 'middle-east-tensions' || equityRiskOff) && tnxDown) {
+        thesisCheck = '客户配置美债是为了对冲风险资产波动，还是为了提前做多久期？';
+        portfolioImplication = '若客户持有美债，当前更像避险买盘压低收益率，债券基金与长期国债ETF的防守价值重新抬升。';
+    } else if ((dxyDown || primarySlug === 'private-credit-stress') && tnxDown) {
+        thesisCheck = '客户配置美债是押注联储路径前移，还是为了给组合增加流动性缓冲？';
+        portfolioImplication = '若客户持有美债，当前更像联储路径重新前移带来的久期受益，可确认债券仓位是否仍符合 house view 的久期方向。';
+    } else if ((tnxUp || strongFiveDayBackup) && (dxyUp || longEndStillElevated)) {
+        thesisCheck = '客户配置美债是基于降息预期，还是默认长端供给与财政压力会回落？';
         portfolioImplication = '若客户持有美债，当前更像财政供给与term premium重新主导长端，久期仓位不宜只按降息逻辑理解。';
-    } else if (tnxDown && equityRiskOn) {
-        thesisCheck = '客户配置美债是为了锁定票息，还是押注联储路径重新前移？';
-        portfolioImplication = '若客户持有美债，当前更像在风险资产反弹中利率压力同步缓解，可确认债券仓位是否仍服务 house view 的久期方向。';
+    } else if ((tnxDown || strongFiveDayRelief) && equityRiskOn && !oilDown) {
+        thesisCheck = '客户配置美债是为了锁定票息，还是为股票仓位提供利率对冲？';
+        portfolioImplication = '若客户持有美债，当前更像在风险资产回稳中利率压力同步缓解，适合确认债券仓位是否仍承担组合缓冲角色。';
+    } else if (longEndSoftenedYtd && !tnxUp) {
+        thesisCheck = '客户配置美债是为了中期久期收益，还是仅把它视为短期避险工具？';
+        portfolioImplication = '若客户持有美债，年内收益率已从高位明显回落，当前更适合核对久期仓位是否已兑现原先判断，而非继续机械加码。';
     }
 
     if (primarySlug === 'usd-strength') {
@@ -3226,7 +3240,7 @@ function ensurePriorityAssetBuckets(
 ): DailyMarketNarrative['asset_buckets'] {
     const nextBuckets = [...assetBuckets];
 
-    // Deterministically inject 美债 if needed
+    // Deterministically inject 美债 as a PB core bucket
     const treasuryBucket = buildTreasuryBucket(marketSnapshot, primarySlug);
     if (treasuryBucket && !nextBuckets.some((item) => item.bucket === '美债')) {
         if (nextBuckets.length < 5) {
@@ -3235,6 +3249,11 @@ function ensurePriorityAssetBuckets(
             const commodityIndex = nextBuckets.findIndex((item) => item.bucket === '大宗商品');
             if (commodityIndex !== -1) {
                 nextBuckets.splice(commodityIndex, 1, treasuryBucket);
+            } else {
+                const fxIndex = nextBuckets.findIndex((item) => item.bucket === '汇率');
+                if (fxIndex !== -1) {
+                    nextBuckets.splice(fxIndex, 1, treasuryBucket);
+                }
             }
         }
     }
@@ -3245,7 +3264,7 @@ function ensurePriorityAssetBuckets(
         if (nextBuckets.length < 5) {
             nextBuckets.push(fxBucket);
         } else {
-            // Replace 大宗商品 if present, otherwise don't force it in
+            // 汇率不是核心桶，只替换大宗商品，不挤掉美债
             const commodityIndex = nextBuckets.findIndex((item) => item.bucket === '大宗商品');
             if (commodityIndex !== -1) {
                 nextBuckets.splice(commodityIndex, 1, fxBucket);
@@ -3253,7 +3272,9 @@ function ensurePriorityAssetBuckets(
         }
     }
 
-    return DAILY_NARRATIVE_BUCKETS
+    const orderedBuckets = ['美股', '港股', '美债', '黄金', '汇率', '大宗商品'] as const;
+
+    return orderedBuckets
         .filter((bucket) => nextBuckets.some((item) => item.bucket === bucket))
         .map((bucket) => nextBuckets.find((item) => item.bucket === bucket)!)
         .slice(0, 5);
@@ -3329,7 +3350,7 @@ ${narrativeHistorySection}
 2. 用 1 句话描述今天市场在定价什么（narrative，≤40字）
 3. 生成 3-5 个资产桶审视卡片（asset_buckets）
    - bucket 只能从：美股、港股、黄金、美债、汇率、大宗商品 中选择
-   - 必须至少生成 3 个桶（美股、港股、黄金 是 PB 客户持仓最重的资产，除非信号极弱且没有任何复核意义才可省略）
+   - 必须至少生成 3 个桶；PB 客户的核心配置桶优先级应为：美股、港股、美债，其次才是黄金；大宗商品不是默认核心桶
    - 每个 bucket 必须包含：
      - thesis_check：疑问句，≤25字，帮助 RM 问出”客户当初买这个资产的 thesis 还成立吗”，必须以”客户”开头，禁止使用”您”
      - today_signal：≤40字，必须包含今日真实数字；若5日或YTD能帮助判断是否已处于阶段性高位/低位，应一并写出
@@ -3402,9 +3423,9 @@ ${narrativeHistorySection}
 
 3. 生成 3-5 个资产桶复核卡片（asset_buckets）
    - bucket 只能从：美股、港股、黄金、美债、汇率、大宗商品 中选择
-   - 必须至少包含：美股、港股、黄金（PB客户核心持仓，除非无任何市场数据否则必须生成）
-   - 美债：只要上方市场数据中 TNX 有变动，或主叙事涉及利率/避险，必须包含
-   - 大宗商品：只在 commodity-led 场景（原油/贵金属主导跨资产走势）才包含；不作为默认桶
+   - 必须至少包含：美股、港股、美债（PB客户核心持仓，除非无任何市场数据否则必须生成）
+   - 黄金：在避险/实际利率/黄金重估逻辑下优先生成；弱信号时可省略
+   - 大宗商品：只在 commodity-led 场景（原油/贵金属主导跨资产走势）才包含；不作为默认桶，也不应挤掉美债
 
    每个 bucket 的三个字段生成规则：
 
