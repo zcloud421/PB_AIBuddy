@@ -2659,6 +2659,136 @@ function formatNarrativeMarketMove(
     return `${item.name}${timeLabel}${todayChange >= 0 ? '+' : ''}${todayChange.toFixed(2)}%`;
 }
 
+function computeCalendarYtdChange(
+    history: ClientFocusPriceHistoryPoint[] | null | undefined
+): number | null {
+    if (!history || history.length < 2) {
+        return null;
+    }
+
+    const currentYear = new Date().getFullYear();
+    const yearStartPoint = history.find((point) => {
+        if (!point.date || point.close === null) {
+            return false;
+        }
+        return point.date >= `${currentYear}-01-01`;
+    });
+    const latestPoint = history[history.length - 1];
+
+    if (!yearStartPoint || yearStartPoint.close === null || latestPoint?.close === null || yearStartPoint.close === 0) {
+        return null;
+    }
+
+    return ((latestPoint.close - yearStartPoint.close) / yearStartPoint.close) * 100;
+}
+
+function computeTrailingChange(
+    history: ClientFocusPriceHistoryPoint[] | null | undefined,
+    tradingDays: number
+): number | null {
+    if (!history || history.length < tradingDays + 1) {
+        return null;
+    }
+
+    const window = history.slice(-(tradingDays + 1));
+    const startPoint = window[0];
+    const latestPoint = window[window.length - 1];
+
+    if (!startPoint || startPoint.close === null || latestPoint?.close === null || startPoint.close === 0) {
+        return null;
+    }
+
+    return ((latestPoint.close - startPoint.close) / startPoint.close) * 100;
+}
+
+function computeCalendarYtdBpsChange(
+    history: ClientFocusPriceHistoryPoint[] | null | undefined
+): number | null {
+    if (!history || history.length < 2) {
+        return null;
+    }
+
+    const currentYear = new Date().getFullYear();
+    const yearStartPoint = history.find((point) => {
+        if (!point.date || point.close === null) {
+            return false;
+        }
+        return point.date >= `${currentYear}-01-01`;
+    });
+    const latestPoint = history[history.length - 1];
+
+    if (!yearStartPoint || yearStartPoint.close === null || latestPoint?.close === null) {
+        return null;
+    }
+
+    return (latestPoint.close - yearStartPoint.close) * 100;
+}
+
+function computeTrailingBpsChange(
+    history: ClientFocusPriceHistoryPoint[] | null | undefined,
+    tradingDays: number
+): number | null {
+    if (!history || history.length < tradingDays + 1) {
+        return null;
+    }
+
+    const window = history.slice(-(tradingDays + 1));
+    const startPoint = window[0];
+    const latestPoint = window[window.length - 1];
+
+    if (!startPoint || startPoint.close === null || latestPoint?.close === null) {
+        return null;
+    }
+
+    return (latestPoint.close - startPoint.close) * 100;
+}
+
+function formatMonitoringContext(
+    item: ClientFocusMarketStateResponse['indices'][number] | undefined
+): string | null {
+    if (!item) {
+        return null;
+    }
+
+    const parts: string[] = [];
+    const todayLabel = ['SPX', 'NDX', 'TNX', 'DXY'].includes(item.code) ? '昨日收盘' : '今日';
+
+    if (typeof item.change_pct === 'number' && !Number.isNaN(item.change_pct)) {
+        if (item.code === 'TNX') {
+            parts.push(`${todayLabel}${item.change_pct >= 0 ? '+' : ''}${item.change_pct.toFixed(1)}bps`);
+        } else {
+            parts.push(`${todayLabel}${item.change_pct >= 0 ? '+' : ''}${item.change_pct.toFixed(2)}%`);
+        }
+    }
+
+    if (typeof item.change_5d_pct === 'number' && !Number.isNaN(item.change_5d_pct)) {
+        if (item.code === 'TNX') {
+            parts.push(`5日${item.change_5d_pct >= 0 ? '+' : ''}${item.change_5d_pct.toFixed(1)}bps`);
+        } else {
+            parts.push(`5日${item.change_5d_pct >= 0 ? '+' : ''}${item.change_5d_pct.toFixed(2)}%`);
+        }
+    }
+
+    if (typeof item.change_ytd_pct === 'number' && !Number.isNaN(item.change_ytd_pct)) {
+        if (item.code === 'TNX') {
+            parts.push(`YTD${item.change_ytd_pct >= 0 ? '+' : ''}${item.change_ytd_pct.toFixed(1)}bps`);
+        } else {
+            parts.push(`YTD${item.change_ytd_pct >= 0 ? '+' : ''}${item.change_ytd_pct.toFixed(2)}%`);
+        }
+    }
+
+    return parts.length > 0 ? `${item.name}${parts.join('，')}` : null;
+}
+
+function joinMonitoringContexts(
+    items: Array<ClientFocusMarketStateResponse['indices'][number] | undefined>
+): string {
+    return items
+        .map((item) => formatMonitoringContext(item))
+        .filter((item): item is string => Boolean(item))
+        .join('；');
+}
+
 function buildFallbackDailyNarrative(
     cachedTopics: NarrativeTopicPromptContext[],
     marketSnapshot: ClientFocusMarketStateResponse | null
@@ -2684,7 +2814,7 @@ function buildFallbackDailyNarrative(
     const tnx = byCode.get('TNX');
     const oil = byCode.get('OIL') ?? byCode.get('BRENT');
 
-    const usEquitySignal = [formatNarrativeMarketMove(spx), formatNarrativeMarketMove(ndx)].filter(Boolean).join('，');
+    const usEquitySignal = joinMonitoringContexts([spx, ndx]);
     if (usEquitySignal) {
         const spxPct = spx?.change_pct ?? null;
         const spx5d = spx?.change_5d_pct ?? null;
@@ -2706,7 +2836,7 @@ function buildFallbackDailyNarrative(
         });
     }
 
-    const hkSignal = [formatNarrativeMarketMove(hsi), formatNarrativeMarketMove(hstech)].filter(Boolean).join('，');
+    const hkSignal = joinMonitoringContexts([hsi, hstech]);
     if (hkSignal) {
         const hsi5d = hsi?.change_5d_pct ?? null;
         let hkImplication = '若客户近期增配港股，可确认其依据是资金回流预期，还是政策与盈利修复判断。';
@@ -2725,7 +2855,7 @@ function buildFallbackDailyNarrative(
         });
     }
 
-    const goldSignal = formatNarrativeMarketMove(gold);
+    const goldSignal = formatMonitoringContext(gold);
     const equityRiskOn =
         (typeof spx?.change_pct === 'number' && spx.change_pct >= 1)
         || (typeof ndx?.change_pct === 'number' && ndx.change_pct >= 1);
@@ -2764,7 +2894,7 @@ function buildFallbackDailyNarrative(
         assetBuckets.push(fxBucket);
     }
 
-    const commoditySignal = formatNarrativeMarketMove(oil);
+    const commoditySignal = formatMonitoringContext(oil);
     const commodityLed =
         (typeof oil?.change_pct === 'number' && Math.abs(oil.change_pct) >= 3)
         || primaryTopic.slug === 'middle-east-tensions';
@@ -2876,6 +3006,7 @@ function buildDailyNarrativeMarketSignalsSection(
     const lines = sortedSignals.map((item) => {
         const todayChange = item.change_pct;
         const fiveDayChange = item.change_5d_pct;
+        const ytdChange = item.change_ytd_pct;
         const parts: string[] = [item.name];
 
         if (item.code === 'TNX') {
@@ -2885,6 +3016,9 @@ function buildDailyNarrativeMarketSignalsSection(
             if (fiveDayChange !== null && fiveDayChange !== undefined && !Number.isNaN(fiveDayChange)) {
                 parts.push(`5日 ${fiveDayChange >= 0 ? '+' : ''}${fiveDayChange.toFixed(1)}bps`);
             }
+            if (ytdChange !== null && ytdChange !== undefined && !Number.isNaN(ytdChange)) {
+                parts.push(`YTD ${ytdChange >= 0 ? '+' : ''}${ytdChange.toFixed(1)}bps`);
+            }
         } else {
             if (todayChange !== null && todayChange !== undefined && !Number.isNaN(todayChange)) {
                 parts.push(`今日 ${todayChange >= 0 ? '+' : ''}${todayChange.toFixed(2)}%`);
@@ -2892,12 +3026,15 @@ function buildDailyNarrativeMarketSignalsSection(
             if (fiveDayChange !== null && fiveDayChange !== undefined && !Number.isNaN(fiveDayChange)) {
                 parts.push(`5日 ${fiveDayChange >= 0 ? '+' : ''}${fiveDayChange.toFixed(2)}%`);
             }
+            if (ytdChange !== null && ytdChange !== undefined && !Number.isNaN(ytdChange)) {
+                parts.push(`YTD ${ytdChange >= 0 ? '+' : ''}${ytdChange.toFixed(2)}%`);
+            }
         }
 
         return parts.join('  ');
     });
 
-    return `今日跨资产变动（今日=当日变动；5日=近5交易日累计，用于判断是否处于极端位置；仅供叙事归因，不代表方向建议）：\n${lines.join('\n')}`;
+    return `今日跨资产变动（今日=当日变动；5日=近5交易日累计，用于判断是否处于极端位置；YTD=年初至今累计，用于判断是否已走出中期趋势；仅供叙事归因，不代表方向建议）：\n${lines.join('\n')}`;
 }
 
 const DAILY_NARRATIVE_BUCKETS = ['美股', '港股', '黄金', '美债', '汇率', '大宗商品'] as const;
@@ -2949,6 +3086,10 @@ function buildTreasuryBucket(
     primarySlug: string
 ): DailyMarketNarrative['asset_buckets'][number] | null {
     const tnx = marketSnapshot?.indices.find((item) => item.code === 'TNX');
+    const oil = marketSnapshot?.indices.find((item) => item.code === 'OIL') ?? marketSnapshot?.indices.find((item) => item.code === 'BRENT');
+    const spx = marketSnapshot?.indices.find((item) => item.code === 'SPX');
+    const ndx = marketSnapshot?.indices.find((item) => item.code === 'NDX');
+    const dxy = marketSnapshot?.indices.find((item) => item.code === 'DXY');
     const todayChange = tnx?.change_pct;
     const fiveDayChange = tnx?.change_5d_pct;
     const hasSignal =
@@ -2960,21 +3101,39 @@ function buildTreasuryBucket(
         return null;
     }
 
-    const signalParts: string[] = [];
-    if (typeof todayChange === 'number' && !Number.isNaN(todayChange)) {
-        signalParts.push(`美债10Y昨日收盘${todayChange >= 0 ? '+' : ''}${todayChange.toFixed(1)}bps`);
-    }
-    if (typeof fiveDayChange === 'number' && !Number.isNaN(fiveDayChange)) {
-        signalParts.push(`5日${fiveDayChange >= 0 ? '+' : ''}${fiveDayChange.toFixed(1)}bps`);
-    }
-
-    const todaySignal =
-        signalParts.length > 0
-            ? `${signalParts.join('，')}，利率路径重新定价。`
-            : '美债收益率路径出现变化，利率预期重新定价。';
+    const todaySignal = formatMonitoringContext(tnx) ?? '美债收益率路径出现变化，利率预期重新定价。';
 
     let thesisCheck = '客户配置美债是基于避险保护，还是押注降息路径兑现？';
-    let portfolioImplication = '复核美债仓位，确认其久期配置是否仍服务原先的避险或利率判断。';
+    let portfolioImplication = '若客户持有美债，收益率回落意味着久期压力阶段性缓解，可先确认债券基金与长期国债ETF是否仍服务防守配置。';
+
+    const oilDown = typeof oil?.change_pct === 'number' && oil.change_pct <= -3;
+    const oilUp = typeof oil?.change_pct === 'number' && oil.change_pct >= 3;
+    const equityRiskOff =
+        (typeof spx?.change_pct === 'number' && spx.change_pct <= -0.8)
+        || (typeof ndx?.change_pct === 'number' && ndx.change_pct <= -1);
+    const equityRiskOn =
+        (typeof spx?.change_pct === 'number' && spx.change_pct >= 0.8)
+        || (typeof ndx?.change_pct === 'number' && ndx.change_pct >= 1);
+    const tnxDown = typeof todayChange === 'number' && todayChange <= -4;
+    const tnxUp = typeof todayChange === 'number' && todayChange >= 4;
+    const dxyUp = typeof dxy?.change_pct === 'number' && dxy.change_pct >= 0.25;
+
+    if ((primarySlug === 'middle-east-tensions' && tnxDown) || (equityRiskOff && tnxDown)) {
+        thesisCheck = '客户配置美债是为了避险缓冲，还是提前布局久期反弹？';
+        portfolioImplication = '若客户持有美债，当前更像避险买盘压低收益率，IG债券、债券基金与长期国债ETF的防守价值重新抬升。';
+    } else if (oilDown && tnxDown) {
+        thesisCheck = '客户配置美债是押注通胀回落，还是为了阶段性久期修复？';
+        portfolioImplication = '若客户持有美债，当前更像油价回落后通胀压力缓解，久期资产的阶段性压力正在释放。';
+    } else if (oilUp && tnxUp) {
+        thesisCheck = '客户配置美债时，是否低估了油价重新推升通胀预期的风险？';
+        portfolioImplication = '若客户持有美债，需先判断这轮收益率反弹是否由油价与通胀担忧驱动，长久期债券回撤会更直接。';
+    } else if (tnxUp && dxyUp && !oilUp) {
+        thesisCheck = '客户配置美债是基于降息判断，还是默认长端供给压力会回落？';
+        portfolioImplication = '若客户持有美债，当前更像财政供给与term premium重新主导长端，久期仓位不宜只按降息逻辑理解。';
+    } else if (tnxDown && equityRiskOn) {
+        thesisCheck = '客户配置美债是为了锁定票息，还是押注联储路径重新前移？';
+        portfolioImplication = '若客户持有美债，当前更像在风险资产反弹中利率压力同步缓解，可确认债券仓位是否仍服务 house view 的久期方向。';
+    }
 
     if (primarySlug === 'usd-strength') {
         thesisCheck = '客户配置美债是基于美元避险，还是押注实际利率回落？';
@@ -3020,25 +3179,13 @@ function buildFxBucket(
         return null;
     }
 
-    // Build signal string from most significant movers
-    const signalParts: string[] = [];
-    if (usdjpy?.change_pct !== null && usdjpy?.change_pct !== undefined && jpySignificant) {
-        const dir = usdjpy.change_pct < 0 ? '日元升值' : '日元走弱';
-        signalParts.push(`USDJPY今日${usdjpy.change_pct >= 0 ? '+' : ''}${usdjpy.change_pct.toFixed(2)}%（${dir}）`);
-    }
-    if (usdchf?.change_pct !== null && usdchf?.change_pct !== undefined && chfSignificant) {
-        const dir = usdchf.change_pct < 0 ? '瑞郎升值' : '瑞郎走弱';
-        signalParts.push(`USDCHF今日${usdchf.change_pct >= 0 ? '+' : ''}${usdchf.change_pct.toFixed(2)}%（${dir}）`);
-    }
-    if (usdcnh?.change_pct !== null && usdcnh?.change_pct !== undefined && cnhSignificant) {
-        const dir = usdcnh.change_pct < 0 ? '人民币升值' : '人民币走弱';
-        signalParts.push(`USDCNH今日${usdcnh.change_pct >= 0 ? '+' : ''}${usdcnh.change_pct.toFixed(2)}%（${dir}）`);
-    }
-    if (signalParts.length === 0 && dxy?.change_5d_pct !== null && dxy?.change_5d_pct !== undefined) {
-        signalParts.push(`美元指数5日${dxy.change_5d_pct >= 0 ? '+' : ''}${dxy.change_5d_pct.toFixed(2)}%`);
-    }
+    const signalItems: Array<ClientFocusMarketStateResponse['indices'][number] | undefined> = [];
+    if (jpySignificant && usdjpy) signalItems.push(usdjpy);
+    if (chfSignificant && usdchf) signalItems.push(usdchf);
+    if (cnhSignificant && usdcnh) signalItems.push(usdcnh);
+    if (signalItems.length === 0 && dxyTrending && dxy) signalItems.push(dxy);
 
-    const todaySignal = signalParts.join('；') + '。';
+    const todaySignal = joinMonitoringContexts(signalItems) || '美元与主要融资货币方向出现变化。';
 
     // Determine primary FX narrative
     let thesisCheck = '客户外汇持仓是基于收益套利还是避险对冲？';
@@ -3185,11 +3332,12 @@ ${narrativeHistorySection}
    - 必须至少生成 3 个桶（美股、港股、黄金 是 PB 客户持仓最重的资产，除非信号极弱且没有任何复核意义才可省略）
    - 每个 bucket 必须包含：
      - thesis_check：疑问句，≤25字，帮助 RM 问出”客户当初买这个资产的 thesis 还成立吗”，必须以”客户”开头，禁止使用”您”
-     - today_signal：≤30字，必须包含今日真实数字，且数字必须来自上方市场数据
+     - today_signal：≤40字，必须包含今日真实数字；若5日或YTD能帮助判断是否已处于阶段性高位/低位，应一并写出
      - portfolio_implication：≤35字，必须是持仓复核动作，不是市场评论
-   - 不生成通用分析；每条都要对应一个具体的持仓复核场景
-   - 香港白天语境下，美股/美债/美元指数默认表述为“昨日收盘”或“隔夜”，不要写成“今日上涨/今日下跌”
-   - 若单日波动很小（例如黄金<1%、汇率信号未达显著阈值），不要硬写成“今天需要review”，可省略该 bucket，或明确说明“当前不足以单独触发复核”
+- 不生成通用分析；每条都要对应一个具体的持仓复核场景
+- 香港白天语境下，美股/美债/美元指数默认表述为“昨日收盘”或“隔夜”，不要写成“今日上涨/今日下跌”
+- 若单日波动很小（例如黄金<1%、汇率信号未达显著阈值），不要硬写成“今天需要review”，可省略该 bucket，或明确说明“当前不足以单独触发复核”
+- 今日/5日/YTD 的组合更适合 PB 监测语境：今日负责触发，5日负责判断是否过热，YTD负责判断中期趋势
 4. 选择今日信号最强的资产类别作为 default_expanded_bucket
 5. 将所有主题按今日客户关注度排序（ranked_slugs）
 
@@ -3206,7 +3354,7 @@ ${narrativeHistorySection}
     {
       "bucket": "美股|港股|黄金|美债|汇率|大宗商品",
       "thesis_check": "以'客户'开头的疑问句，≤25字，例如：客户持仓港股是基于南向资金还是盈利复苏逻辑？",
-      "today_signal": "必须包含今日真实数字的1句话，≤30字",
+      "today_signal": "必须包含今日真实数字的1句话；如相关可同时包含5日或YTD，≤40字",
       "portfolio_implication": "持仓行动含义，≤35字，以'若...'或动词开头"
     }
   ]
@@ -3265,9 +3413,10 @@ ${narrativeHistorySection}
    - 引导RM问出：客户当初买这个资产的逻辑现在是否还成立
 
    【today_signal】
-   - 必须包含今日真实数字，≤30字
+   - 必须包含今日真实数字，≤40字
    - 来自上方市场数据，不可编造
    - 如果该资产5日涨幅超过3%，必须提及（这是判断是否处于极端位置的依据）
+   - 如果YTD方向已经很明确，优先加上YTD，帮助RM判断这是不是阶段性回摆而非主线逆转
 
    【portfolio_implication】
    ⚠️ 这是最关键字段，必须有IC判断角度，不能是教科书式风险提示。
@@ -3323,6 +3472,7 @@ ${narrativeHistorySection}
 - 你是一位有10年经验的PB IC，这是给RM在客户见面前5分钟看的，必须有具体IC角度
 - thesis_check必须以"客户"开头，禁止使用"您"
 - today_signal数字必须来自上方提供的市场数据，不可编造
+- 生成 today_signal 时，优先使用“昨日收盘/今日 + 5日 + YTD”的监测框架，而不是只写单日波动
 - 如果上方topic摘要中有传导链内容，portfolio_implication应优先引用其中的具体判断，而不是另起炉灶
 - 禁止输出任何教科书式风险管理语言` },
                     { role: 'user', content: userPrompt }
@@ -5532,7 +5682,8 @@ async function fetchHongKongSpotIndices() {
     const enriched = await Promise.all(
         baseItems.map(async (item) => ({
             ...item,
-            change_5d_pct: await fetchHongKongIndex5dChange(item.code, item.change_pct)
+            change_5d_pct: await fetchHongKongIndex5dChange(item.code, item.change_pct),
+            change_ytd_pct: await fetchHongKongIndexYtdChange(item.code)
         }))
     );
 
@@ -5540,19 +5691,37 @@ async function fetchHongKongSpotIndices() {
 }
 
 async function fetchUsMarketStateIndices() {
-    const snapshots = await Promise.all([
+    const [spxMassive, ndxMassive, spxYahoo, ndxYahoo] = await Promise.all([
         fetchMassiveIndexSnapshot('I:SPX', { code: 'SPX', name: '标普500' }),
-        fetchMassiveIndexSnapshot('I:NDX', { code: 'NDX', name: '纳斯达克' })
+        fetchMassiveIndexSnapshot('I:NDX', { code: 'NDX', name: '纳斯达克' }),
+        fetchYahooChartSeries('^GSPC', { code: 'SPX', name: '标普500' }),
+        fetchYahooChartSeries('^IXIC', { code: 'NDX', name: '纳斯达克' }),
     ]);
 
-    return snapshots
-        .filter((item): item is NonNullable<typeof item> => item !== null)
-        .map((item) => ({
-            code: item.code,
-            name: item.name,
-            latest: item.latest,
-            change_pct: item.change_pct
-        }));
+    const rows = [
+        spxMassive
+            ? {
+                code: spxMassive.code,
+                name: spxMassive.name,
+                latest: spxMassive.latest,
+                change_pct: spxMassive.change_pct,
+                change_5d_pct: computeTrailingChange(spxYahoo.history, 5),
+                change_ytd_pct: computeCalendarYtdChange(spxYahoo.history)
+            }
+            : null,
+        ndxMassive
+            ? {
+                code: ndxMassive.code,
+                name: ndxMassive.name,
+                latest: ndxMassive.latest,
+                change_pct: ndxMassive.change_pct,
+                change_5d_pct: computeTrailingChange(ndxYahoo.history, 5),
+                change_ytd_pct: computeCalendarYtdChange(ndxYahoo.history)
+            }
+            : null
+    ];
+
+    return rows.filter((item): item is NonNullable<typeof item> => item !== null);
 }
 
 async function fetchMassiveIndexSnapshot(
@@ -5805,6 +5974,9 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
         usdCnhSnapshot,
         usdJpySnapshot,
         usdChfSnapshot,
+        usdCnhHistory,
+        usdJpySeries,
+        usdChfSeries,
         dxySnapshot,
         usIndices,
         wtiSnapshot,
@@ -5818,6 +5990,9 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
         fetchForexSnapshot('USDCNH', '美元人民币'),
         fetchForexSnapshot('USDJPY', '美元兑日元'),
         fetchForexSnapshot('USDCHF', '美元兑瑞郎'),
+        fetchForexHistory('USDCNH'),
+        fetchYahooChartSeries('JPY=X', { code: 'USDJPY', name: '美元兑日元' }),
+        fetchYahooChartSeries('CHF=X', { code: 'USDCHF', name: '美元兑瑞郎' }),
         fetchYahooChartSeries('DX-Y.NYB', { code: 'DXY', name: '美元指数' }),
         fetchUsMarketStateIndices(),
         fetchYahooChartSeries('CL=F', { code: 'OIL', name: 'WTI原油' }),
@@ -5844,7 +6019,9 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
                 code: goldSnapshot.snapshot.code,
                 name: goldSnapshot.snapshot.name,
                 latest: goldSnapshot.snapshot.latest,
-                change_pct: goldSnapshot.snapshot.change_pct
+                change_pct: goldSnapshot.snapshot.change_pct,
+                change_5d_pct: computeTrailingChange(goldSnapshot.history, 5),
+                change_ytd_pct: computeCalendarYtdChange(goldSnapshot.history)
             }
             : null,
         silverSnapshot.snapshot
@@ -5852,7 +6029,9 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
                 code: silverSnapshot.snapshot.code,
                 name: silverSnapshot.snapshot.name,
                 latest: silverSnapshot.snapshot.latest,
-                change_pct: silverSnapshot.snapshot.change_pct
+                change_pct: silverSnapshot.snapshot.change_pct,
+                change_5d_pct: computeTrailingChange(silverSnapshot.history, 5),
+                change_ytd_pct: computeCalendarYtdChange(silverSnapshot.history)
             }
             : null,
         dxySnapshot.snapshot
@@ -5860,7 +6039,9 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
                 code: dxySnapshot.snapshot.code,
                 name: dxySnapshot.snapshot.name,
                 latest: dxySnapshot.snapshot.latest,
-                change_pct: dxySnapshot.snapshot.change_pct
+                change_pct: dxySnapshot.snapshot.change_pct,
+                change_5d_pct: computeTrailingChange(dxySnapshot.history, 5),
+                change_ytd_pct: computeCalendarYtdChange(dxySnapshot.history)
             }
             : null,
         wtiSnapshot.snapshot
@@ -5868,7 +6049,9 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
                 code: wtiSnapshot.snapshot.code,
                 name: wtiSnapshot.snapshot.name,
                 latest: wtiSnapshot.snapshot.latest,
-                change_pct: wtiSnapshot.snapshot.change_pct
+                change_pct: wtiSnapshot.snapshot.change_pct,
+                change_5d_pct: computeTrailingChange(wtiSnapshot.history, 5),
+                change_ytd_pct: computeCalendarYtdChange(wtiSnapshot.history)
             }
             : null,
         brentSnapshot.snapshot
@@ -5876,7 +6059,9 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
                 code: brentSnapshot.snapshot.code,
                 name: brentSnapshot.snapshot.name,
                 latest: brentSnapshot.snapshot.latest,
-                change_pct: brentSnapshot.snapshot.change_pct
+                change_pct: brentSnapshot.snapshot.change_pct,
+                change_5d_pct: computeTrailingChange(brentSnapshot.history, 5),
+                change_ytd_pct: computeCalendarYtdChange(brentSnapshot.history)
             }
             : null,
         naturalGasSnapshot.snapshot
@@ -5884,7 +6069,9 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
                 code: naturalGasSnapshot.snapshot.code,
                 name: naturalGasSnapshot.snapshot.name,
                 latest: naturalGasSnapshot.snapshot.latest,
-                change_pct: naturalGasSnapshot.snapshot.change_pct
+                change_pct: naturalGasSnapshot.snapshot.change_pct,
+                change_5d_pct: computeTrailingChange(naturalGasSnapshot.history, 5),
+                change_ytd_pct: computeCalendarYtdChange(naturalGasSnapshot.history)
             }
             : null,
         tnxSnapshot.snapshot
@@ -5892,7 +6079,9 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
                 code: tnxSnapshot.snapshot.code,
                 name: tnxSnapshot.snapshot.name,
                 latest: tnxSnapshot.snapshot.latest,
-                change_pct: Number.isFinite(tnxBpsChange) ? tnxBpsChange : tnxSnapshot.snapshot.change_pct
+                change_pct: Number.isFinite(tnxBpsChange) ? tnxBpsChange : tnxSnapshot.snapshot.change_pct,
+                change_5d_pct: computeTrailingBpsChange(tnxSnapshot.history, 5),
+                change_ytd_pct: computeCalendarYtdBpsChange(tnxSnapshot.history)
             }
             : null,
         usdCnhSnapshot
@@ -5900,7 +6089,9 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
                 code: usdCnhSnapshot.code,
                 name: usdCnhSnapshot.name,
                 latest: usdCnhSnapshot.latest,
-                change_pct: usdCnhSnapshot.change_pct
+                change_pct: usdCnhSnapshot.change_pct,
+                change_5d_pct: computeTrailingChange(usdCnhHistory, 5),
+                change_ytd_pct: computeCalendarYtdChange(usdCnhHistory)
             }
             : null,
         usdJpySnapshot
@@ -5908,7 +6099,9 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
                 code: usdJpySnapshot.code,
                 name: usdJpySnapshot.name,
                 latest: usdJpySnapshot.latest,
-                change_pct: usdJpySnapshot.change_pct
+                change_pct: usdJpySnapshot.change_pct,
+                change_5d_pct: computeTrailingChange(usdJpySeries.history, 5),
+                change_ytd_pct: computeCalendarYtdChange(usdJpySeries.history)
             }
             : null,
         usdChfSnapshot
@@ -5916,7 +6109,9 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
                 code: usdChfSnapshot.code,
                 name: usdChfSnapshot.name,
                 latest: usdChfSnapshot.latest,
-                change_pct: usdChfSnapshot.change_pct
+                change_pct: usdChfSnapshot.change_pct,
+                change_5d_pct: computeTrailingChange(usdChfSeries.history, 5),
+                change_ytd_pct: computeCalendarYtdChange(usdChfSeries.history)
             }
             : null,
         ...(hkSnapshot?.indices ?? [])
@@ -5966,6 +6161,15 @@ async function fetchHongKongIndex5dChange(code: string, fallbackChangePct: numbe
         return ((end - start) / start) * 100;
     } catch {
         return fallbackChangePct;
+    }
+}
+
+async function fetchHongKongIndexYtdChange(code: string): Promise<number | null> {
+    try {
+        const history = await fetchHongKongIndexHistory(code, 260);
+        return computeCalendarYtdChange(history);
+    } catch {
+        return null;
     }
 }
 

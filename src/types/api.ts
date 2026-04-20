@@ -265,6 +265,7 @@ export interface ClientFocusMarketSnapshotItem {
     latest: number | null;
     change_pct: number | null;
     change_5d_pct?: number | null;
+    change_ytd_pct?: number | null;
 }
 
 export interface ClientFocusMarketSnapshot {
