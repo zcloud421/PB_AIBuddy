@@ -2688,13 +2688,15 @@ function buildFallbackDailyNarrative(
     if (usEquitySignal) {
         const spxPct = spx?.change_pct ?? null;
         const spx5d = spx?.change_5d_pct ?? null;
-        let usImplication = '若客户持有美股，可确认这轮反弹被理解为风险偏好修复，还是长期增长逻辑延续。';
+        let usImplication = '若客户持有美股，更应把当前回吐理解为创高后的仓位回摆，而非主线已经逆转。';
         if (typeof spx5d === 'number' && spx5d >= 4) {
             usImplication = '若客户美股仓位已偏高，可讨论是否先锁定部分获利；没有仓位的客户此时不宜追高。';
         } else if (typeof spxPct === 'number' && spxPct <= -1.5) {
             usImplication = '若昨日收盘美股回落明显，需先判断是宏观催化还是技术性回调，再核对持仓逻辑。';
+        } else if (typeof spxPct === 'number' && spxPct > -1 && spxPct < 0 && typeof spx5d === 'number' && spx5d >= 2.5) {
+            usImplication = '若客户持有美股，当前更像创新高后的温和回吐，适合核对仓位是否仍押注AI盈利主线，而非周末headline噪音。';
         } else if (typeof spxPct === 'number' && spxPct >= 1) {
-            usImplication = '若客户持有美股，可确认昨日这轮上涨被视为地缘缓和后的风险偏好修复，还是增长逻辑延续。';
+            usImplication = '若客户持有美股，可把昨日上涨理解为停火预期带来的risk-on延续，再核对仓位是否已计入过多乐观预期。';
         }
         assetBuckets.push({
             bucket: '美股',
@@ -2756,11 +2758,10 @@ function buildFallbackDailyNarrative(
         assetBuckets.push(treasuryBucket);
     }
 
-    // 汇率是PB客户核心关注（FX carry trade），在fallback中始终包含
+    // 汇率只在有足够意义的方向信号时才纳入，避免弱波动下生成空泛内容
     const fxBucket = buildFxBucket(marketSnapshot);
-    const fxBucketToAdd = fxBucket ?? buildDefaultFxBucket(marketSnapshot);
-    if (fxBucketToAdd && assetBuckets.length < 5) {
-        assetBuckets.push(fxBucketToAdd);
+    if (fxBucket && assetBuckets.length < 5) {
+        assetBuckets.push(fxBucket);
     }
 
     const commoditySignal = formatNarrativeMarketMove(oil);
@@ -2943,42 +2944,6 @@ function normalizeAssetBuckets(
         }));
 }
 
-function buildDefaultFxBucket(
-    marketSnapshot: ClientFocusMarketStateResponse | null
-): DailyMarketNarrative['asset_buckets'][number] | null {
-    const indices = marketSnapshot?.indices ?? [];
-    const byCode = new Map(indices.map((item) => [item.code, item]));
-    const dxy = byCode.get('DXY');
-    const usdcnh = byCode.get('USDCNH');
-    const usdjpy = byCode.get('USDJPY');
-
-    const signalParts: string[] = [];
-    if (dxy?.change_pct !== null && dxy?.change_pct !== undefined) {
-        signalParts.push(`美元指数今日${dxy.change_pct >= 0 ? '+' : ''}${dxy.change_pct.toFixed(2)}%`);
-    }
-    if (usdcnh?.change_pct !== null && usdcnh?.change_pct !== undefined) {
-        signalParts.push(`USDCNH今日${usdcnh.change_pct >= 0 ? '+' : ''}${usdcnh.change_pct.toFixed(2)}%`);
-    }
-    if (usdjpy?.change_pct !== null && usdjpy?.change_pct !== undefined) {
-        signalParts.push(`USDJPY今日${usdjpy.change_pct >= 0 ? '+' : ''}${usdjpy.change_pct.toFixed(2)}%`);
-    }
-
-    if (signalParts.length === 0) {
-        return null;
-    }
-
-    if (signalParts.length === 0) {
-        return null;
-    }
-
-    return {
-        bucket: '汇率',
-        thesis_check: '客户的FX敞口（JPY/CHF套息或CNH持仓）是否与当前美元走势方向一致？',
-        today_signal: signalParts.join('；') + '。',
-        portfolio_implication: '当前美元波动有限，若客户持有JPY/CHF carry或CNH敞口，更适合继续观察USDJPY、USDCHF与USDCNH是否形成明确方向。'
-    };
-}
-
 function buildTreasuryBucket(
     marketSnapshot: ClientFocusMarketStateResponse | null,
     primarySlug: string
@@ -3085,7 +3050,7 @@ function buildFxBucket(
     const cnhWeakening = typeof usdcnh?.change_pct === 'number' && usdcnh.change_pct > 0.3;
 
     if (jpyAppreciating || chfAppreciating) {
-        thesisCheck = '客户持有JPY/CHF套息仓位（借低息货币做多高息资产）？';
+        thesisCheck = '客户是否有借入日元/瑞郎进行套息交易的融资仓位？';
         const currencies = [jpyAppreciating && '日元', chfAppreciating && '瑞郎'].filter(Boolean).join('、');
         portfolioImplication = `${currencies}升值是carry unwind信号，需复核客户套息仓位是否已面临亏损压力，必要时控制敞口。`;
     } else if (cnhStrengthening) {
