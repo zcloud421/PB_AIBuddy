@@ -2633,6 +2633,124 @@ type NarrativeTopicPromptContext = {
     transmission_chain: Array<{ order: string; title: string; pricing: string; summary: string }>;
 };
 
+function formatNarrativeMarketMove(
+    item: ClientFocusMarketStateResponse['indices'][number] | undefined
+): string | null {
+    if (!item) {
+        return null;
+    }
+
+    const todayChange = item.change_pct;
+    if (typeof todayChange !== 'number' || Number.isNaN(todayChange)) {
+        return null;
+    }
+
+    if (item.code === 'TNX') {
+        return `${item.name}今日${todayChange >= 0 ? '+' : ''}${todayChange.toFixed(1)}bps`;
+    }
+
+    return `${item.name}今日${todayChange >= 0 ? '+' : ''}${todayChange.toFixed(2)}%`;
+}
+
+function buildFallbackDailyNarrative(
+    cachedTopics: NarrativeTopicPromptContext[],
+    marketSnapshot: ClientFocusMarketStateResponse | null
+): DailyMarketNarrative | null {
+    const primaryTopic = cachedTopics.find((topic) => topic.status === '持续发酵') ?? cachedTopics[0];
+    if (!primaryTopic) {
+        return null;
+    }
+
+    const indices = marketSnapshot?.indices ?? [];
+    const byCode = new Map(indices.map((item) => [item.code, item]));
+    const rankedSlugs = cachedTopics.map((topic) => topic.slug);
+    const narrative = (marketSnapshot?.summary ?? primaryTopic.summary ?? '').trim();
+    const fallbackNarrative = narrative.length > 0 ? narrative : `${primaryTopic.title} 仍是今天最值得先和客户解释的市场主线。`;
+
+    const assetBuckets: DailyMarketNarrative['asset_buckets'] = [];
+
+    const spx = byCode.get('SPX');
+    const ndx = byCode.get('NDX');
+    const hsi = byCode.get('HSI');
+    const hstech = byCode.get('HSTECH');
+    const gold = byCode.get('GOLD');
+    const tnx = byCode.get('TNX');
+    const usdcnh = byCode.get('USDCNH');
+    const dxy = byCode.get('DXY');
+    const oil = byCode.get('OIL') ?? byCode.get('BRENT');
+
+    const usEquitySignal = [formatNarrativeMarketMove(spx), formatNarrativeMarketMove(ndx)].filter(Boolean).join('，');
+    if (usEquitySignal) {
+        assetBuckets.push({
+            bucket: '美股',
+            thesis_check: '客户持有美股的增长逻辑是否仍然成立？',
+            today_signal: usEquitySignal,
+            portfolio_implication: '若客户持仓偏成长，需复核美股仓位是否仍匹配其风险预算。'
+        });
+    }
+
+    const hkSignal = [formatNarrativeMarketMove(hsi), formatNarrativeMarketMove(hstech)].filter(Boolean).join('，');
+    if (hkSignal) {
+        assetBuckets.push({
+            bucket: '港股',
+            thesis_check: '客户持有港股的修复逻辑是否仍然成立？',
+            today_signal: hkSignal,
+            portfolio_implication: '若客户持仓偏中国修复，可复核港股仓位是否仍承载原先判断。'
+        });
+    }
+
+    const goldSignal = formatNarrativeMarketMove(gold);
+    if (goldSignal) {
+        assetBuckets.push({
+            bucket: '黄金',
+            thesis_check: '客户持有黄金的避险逻辑是否仍然成立？',
+            today_signal: goldSignal,
+            portfolio_implication: '若客户持仓偏避险保护，需复核黄金配置是否仍服务当前组合目标。'
+        });
+    }
+
+    const treasuryBucket = buildTreasuryBucket(marketSnapshot, primaryTopic.slug);
+    if (treasuryBucket) {
+        assetBuckets.push(treasuryBucket);
+    }
+
+    const fxSignal = [formatNarrativeMarketMove(usdcnh), formatNarrativeMarketMove(dxy)].filter(Boolean).join('，');
+    if (fxSignal && assetBuckets.length < 4) {
+        assetBuckets.push({
+            bucket: '汇率',
+            thesis_check: '客户汇率敞口背后的美元判断是否仍然成立？',
+            today_signal: fxSignal,
+            portfolio_implication: '若客户有外币或港股敞口，可复核汇率假设是否仍支持当前配置。'
+        });
+    }
+
+    const commoditySignal = formatNarrativeMarketMove(oil);
+    if (commoditySignal && assetBuckets.length < 4) {
+        assetBuckets.push({
+            bucket: '大宗商品',
+            thesis_check: '客户持有商品的通胀或地缘逻辑是否仍然成立？',
+            today_signal: commoditySignal,
+            portfolio_implication: '若客户持有商品相关资产，可复核其持仓目的是否仍与市场主线一致。'
+        });
+    }
+
+    if (assetBuckets.length === 0) {
+        return null;
+    }
+
+    return {
+        primary_slug: primaryTopic.slug,
+        regime_label: '今日',
+        narrative: fallbackNarrative,
+        ranked_slugs: rankedSlugs,
+        rank_changes: {},
+        momentum_days: 1,
+        asset_buckets: ensurePriorityAssetBuckets(assetBuckets.slice(0, 4), primaryTopic.slug, marketSnapshot),
+        default_expanded_bucket: assetBuckets.some((item) => item.bucket === '美股') ? '美股' : assetBuckets[0].bucket,
+        generated_at: new Date().toISOString(),
+    };
+}
+
 function collectNarrativeTopics(): NarrativeTopicPromptContext[] {
     return FOCUS_TOPICS
         .map((topic) => {
@@ -2965,10 +3083,11 @@ async function generateDailyMarketNarrative(): Promise<DailyMarketNarrative | nu
 
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
-        return null;
+        return buildFallbackDailyNarrative(cachedTopics, null);
     }
 
     const marketSnapshot = await fetchClientFocusMarketStateSnapshot().catch(() => null);
+    const fallbackNarrative = buildFallbackDailyNarrative(cachedTopics, marketSnapshot);
 
     const topicSection = cachedTopics
         .map((item) => {
@@ -3161,7 +3280,7 @@ ${narrativeHistorySection}
         });
 
         if (!response.ok) {
-            return null;
+            return fallbackNarrative;
         }
 
         const payload = (await response.json()) as {
@@ -3225,7 +3344,7 @@ ${narrativeHistorySection}
             generated_at: new Date().toISOString(),
         };
     } catch (error) {
-        throw error;
+        return fallbackNarrative;
     }
 }
 
