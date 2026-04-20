@@ -7,6 +7,8 @@ export interface PairAnalysisResponse {
     data_as_of: string;
     trading_days_overlap: number;
     correlation: {
+        d60?: number;
+        d120?: number;
         d90: number;
         d180: number;
         d252: number;
@@ -100,6 +102,9 @@ export async function analyzePairSuitability(symbolA: string, symbolB: string): 
             data_as_of: recentAlignedSeries[recentAlignedSeries.length - 1].date,
             trading_days_overlap: recentAlignedSeries.length,
             correlation: {
+                // Backward-compatible aliases for older mobile builds that still expect 60/120-day keys.
+                d60: corr90,
+                d120: corr180,
                 d90: corr90,
                 d180: corr180,
                 d252: corr252,
