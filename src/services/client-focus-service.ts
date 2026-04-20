@@ -301,7 +301,12 @@ const focusChainCache = new Map<string, { expiresAt: number; value: ClientFocusT
 const focusMarketChartCache = new Map<string, { expiresAt: number; value: ClientFocusMarketChart | null }>();
 const polymarketCache = new Map<string, { expiresAt: number; value: ClientFocusPolymarketResponse }>();
 const focusMarketStateCache = new Map<string, { expiresAt: number; value: ClientFocusMarketStateResponse }>();
-const dailyNarrativeCache = { expiresAt: 0, value: null as DailyMarketNarrative | null };
+const DAILY_NARRATIVE_CACHE_SCHEMA_VERSION = 2;
+const dailyNarrativeCache = {
+    expiresAt: 0,
+    schemaVersion: DAILY_NARRATIVE_CACHE_SCHEMA_VERSION,
+    value: null as DailyMarketNarrative | null
+};
 let dailyNarrativeRefreshPromise: Promise<DailyMarketNarrative | null> | null = null;
 let previousRankedSlugs: string[] = [];
 let narrativeHistory: Array<{ date: string; primary_slug: string }> = [];
@@ -2675,8 +2680,6 @@ function buildFallbackDailyNarrative(
     const hstech = byCode.get('HSTECH');
     const gold = byCode.get('GOLD');
     const tnx = byCode.get('TNX');
-    const usdcnh = byCode.get('USDCNH');
-    const dxy = byCode.get('DXY');
     const oil = byCode.get('OIL') ?? byCode.get('BRENT');
 
     const usEquitySignal = [formatNarrativeMarketMove(spx), formatNarrativeMarketMove(ndx)].filter(Boolean).join('，');
@@ -2714,18 +2717,13 @@ function buildFallbackDailyNarrative(
         assetBuckets.push(treasuryBucket);
     }
 
-    const fxSignal = [formatNarrativeMarketMove(usdcnh), formatNarrativeMarketMove(dxy)].filter(Boolean).join('，');
-    if (fxSignal && assetBuckets.length < 4) {
-        assetBuckets.push({
-            bucket: '汇率',
-            thesis_check: '客户汇率敞口背后的美元判断是否仍然成立？',
-            today_signal: fxSignal,
-            portfolio_implication: '若客户有外币或港股敞口，可复核汇率假设是否仍支持当前配置。'
-        });
+    const fxBucket = buildFxBucket(marketSnapshot);
+    if (fxBucket && assetBuckets.length < 5) {
+        assetBuckets.push(fxBucket);
     }
 
     const commoditySignal = formatNarrativeMarketMove(oil);
-    if (commoditySignal && assetBuckets.length < 4) {
+    if (commoditySignal && assetBuckets.length < 5) {
         assetBuckets.push({
             bucket: '大宗商品',
             thesis_check: '客户持有商品的通胀或地缘逻辑是否仍然成立？',
@@ -2738,6 +2736,8 @@ function buildFallbackDailyNarrative(
         return null;
     }
 
+    const prioritizedBuckets = ensurePriorityAssetBuckets(assetBuckets.slice(0, 5), primaryTopic.slug, marketSnapshot);
+
     return {
         primary_slug: primaryTopic.slug,
         regime_label: '今日',
@@ -2745,8 +2745,8 @@ function buildFallbackDailyNarrative(
         ranked_slugs: rankedSlugs,
         rank_changes: {},
         momentum_days: 1,
-        asset_buckets: ensurePriorityAssetBuckets(assetBuckets.slice(0, 4), primaryTopic.slug, marketSnapshot),
-        default_expanded_bucket: assetBuckets.some((item) => item.bucket === '美股') ? '美股' : assetBuckets[0].bucket,
+        asset_buckets: prioritizedBuckets,
+        default_expanded_bucket: prioritizedBuckets.some((item) => item.bucket === '美股') ? '美股' : prioritizedBuckets[0].bucket,
         generated_at: new Date().toISOString(),
     };
 }
@@ -3157,10 +3157,10 @@ ${narrativeHistorySection}
   "default_expanded_bucket": "今日信号最强的资产类别",
   "asset_buckets": [
     {
-      “bucket”: “美股|港股|黄金|美债|汇率|大宗商品”,
-      “thesis_check”: “以'客户'开头的疑问句，≤25字，例如：客户持仓港股是基于南向资金还是盈利复苏逻辑？”,
-      “today_signal”: “必须包含今日真实数字的1句话，≤30字”,
-      “portfolio_implication”: “持仓行动含义，≤35字，以”若...”或动词开头”
+      "bucket": "美股|港股|黄金|美债|汇率|大宗商品",
+      "thesis_check": "以'客户'开头的疑问句，≤25字，例如：客户持仓港股是基于南向资金还是盈利复苏逻辑？",
+      "today_signal": "必须包含今日真实数字的1句话，≤30字",
+      "portfolio_implication": "持仓行动含义，≤35字，以'若...'或动词开头"
     }
   ]
 }
@@ -3197,10 +3197,10 @@ ${narrativeHistorySection}
   "default_expanded_bucket": "今日信号最强的资产类别",
   "asset_buckets": [
     {
-      “bucket”: “美股|港股|黄金|美债|汇率|大宗商品”,
-      “thesis_check”: “以客户开头的疑问句，≤25字”,
-      “today_signal”: “必须包含今日真实数字的1句话，≤30字”,
-      “portfolio_implication”: “持仓行动含义，≤35字，以若或动词开头”
+      "bucket": "美股|港股|黄金|美债|汇率|大宗商品",
+      "thesis_check": "以客户开头的疑问句，≤25字",
+      "today_signal": "必须包含今日真实数字的1句话，≤30字",
+      "portfolio_implication": "持仓行动含义，≤35字，以若或动词开头"
     }
   ]
 }
@@ -6499,6 +6499,7 @@ async function refreshDailyMarketNarrative(
             };
 
             dailyNarrativeCache.value = nextValue;
+            dailyNarrativeCache.schemaVersion = DAILY_NARRATIVE_CACHE_SCHEMA_VERSION;
             dailyNarrativeCache.expiresAt = Date.now() + DAILY_NARRATIVE_CACHE_TTL_MS;
             return nextValue;
         } catch {
@@ -6512,6 +6513,12 @@ async function refreshDailyMarketNarrative(
 }
 
 export async function getDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
+    if (dailyNarrativeCache.schemaVersion !== DAILY_NARRATIVE_CACHE_SCHEMA_VERSION) {
+        dailyNarrativeCache.value = null;
+        dailyNarrativeCache.expiresAt = 0;
+        dailyNarrativeCache.schemaVersion = DAILY_NARRATIVE_CACHE_SCHEMA_VERSION;
+    }
+
     const cached = isRenderableDailyNarrative(dailyNarrativeCache.value) ? dailyNarrativeCache.value : null;
 
     if (dailyNarrativeCache.value && !cached) {
