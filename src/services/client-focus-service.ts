@@ -2624,7 +2624,16 @@ ${newsSection}
     }
 }
 
-function collectNarrativeTopics() {
+type NarrativeTopicPromptContext = {
+    slug: string;
+    title: string;
+    status: string;
+    summary: string;
+    latest_updates: Array<{ time: string; date: string | undefined; title: string; impact: string }>;
+    transmission_chain: Array<{ order: string; title: string; pricing: string; summary: string }>;
+};
+
+function collectNarrativeTopics(): NarrativeTopicPromptContext[] {
     return FOCUS_TOPICS
         .map((topic) => {
             const cached = focusCache.get(topic.slug);
@@ -2635,12 +2644,37 @@ function collectNarrativeTopics() {
                       status: cached.value.status ?? '',
                       summary: (cached.value.summary ?? '').trim().slice(0, 60),
                       latest_updates: Array.isArray(cached.value.latest_updates)
-                          ? cached.value.latest_updates.slice(0, 2).map((item) => item.title).filter(Boolean)
+                          ? cached.value.latest_updates
+                              .slice(0, 3)
+                              .map((item) => ({
+                                  time: typeof item?.time === 'string' ? item.time.trim() : '',
+                                  date: typeof item?.date === 'string' ? item.date.trim() : undefined,
+                                  title: typeof item?.title === 'string' ? item.title.trim() : '',
+                                  impact: typeof item?.impact === 'string' ? item.impact.trim() : ''
+                              }))
+                              .filter((item) => item.time.length > 0 && item.title.length > 0 && item.impact.length > 0)
+                          : [],
+                      transmission_chain: Array.isArray(cached.value.transmission_chain)
+                          ? cached.value.transmission_chain
+                              .slice(0, 2)
+                              .map((item) => ({
+                                  order: typeof item?.order === 'string' ? item.order.trim() : '',
+                                  title: typeof item?.title === 'string' ? item.title.trim() : '',
+                                  pricing: typeof item?.pricing === 'string' ? item.pricing.trim() : '',
+                                  summary: typeof item?.summary === 'string' ? item.summary.trim() : ''
+                              }))
+                              .filter(
+                                  (item) =>
+                                      item.order.length > 0
+                                      && item.title.length > 0
+                                      && item.pricing.length > 0
+                                      && item.summary.length > 0
+                              )
                           : [],
                   }
                 : null;
         })
-        .filter((item): item is { slug: string; title: string; status: string; summary: string; latest_updates: string[] } => Boolean(item));
+        .filter((item): item is NarrativeTopicPromptContext => Boolean(item));
 }
 
 function computeMomentumDays(
@@ -2700,7 +2734,7 @@ function buildDailyNarrativeMarketSignalsSection(
         return parts.join('  ');
     });
 
-    return `今日跨资产变动（仅供叙事归因，不代表方向建议）：\n${lines.join('\n')}`;
+    return `今日跨资产变动（今日=当日变动；5日=近5交易日累计，用于判断是否处于极端位置；仅供叙事归因，不代表方向建议）：\n${lines.join('\n')}`;
 }
 
 const DAILY_NARRATIVE_BUCKETS = ['美股', '港股', '黄金', '美债', '汇率', '大宗商品'] as const;
@@ -2848,10 +2882,29 @@ async function generateDailyMarketNarrative(): Promise<DailyMarketNarrative | nu
     const marketSnapshot = await fetchClientFocusMarketStateSnapshot().catch(() => null);
 
     const topicSection = cachedTopics
-        .map(
-            (item, index) =>
-                `${index + 1}. slug=${item.slug}\n标题=${item.title}\n状态=${item.status || '无'}\n摘要=${item.summary || '无'}\n最新事件=${item.latest_updates.join('；') || '无'}`
-        )
+        .map((item) => {
+            const latestUpdatesSection =
+                item.latest_updates.length > 0
+                    ? item.latest_updates
+                        .map((update) => `[${update.time}${update.date ? `/${update.date}` : ''}] ${update.title} → 市场影响：[${update.impact}]`)
+                        .join('\n')
+                    : '无';
+
+            const transmissionChainSection =
+                item.transmission_chain.length > 0
+                    ? `\n\n传导链（分析框架）：\n${item.transmission_chain
+                        .map((chain) => `[${chain.order}]：${chain.title}（${chain.pricing}）— ${chain.summary}`)
+                        .join('\n')}`
+                    : '';
+
+            return `[${item.title}] [${item.status || '无'}]
+核心摘要：${item.summary || '无'}
+
+最新动态（时序，最新在前）：
+${latestUpdatesSection}${transmissionChainSection}
+
+---`;
+        })
         .join('\n\n');
     const marketSignalsSection = buildDailyNarrativeMarketSignalsSection(marketSnapshot);
     const narrativeHistorySection =
@@ -2860,7 +2913,7 @@ async function generateDailyMarketNarrative(): Promise<DailyMarketNarrative | nu
     const userPrompt = `
 你是香港私人银行资深策略师，职责是帮助 RM 每天识别真正影响客户 SAA 组合的结构性变量，而不是追逐 headline。
 
-当前活跃客户焦点主题：
+今日客户焦点话题摘要：
 
 ${topicSection}
 
@@ -2944,11 +2997,70 @@ ${narrativeHistorySection}
   ]
 }
 
+3. 生成 3-5 个资产桶复核卡片（asset_buckets）
+   - bucket 只能从：美股、港股、黄金、美债、汇率、大宗商品 中选择
+   - 必须至少包含：美股、港股、黄金（PB客户核心持仓，除非无任何市场数据否则必须生成）
+   - 美债：只要上方市场数据中 TNX 有变动，或主叙事涉及利率/避险，必须包含
+   - 大宗商品：只在 commodity-led 场景（原油/贵金属主导跨资产走势）才包含；不作为默认桶
+
+   每个 bucket 的三个字段生成规则：
+
+   【thesis_check】
+   - 以"客户"开头的疑问句，≤25字
+   - 引导RM问出：客户当初买这个资产的逻辑现在是否还成立
+
+   【today_signal】
+   - 必须包含今日真实数字，≤30字
+   - 来自上方市场数据，不可编造
+   - 如果该资产5日涨幅超过3%，必须提及（这是判断是否处于极端位置的依据）
+
+   【portfolio_implication】
+   ⚠️ 这是最关键字段，必须有IC判断角度，不能是教科书式风险提示。
+
+   按资产类型的IC判断逻辑：
+
+   美股：
+   - 如果SPX/NDX 5日涨幅≥3%（接近或处于历史高位）：
+     → implication应判断"高位持仓是否应该锁定部分获利"或"没有仓位的客户此时不建议追高，等待回调机会"
+   - 如果SPX/NDX今日下跌：
+     → 判断是否是地缘/宏观催化，还是技术性回调
+   - 禁止："复核行业分布是否过度暴露于某板块"这类无方向判断
+
+   港股：
+   - 优先结合今日结构性亮点（传导链或最新动态中提到的具体板块/个股主题）
+   - 如果提到AI/科技次新股或南向资金，直接引用
+   - 停火后港股作为EM资金回流受益标的，这个角度要体现
+   - 禁止：用单日涨幅微小来判断"拖累弹性"这类无意义评论
+
+   黄金：
+   - 必须判断：当前避险逻辑是否仍然成立（地缘缓和 = 避险逻辑弱化）
+   - 如果黄金今日下跌而风险资产上涨：直接点出"避险溢价正在被挤出"
+   - 如果输入的topic摘要中有"黄金逻辑重估"相关内容：引用其核心传导逻辑
+   - 禁止："结合美元走势评估相对吸引力"这类模糊判断
+
+   美债：
+   - 必须说清楚 TNX 变动对不同久期产品的含义（收益率下行 = 债券价格上涨 = 久期敞口受益）
+   - 点出受益的具体资产类型：IG债券、债券基金、长期国债ETF
+   - 框架：是否符合机构 house view 的久期配置方向
+   - 禁止："确认久期配置是否服务原先的判断"这类空话
+
+   汇率：
+   - 聚焦美元指数方向对客户实际持仓的影响（美元走强 = 港股/EM 承压；走弱 = 有利）
+   - 如有USDCNH数据，提及人民币方向
+
+   大宗商品（仅在commodity-led场景生成）：
+   - 原油：地缘溢价 vs 基本面，两个逻辑对应完全不同的持仓目的
+   - 必须帮助RM判断客户原始买入逻辑是哪一种
+
+4. 选择今日IC判断最有价值、最需要RM向客户核实的资产作为 default_expanded_bucket
+
 规则：
-- asset_buckets至少3个（美股、港股、黄金是PB客户核心持仓，除非无市场数据否则必须包含）
-- thesis_check必须以”客户”开头，禁止使用”您”，引导RM思考客户的原始买入逻辑是否还成立
-- today_signal中的数字必须来自下方提供的市场数据，不可编造
-- portfolio_implication不能是”关注走势”这类无行动含义的废话` },
+- portfolio_implication是整张卡最重要的字段：必须有方向性判断，不能是"关注走势"/"评估是否变化"/"复核是否合适"这类无行动含义的废话
+- 你是一位有10年经验的PB IC，这是给RM在客户见面前5分钟看的，必须有具体IC角度
+- thesis_check必须以"客户"开头，禁止使用"您"
+- today_signal数字必须来自上方提供的市场数据，不可编造
+- 如果上方topic摘要中有传导链内容，portfolio_implication应优先引用其中的具体判断，而不是另起炉灶
+- 禁止输出任何教科书式风险管理语言` },
                     { role: 'user', content: userPrompt }
                 ],
                 max_tokens: 650,
