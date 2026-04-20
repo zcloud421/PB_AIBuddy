@@ -32,7 +32,11 @@ import { runDailyScreener } from '../scoring-engine';
 import { selectDailyBest, selectDailyRecommendationShowcase } from '../services/ideas-service';
 import { runPriceTracker } from '../services/tracker-service';
 import { runThemeBasketDaily } from '../services/theme-basket-service';
-import { generateClientFocusDailyVerdictSnapshot } from '../services/client-focus-service';
+import {
+    generateClientFocusDailyVerdictSnapshot,
+    getClientFocusList,
+    getDailyMarketNarrative
+} from '../services/client-focus-service';
 import { generateNarrative } from '../utils/narrative-generator';
 import { sendDowngradeNotifications } from '../utils/push-notifications';
 import { ensureDeviceTables } from '../db/queries/devices';
@@ -290,6 +294,21 @@ async function main(): Promise<void> {
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             console.warn(`[focus-daily] middle-east-tensions failed (${message})`);
+        }
+
+        try {
+            await getClientFocusList();
+            const dailyNarrative = await getDailyMarketNarrative();
+            if (dailyNarrative) {
+                console.log(
+                    `[focus-daily] daily narrative prepared (${dailyNarrative.primary_slug} / ${dailyNarrative.asset_buckets.map((item) => item.bucket).join(', ')})`
+                );
+            } else {
+                console.warn('[focus-daily] daily narrative skipped: no renderable output');
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn(`[focus-daily] daily narrative failed (${message})`);
         }
 
         try {
