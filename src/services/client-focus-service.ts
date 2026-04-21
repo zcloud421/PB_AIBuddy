@@ -3353,8 +3353,15 @@ ${latestUpdatesSection}${transmissionChainSection}
     const narrativeHistorySection =
         narrativeHistory.map((record) => `${record.date}: ${record.primary_slug}`).join('\n') || '暂无历史';
 
+    const nowHKT = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Hong_Kong' }));
+    const hktHour = nowHKT.getHours();
+    const hktMinute = nowHKT.getMinutes();
+    const hktTimeLabel = `${String(hktHour).padStart(2, '0')}:${String(hktMinute).padStart(2, '0')}`;
+    const hkMarketClosed = hktHour >= 16;
+
     const userPrompt = `
 你是香港私人银行资深策略师，职责是帮助 RM 每天识别真正影响客户 SAA 组合的结构性变量，而不是追逐 headline。
+当前香港时间：${hktTimeLabel}（港股${hkMarketClosed ? '已收盘' : '盘中/未开盘'}）
 ${earningsSection ? `\n${earningsSection}\n` : ''}
 今日客户焦点话题摘要：
 
@@ -3381,7 +3388,7 @@ ${narrativeHistorySection}
      - thesis_check：市场总结+归因，≤45字，先交代今天发生了什么，再解释为什么这样走；虽然字段名叫 thesis_check，但这里不要写问句，不要直接写客户持仓复核
      - portfolio_implication：今日需留意，≤40字，告诉RM接下来1-3天该盯什么催化、风险点或验证窗口；如确有必要，可轻带一句持仓含义，但不能喧宾夺主
 - 先把今天市场讲明白，再告诉RM接下来该盯什么；不要一上来就写持仓复核模板
-- 香港白天语境下，美股/美债/美元指数默认表述为“昨日收盘”或“隔夜”，不要写成“今日上涨/今日下跌”
+- 时间表述规则：美股/美债/美元指数从HK视角永远是”隔夜”或”昨收”（美市在HKT凌晨4点收盘）；港股时间表述根据当前香港时间判断：港股已收盘时写”今收”，港股未收盘时写”今日”
 - 若单日波动很小（例如黄金<1%、汇率信号未达显著阈值），不要硬写成“今天需要review”，可省略该 bucket，或明确说明“当前不足以单独触发复核”
 - 今日/5日/YTD 的组合更适合 PB 监测语境：今日负责触发，5日负责判断是否过热，YTD负责判断中期趋势
 - 写法上优先采用“盘面事实 + 直接驱动 + 下一观察点”的交易台摘要语气，而不是抽象术语堆叠
@@ -3485,7 +3492,7 @@ ${narrativeHistorySection}
    - 如果SPX/NDX 5日涨幅≥3% 但 无近期财报：
      → 判断反弹质量：是否为空头回补/流动性驱动（而非盈利支撑）；接下来重点看这波累涨是否有盈利与财报继续接棒，而不是停留在情绪和仓位推动
    - 如果市场数据包含SPX绝对价位，优先引用（如"标普现报5,570点"），而非只说涨幅%
-   - 香港白天默认写"昨收标普/纳指…"，不写"今日上涨/今日下跌"
+   - 美股从HK视角永远写"隔夜"或"昨收"，不写"今日上涨/今日下跌"
    - 禁止："复核行业分布是否过度暴露于某板块"这类无方向判断
 
    港股：
@@ -3510,7 +3517,7 @@ ${narrativeHistorySection}
    - 框架：是否符合机构 house view 的久期配置方向
    - 如果 primary_slug 是 middle-east-tensions 或 private-credit-stress：
      → portfolio_implication必须额外提及 AT1 债券（HSBC/BACR/BNP等）的信用利差敞口——地缘风险溢价上升或信贷压力扩散时，AT1是HK PB客户最直接受影响的固收持仓
-   - 香港白天默认写"昨收10Y收益率…"，不是"今日收益率…"
+   - 美债从HK视角永远写"隔夜"或"昨收10Y收益率…"，不是"今日收益率…"
    - 禁止："确认久期配置是否服务原先的判断"这类空话
 
    汇率（触发条件：USDJPY或USDCHF单日变动≥0.5%，或USDCNH单日变动≥0.3%，或DXY 5日变动≥1.5%）：
