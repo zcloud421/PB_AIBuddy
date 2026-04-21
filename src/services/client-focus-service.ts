@@ -3007,8 +3007,10 @@ function buildDailyNarrativeMarketSignalsSection(
         const todayChange = item.change_pct;
         const fiveDayChange = item.change_5d_pct;
         const ytdChange = item.change_ytd_pct;
-        const latestStr = item.latest !== null && item.latest !== undefined
-            ? ` (${item.latest.toFixed(item.code === 'TNX' ? 2 : item.code === 'USDCNH' || item.code === 'USDJPY' || item.code === 'USDCHF' ? 4 : 2)})`
+        const isFxOrRate = ['USDCNH', 'USDJPY', 'USDCHF', 'DXY'].includes(item.code);
+        const latestStr =
+            item.latest !== null && item.latest !== undefined
+                ? ` (${item.latest.toFixed(isFxOrRate ? 4 : item.code === 'TNX' ? 2 : 2)})`
             : '';
         const parts: string[] = [`${item.name}${latestStr}`];
 
@@ -3042,26 +3044,23 @@ function buildDailyNarrativeMarketSignalsSection(
 
 async function buildEarningsCalendarSection(): Promise<string> {
     try {
-        const rows = await getUpcomingEarningsNextNDays(7);
-        if (rows.length === 0) {
-            return '';
-        }
+        const rows = await getUpcomingEarningsNextNDays(2);
+        if (rows.length === 0) return '';
 
-        const byDate = new Map<string, string[]>();
+        const today: string[] = [];
+        const tomorrow: string[] = [];
+
         for (const row of rows) {
-            const existing = byDate.get(row.report_date) ?? [];
-            existing.push(row.symbol);
-            byDate.set(row.report_date, existing);
+            if (row.days_until === 0) today.push(row.symbol);
+            else if (row.days_until === 1) tomorrow.push(row.symbol);
         }
 
         const lines: string[] = [];
-        for (const [date, symbols] of byDate) {
-            const daysUntil = rows.find((item) => item.report_date === date)?.days_until ?? 0;
-            const label = daysUntil === 0 ? '今日' : daysUntil === 1 ? '明日' : `${daysUntil}日后`;
-            lines.push(`${date}（${label}）：${symbols.join('、')}`);
-        }
+        if (today.length > 0) lines.push(`今日财报：${today.join('、')}`);
+        if (tomorrow.length > 0) lines.push(`明日财报：${tomorrow.join('、')}`);
+        if (lines.length === 0) return '';
 
-        return `未来7日重要财报（来自earnings_calendar）：\n${lines.join('\n')}`;
+        return `⚠️ 关键财报（优先级最高，必须在 narrative 和美股 bucket 中体现）：\n${lines.join('\n')}`;
     } catch {
         return '';
     }
@@ -3364,13 +3363,13 @@ ${latestUpdatesSection}${transmissionChainSection}
 
     const userPrompt = `
 你是香港私人银行资深策略师，职责是帮助 RM 每天识别真正影响客户 SAA 组合的结构性变量，而不是追逐 headline。
-
+${earningsSection ? `\n${earningsSection}\n` : ''}
 今日客户焦点话题摘要：
 
 ${topicSection}
 
 ${marketSignalsSection}
-${earningsSection ? `\n${earningsSection}\n` : ''}
+
 叙事连续主导天数参考（用于判断结构性 vs 噪音）：
 ${narrativeHistorySection}
 
@@ -3379,8 +3378,8 @@ ${narrativeHistorySection}
    - 如果当前 primary_slug 已连续主导多天，需要有新的强信号才能切换，否则保持原叙事
    - 单日价格跳动不足以触发叙事切换，除非同时有多个资产类别同向确认
 2. 用 1 句话描述今天市场在定价什么（narrative，≤40字）
-   - 如果上方财报日历显示今日或明日有重要财报，narrative必须提及"财报季检验"或具体公司名称
-   - 财报是"盈利能否支撑反弹"的测试窗口，比单日价格跳动更具结构性
+   - 如果顶部财报日历显示今日或明日有关键财报，narrative必须体现"财报季是验证反弹成色的测试窗口"这一判断
+   - 财报事件的结构性重要性高于单日价格跳动
 3. 生成 3-5 个资产桶审视卡片（asset_buckets）
    - bucket 只能从：美股、港股、黄金、美债、汇率、大宗商品 中选择
    - 必须至少生成 3 个桶；PB 客户的核心配置桶优先级应为：美股、港股、美债，其次才是黄金；大宗商品不是默认核心桶
@@ -3478,16 +3477,14 @@ ${narrativeHistorySection}
    按资产类型的IC判断逻辑：
 
    美股：
-   - 如果上方财报日历显示今日/明日有重要财报（如TSLA、GEV、UNH等）：
-     → portfolio_implication必须提及财报是"验证反弹成色"的关键测试，不宜在财报前追高
-   - 如果SPX/NDX 5日涨幅≥3%（接近或处于历史高位）且有近期财报：
-     → 明确判断：高位+财报窗口 = 不建议追高，等财报确认盈利韧性后再判断
-   - 如果SPX/NDX 5日涨幅≥3%但无近期财报：
-     → 判断是否为获利节点；说明反弹是否由盈利支撑还是空头回补/流动性驱动
-   - 如果SPX/NDX今日下跌：
-     → 判断是否是地缘/宏观催化，还是财报不及预期触发
-   - 香港白天默认写"昨收标普/纳指…"，不是"今日上涨/今日下跌"
-   - 如果市场数据包含绝对价格（如SPX 5570），优先引用绝对位置而非只说涨幅%
+   - 如果顶部财报日历显示今日/明日有重要财报（如TSLA、GEV、UNH、AAPL等大市值公司）：
+     → portfolio_implication必须明确：财报是检验"反弹由盈利支撑还是空头回补"的关键窗口；财报前不建议追高，等结果出来再判断
+   - 如果SPX/NDX 5日涨幅≥3% 且 有近期财报：
+     → 高位+财报窗口 = 明确建议不追高，等财报验证盈利韧性
+   - 如果SPX/NDX 5日涨幅≥3% 但 无近期财报：
+     → 判断反弹质量：是否为空头回补/流动性驱动（而非盈利支撑）；5日累涨是否已过热，持仓客户可考虑锁定部分获利
+   - 如果市场数据包含SPX绝对价位，优先引用（如"标普现报5,570点"），而非只说涨幅%
+   - 香港白天默认写"昨收标普/纳指…"，不写"今日上涨/今日下跌"
    - 禁止："复核行业分布是否过度暴露于某板块"这类无方向判断
 
    港股：
@@ -3508,7 +3505,9 @@ ${narrativeHistorySection}
    - 必须说清楚 TNX 变动对不同久期产品的含义（收益率下行 = 债券价格上涨 = 久期敞口受益）
    - 点出受益的具体资产类型：IG债券、债券基金、长期国债ETF
    - 框架：是否符合机构 house view 的久期配置方向
-   - 香港白天默认写“昨日收盘10Y收益率…”，不是“今日收益率…”
+   - 如果 primary_slug 是 middle-east-tensions 或 private-credit-stress：
+     → portfolio_implication必须额外提及 AT1 债券（HSBC/BACR/BNP等）的信用利差敞口——地缘风险溢价上升或信贷压力扩散时，AT1是HK PB客户最直接受影响的固收持仓
+   - 香港白天默认写"昨收10Y收益率…"，不是"今日收益率…"
    - 禁止："确认久期配置是否服务原先的判断"这类空话
 
    汇率（触发条件：USDJPY或USDCHF单日变动≥0.5%，或USDCNH单日变动≥0.3%，或DXY 5日变动≥1.5%）：
@@ -3521,8 +3520,10 @@ ${narrativeHistorySection}
    - portfolio_implication必须明确指出：是carry unwind风险、是人民币方向变化的配置含义，还是美元趋势对EM的影响
 
    大宗商品（仅在commodity-led场景生成）：
-   - 原油：地缘溢价 vs 基本面，两个逻辑对应完全不同的持仓目的
-   - 必须帮助RM判断客户原始买入逻辑是哪一种
+   - 原油在本系统中是传导因子，不是独立持仓建议对象：油价上涨 → 通胀预期上升 → 利率预期上修 → 债券/股票受压，这是它影响客户组合的路径
+   - 只有当客户明确持有能源股、商品基金或原油相关结构性产品时，才生成大宗商品 bucket
+   - 若生成，portfolio_implication必须指明：客户买入是基于地缘溢价还是供需基本面——两个逻辑在停火/缓和时的仓位应对完全不同
+   - 禁止把大宗商品 bucket 当作"油价大涨就必须提一下"的补充说明用
 
 4. 选择今日IC判断最有价值、最需要RM向客户核实的资产作为 default_expanded_bucket
 
@@ -3536,7 +3537,7 @@ ${narrativeHistorySection}
 - 禁止输出任何教科书式风险管理语言` },
                     { role: 'user', content: userPrompt }
                 ],
-                max_tokens: 750,
+                max_tokens: 800,
                 temperature: 0.3
             })
         });
