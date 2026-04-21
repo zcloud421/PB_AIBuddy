@@ -147,11 +147,18 @@ export interface ThemeBasketItem {
     driver: string;
 }
 
+export interface ThemePerformanceInterpretation {
+    summary: string;
+    laggards: string;
+    client: string;
+}
+
 export interface ThemeWinnersLosersResult {
     scenario_label: string;
     updated_at: string;
     winners: ThemeBasketItem[];
     losers: ThemeBasketItem[];
+    interpretation?: ThemePerformanceInterpretation | null;
 }
 
 export interface ClientFocusUpdate {

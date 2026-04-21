@@ -17,6 +17,11 @@ interface BasketPerfWithMeta extends ThemeBasket, BasketRawPerf {}
 interface DeepSeekThemeBasketResponse {
     scenario_label?: string;
     updated_at?: string;
+    interpretation?: {
+        summary?: string;
+        laggards?: string;
+        client?: string;
+    };
     winners?: Array<{
         id?: string;
         label?: string;
@@ -138,6 +143,7 @@ ${JSON.stringify(basketPerformanceData, null, 2)}
 2. winners 按 ytd_perf 降序排列
 3. losers 按 ytd_perf 升序排列
 4. 每个板块生成一个 driver 字段，15字以内，说明其表现的核心机制
+5. 再生成 interpretation 对象，基于当天真正的 winners / losers 结果写 3 句动态解读
 
 driver 写作规则：
 - 必须包含具体的传导机制，禁止泛化表达
@@ -145,11 +151,23 @@ driver 写作规则：
 - winners driver 示例：'霍尔木兹封锁预期推升原油供给溢价'、'停火后估值修复驱动半导体反弹'
 - losers driver 示例：'高利率环境压制高估值软件折现率'、'AI替代预期压缩传统IT服务需求'
 
+interpretation 写作规则：
+- interpretation.summary：先总结当前 winners 最集中的主线，必须基于当天真实 winners，不可套模板，不可引用未进入 winners 的板块
+- interpretation.laggards：总结当前 losers / laggards 最集中的压力来源；如果 losers 数量很少，可明确写“年内明确跑输板块有限，当前主要落后在……”
+- interpretation.client：给 RM 一句客户沟通提示，说明这组结构更像在交易什么，以及接下来最该看什么
+- 三句都必须动态跟随当前结果变化，不能默认写 AI 算力链或企业软件，除非它们今天真的在对应分组里
+- 禁止复述固定模板，禁止输出与 winners / losers 结果不一致的行业
+
 输出以下 JSON，不得输出任何 JSON 以外的内容：
 
 {
   "scenario_label": "${scenarioLabel}",
   "updated_at": "${updatedAt}",
+  "interpretation": {
+    "summary": "一句动态总结 winners 主线",
+    "laggards": "一句动态总结 losers/laggards",
+    "client": "一句 RM 客户沟通提示"
+  },
   "winners": [
     {
       "id": "必须来自传入数据的板块id，不可自创",
@@ -168,6 +186,7 @@ driver 写作规则：
 - 不可自创板块id或板块名，所有id和名称必须来自传入数据
 - 不可编造或修改涨跌幅数字，必须原样输出传入数据
 - driver不可超过15字
+- interpretation 三句必须和当天 winners / losers 结果一致
 - 不可输出JSON以外任何内容
 `.trim();
 
@@ -219,8 +238,31 @@ driver 写作规则：
         updated_at: typeof parsed.updated_at === 'string' && parsed.updated_at.trim()
             ? parsed.updated_at.trim()
             : updatedAt,
+        interpretation: sanitizeInterpretation(parsed.interpretation),
         winners,
         losers
+    };
+}
+
+function sanitizeInterpretation(
+    interpretation: DeepSeekThemeBasketResponse['interpretation'],
+) {
+    if (!interpretation) {
+        return null;
+    }
+
+    const summary = typeof interpretation.summary === 'string' ? interpretation.summary.trim() : '';
+    const laggards = typeof interpretation.laggards === 'string' ? interpretation.laggards.trim() : '';
+    const client = typeof interpretation.client === 'string' ? interpretation.client.trim() : '';
+
+    if (!summary || !laggards || !client) {
+        return null;
+    }
+
+    return {
+        summary,
+        laggards,
+        client,
     };
 }
 
