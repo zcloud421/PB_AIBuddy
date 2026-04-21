@@ -2830,7 +2830,7 @@ function buildFallbackDailyNarrative(
         }
         assetBuckets.push({
             bucket: '美股',
-            thesis_check: '客户持有美股是基于AI增长逻辑还是地缘缓和逻辑？',
+            thesis_check: '关税/宏观扰动持续 → 若客户持仓基于AI资本开支或增长逻辑，此轮波动是否动摇核心thesis？',
             today_signal: usEquitySignal,
             portfolio_implication: usImplication
         });
@@ -2849,7 +2849,7 @@ function buildFallbackDailyNarrative(
         }
         assetBuckets.push({
             bucket: '港股',
-            thesis_check: '客户持有港股是基于南向资金趋势还是中国复苏逻辑？',
+            thesis_check: '港股南向与政策双线驱动 → 若客户持仓基于中国复苏逻辑，当前信号是否仍支持该判断？',
             today_signal: hkSignal,
             portfolio_implication: hkImplication
         });
@@ -2877,7 +2877,7 @@ function buildFallbackDailyNarrative(
         }
         assetBuckets.push({
             bucket: '黄金',
-            thesis_check: '客户持有黄金是为了避险保护还是对冲实际利率下行？',
+            thesis_check: '黄金波动 → 若客户持有黄金目的是避险保护，实际利率与风险资产的走向是否正在动摇这一逻辑？',
             today_signal: goldSignal,
             portfolio_implication: goldImplication
         });
@@ -2901,7 +2901,7 @@ function buildFallbackDailyNarrative(
     if (commoditySignal && commodityLed && assetBuckets.length < 5) {
         assetBuckets.push({
             bucket: '大宗商品',
-            thesis_check: '客户持有商品的通胀或地缘逻辑是否仍然成立？',
+            thesis_check: '原油走势由地缘溢价主导 → 若客户持有商品相关资产，当前地缘变化是否已传导至预期的仓位方向？',
             today_signal: commoditySignal,
             portfolio_implication: '若客户持有商品相关资产，可确认其配置逻辑押注的是地缘溢价，还是供需基本面。'
         });
@@ -3168,24 +3168,24 @@ function buildTreasuryBucket(
         thesisCheck = '客户配置美债是押注联储路径前移，还是为了给组合增加流动性缓冲？';
         portfolioImplication = '若客户持有美债，当前更像联储路径重新前移带来的久期受益，可确认债券仓位是否仍符合 house view 的久期方向。';
     } else if ((tnxUp || strongFiveDayBackup) && (dxyUp || longEndStillElevated)) {
-        thesisCheck = '客户配置美债是基于降息预期，还是默认长端供给与财政压力会回落？';
+        thesisCheck = '长端收益率走高 → 若客户持仓基于降息预期，财政供给与term premium压力是否已动摇这一判断？';
         portfolioImplication = '若客户持有美债，当前更像财政供给与term premium重新主导长端，久期仓位不宜只按降息逻辑理解。';
     } else if ((tnxDown || strongFiveDayRelief) && equityRiskOn && !oilDown) {
-        thesisCheck = '客户配置美债是为了锁定票息，还是为股票仓位提供利率对冲？';
+        thesisCheck = '隔夜利率缓解 → 若客户美债是为股票仓位提供对冲，当前债股同步回稳是否意味着缓冲作用已减弱？';
         portfolioImplication = '若客户持有美债，当前更像在风险资产回稳中利率压力同步缓解，适合确认债券仓位是否仍承担组合缓冲角色。';
     } else if (longEndSoftenedYtd && !tnxUp) {
-        thesisCheck = '客户配置美债是为了中期久期收益，还是仅把它视为短期避险工具？';
+        thesisCheck = '年内长端收益率已从高位回落 → 若客户持仓基于久期收益，原先判断是否已兑现，还是仍有空间？';
         portfolioImplication = '若客户持有美债，年内收益率已从高位明显回落，当前更适合核对久期仓位是否已兑现原先判断，而非继续机械加码。';
     }
 
     if (primarySlug === 'usd-strength') {
-        thesisCheck = '客户配置美债是基于美元避险，还是押注实际利率回落？';
+        thesisCheck = '美元走强同期出现 → 若客户美债是基于美元避险而非降息逻辑，两者方向是否仍然一致？';
         portfolioImplication = '复核美债与美元敞口，确认利率与汇率判断是否仍然一致。';
     } else if (primarySlug === 'gold-repricing') {
-        thesisCheck = '客户配置美债是为了对冲实际利率，还是承接避险仓位？';
+        thesisCheck = '黄金重估背景下 → 若客户美债是为对冲实际利率，黄金与美债的避险角色是否出现分工混乱？';
         portfolioImplication = '核对美债与黄金的分工，确认避险与利率保护逻辑是否仍然成立。';
     } else if (primarySlug === 'private-credit-stress') {
-        thesisCheck = '客户配置美债是为了流动性缓冲，还是信用风险对冲？';
+        thesisCheck = '私募信用压力背景下 → 若客户美债是流动性缓冲，当前久期配置是否仍匹配该目的？';
         portfolioImplication = '复核美债久期与信用资产比例，确认防守仓位是否仍匹配当前压力源。';
     }
 
@@ -3231,7 +3231,7 @@ function buildFxBucket(
     const todaySignal = joinMonitoringContexts(signalItems) || '美元与主要融资货币方向出现变化。';
 
     // Determine primary FX narrative
-    let thesisCheck = '客户外汇持仓是基于收益套利还是避险对冲？';
+    let thesisCheck = '汇率出现方向性波动 → 若客户有carry trade或外币计价仓位，当前变化是否动摇原始配置逻辑？';
     let portfolioImplication = '复核客户FX敞口，确认当前汇率走势是否改变原始配置逻辑。';
 
     const jpyAppreciating = typeof usdjpy?.change_pct === 'number' && usdjpy.change_pct < -0.5;
@@ -3240,21 +3240,21 @@ function buildFxBucket(
     const cnhWeakening = typeof usdcnh?.change_pct === 'number' && usdcnh.change_pct > 0.3;
 
     if (jpyAppreciating || chfAppreciating) {
-        thesisCheck = '客户是否有借入日元/瑞郎进行套息交易的融资仓位？';
         const currencies = [jpyAppreciating && '日元', chfAppreciating && '瑞郎'].filter(Boolean).join('、');
+        thesisCheck = `${currencies}升值触发carry unwind → 若客户有套息融资仓位，当前升值幅度是否已触及亏损区间？`;
         portfolioImplication = `${currencies}升值是carry unwind信号，需复核客户套息仓位是否已面临亏损压力，必要时控制敞口。`;
     } else if (cnhStrengthening) {
-        thesisCheck = '客户持有USD或CNH资产时，是否已把人民币回升纳入判断？';
+        thesisCheck = '人民币走强 → 若客户持仓基于人民币贬值或美元强势逻辑，此信号是否动摇该判断？';
         portfolioImplication = '人民币走强更利于港股与CNH资产表现，可与客户核对其美元与人民币敞口比例是否仍匹配原先判断。';
     } else if (cnhWeakening) {
-        thesisCheck = '客户港股或中资资产的人民币汇率敞口是否已对冲？';
+        thesisCheck = '人民币走弱 → 若客户港股或中资资产未对冲汇率，此贬值幅度是否已影响预期收益？';
         portfolioImplication = '人民币走弱会加大港股和中资资产的汇率压力，可先核对客户是否已有相应对冲。';
     } else if (dxyTrending && dxy && typeof dxy.change_5d_pct === 'number') {
         if (dxy.change_5d_pct > 0) {
-            thesisCheck = '客户新兴市场及港股仓位是否已考虑美元走强的系统性压力？';
+            thesisCheck = '美元5日持续走强 → 若客户持有EM或港股仓位，这一系统性压力是否已纳入持仓逻辑？';
             portfolioImplication = '美元持续走强对EM资产形成压力，复核客户持有的港股及EM债券是否需要减少敞口。';
         } else {
-            thesisCheck = '美元走弱是否为客户的非美资产创造了再配置机会？';
+            thesisCheck = '美元5日走弱 → 若客户持仓基于美元强势，此方向性转变是否动摇原有判断？';
             portfolioImplication = '美元走弱利好EM及港股，可与客户讨论是否适当增加非美货币计价资产的配置。';
         }
     }
@@ -3384,7 +3384,7 @@ ${narrativeHistorySection}
    - bucket 只能从：美股、港股、黄金、美债、汇率、大宗商品 中选择
    - 必须至少生成 3 个桶；PB 客户的核心配置桶优先级应为：美股、港股、美债，其次才是黄金；大宗商品不是默认核心桶
    - 每个 bucket 必须包含：
-     - thesis_check：疑问句，≤25字，帮助 RM 问出”客户当初买这个资产的 thesis 还成立吗”，必须以”客户”开头，禁止使用”您”
+     - thesis_check：格式为”[今日数字+触发因素] → 若客户持仓基于[具体逻辑]，此信号是否动摇该判断？”，≤35字，直接从信号数字入手，禁止使用”您”，禁止纯方向性问题（”是否应减仓？”），必须把 today_signal 的核心数字带入thesis_check形成数据→逻辑的闭环
      - today_signal：≤40字，必须包含今日真实数字；若5日或YTD能帮助判断是否已处于阶段性高位/低位，应一并写出
      - portfolio_implication：≤35字，必须是持仓复核动作，不是市场评论
 - 不生成通用分析；每条都要对应一个具体的持仓复核场景
@@ -3406,7 +3406,7 @@ ${narrativeHistorySection}
   "asset_buckets": [
     {
       "bucket": "美股|港股|黄金|美债|汇率|大宗商品",
-      "thesis_check": "以'客户'开头的疑问句，≤25字，例如：客户持仓港股是基于南向资金还是盈利复苏逻辑？",
+      "thesis_check": "今日数字+触发因素 → 若客户持仓基于X逻辑，此信号是否动摇该判断？例如：昨收纳指跌2.3%，关税新政为导火索 → 若客户押注AI资本开支周期，此轮下跌是否动摇核心逻辑？",
       "today_signal": "必须包含今日真实数字的1句话；如相关可同时包含5日或YTD，≤40字",
       "portfolio_implication": "持仓行动含义，≤35字，以'若...'或动词开头"
     }
@@ -3446,7 +3446,7 @@ ${narrativeHistorySection}
   "asset_buckets": [
     {
       "bucket": "美股|港股|黄金|美债|汇率|大宗商品",
-      "thesis_check": "以客户开头的疑问句，≤25字",
+      "thesis_check": "[数字+触发因素] → 若客户持仓基于X逻辑，此信号是否动摇该判断？≤35字",
       "today_signal": "必须包含今日真实数字的1句话，≤30字",
       "portfolio_implication": "持仓行动含义，≤35字，以若或动词开头"
     }
@@ -3462,8 +3462,11 @@ ${narrativeHistorySection}
    每个 bucket 的三个字段生成规则：
 
    【thesis_check】
-   - 以"客户"开头的疑问句，≤25字
-   - 引导RM问出：客户当初买这个资产的逻辑现在是否还成立
+   - 格式：[今日数字+触发因素] → 若客户持仓基于[具体逻辑]，此信号是否动摇该判断？
+   - ≤35字，直接从信号数字入手，禁止使用"您"
+   - 必须把 today_signal 的核心数字带入，形成"数据→逻辑张力"的闭环
+   - 目的：RM读完后脑子里已经在想"我的客户是哪种情况"，而不是"今天行情怎样"
+   - 禁止纯方向性问题（"客户是否应减仓？"），必须锚定今日数据与特定持仓thesis之间的张力
 
    【today_signal】
    - 必须包含今日真实数字，≤40字
