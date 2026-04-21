@@ -281,6 +281,30 @@ export async function getUpcomingEarningsBySymbol(symbol: string): Promise<Earni
     return result.rows[0] ?? null;
 }
 
+export interface UpcomingEarningsRow {
+    symbol: string;
+    report_date: string;
+    days_until: number;
+}
+
+export async function getUpcomingEarningsNextNDays(days: number): Promise<UpcomingEarningsRow[]> {
+    const result = await pool.query<UpcomingEarningsRow>(
+        `
+        SELECT
+            symbol,
+            report_date::text AS report_date,
+            days_until
+        FROM earnings_calendar
+        WHERE report_date >= CURRENT_DATE
+          AND report_date <= CURRENT_DATE + $1::integer
+        ORDER BY report_date ASC, symbol ASC
+        `,
+        [days]
+    );
+
+    return result.rows;
+}
+
 export async function getIdeasByRunId(runId: string): Promise<TodayIdeaRow[]> {
     const result = await pool.query<TodayIdeaRow>(
         `

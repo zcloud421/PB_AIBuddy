@@ -25,7 +25,7 @@ import type {
 import { fetchNewsItemsByQuery, fetchNewsItemsFromNewsData } from '../data/news-fetcher';
 import { MassiveDataFetcher } from '../data/massive-fetcher';
 import { MassiveClient } from '../data/massive-client';
-import { getLatestClientFocusDailyVerdict, getLatestThemeBasketResult } from '../db/queries/ideas';
+import { getLatestClientFocusDailyVerdict, getLatestThemeBasketResult, getUpcomingEarningsNextNDays } from '../db/queries/ideas';
 import axios from 'axios';
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
@@ -3007,7 +3007,10 @@ function buildDailyNarrativeMarketSignalsSection(
         const todayChange = item.change_pct;
         const fiveDayChange = item.change_5d_pct;
         const ytdChange = item.change_ytd_pct;
-        const parts: string[] = [item.name];
+        const latestStr = item.latest !== null && item.latest !== undefined
+            ? ` (${item.latest.toFixed(item.code === 'TNX' ? 2 : item.code === 'USDCNH' || item.code === 'USDJPY' || item.code === 'USDCHF' ? 4 : 2)})`
+            : '';
+        const parts: string[] = [`${item.name}${latestStr}`];
 
         if (item.code === 'TNX') {
             if (todayChange !== null && todayChange !== undefined && !Number.isNaN(todayChange)) {
@@ -3035,6 +3038,33 @@ function buildDailyNarrativeMarketSignalsSection(
     });
 
     return `今日跨资产变动（今日=当日变动；5日=近5交易日累计，用于判断是否处于极端位置；YTD=年初至今累计，用于判断是否已走出中期趋势；仅供叙事归因，不代表方向建议）：\n${lines.join('\n')}`;
+}
+
+async function buildEarningsCalendarSection(): Promise<string> {
+    try {
+        const rows = await getUpcomingEarningsNextNDays(7);
+        if (rows.length === 0) {
+            return '';
+        }
+
+        const byDate = new Map<string, string[]>();
+        for (const row of rows) {
+            const existing = byDate.get(row.report_date) ?? [];
+            existing.push(row.symbol);
+            byDate.set(row.report_date, existing);
+        }
+
+        const lines: string[] = [];
+        for (const [date, symbols] of byDate) {
+            const daysUntil = rows.find((item) => item.report_date === date)?.days_until ?? 0;
+            const label = daysUntil === 0 ? '今日' : daysUntil === 1 ? '明日' : `${daysUntil}日后`;
+            lines.push(`${date}（${label}）：${symbols.join('、')}`);
+        }
+
+        return `未来7日重要财报（来自earnings_calendar）：\n${lines.join('\n')}`;
+    } catch {
+        return '';
+    }
 }
 
 const DAILY_NARRATIVE_BUCKETS = ['美股', '港股', '黄金', '美债', '汇率', '大宗商品'] as const;
@@ -3328,6 +3358,7 @@ ${latestUpdatesSection}${transmissionChainSection}
         })
         .join('\n\n');
     const marketSignalsSection = buildDailyNarrativeMarketSignalsSection(marketSnapshot);
+    const earningsSection = await buildEarningsCalendarSection();
     const narrativeHistorySection =
         narrativeHistory.map((record) => `${record.date}: ${record.primary_slug}`).join('\n') || '暂无历史';
 
@@ -3339,7 +3370,7 @@ ${latestUpdatesSection}${transmissionChainSection}
 ${topicSection}
 
 ${marketSignalsSection}
-
+${earningsSection ? `\n${earningsSection}\n` : ''}
 叙事连续主导天数参考（用于判断结构性 vs 噪音）：
 ${narrativeHistorySection}
 
@@ -3348,6 +3379,8 @@ ${narrativeHistorySection}
    - 如果当前 primary_slug 已连续主导多天，需要有新的强信号才能切换，否则保持原叙事
    - 单日价格跳动不足以触发叙事切换，除非同时有多个资产类别同向确认
 2. 用 1 句话描述今天市场在定价什么（narrative，≤40字）
+   - 如果上方财报日历显示今日或明日有重要财报，narrative必须提及"财报季检验"或具体公司名称
+   - 财报是"盈利能否支撑反弹"的测试窗口，比单日价格跳动更具结构性
 3. 生成 3-5 个资产桶审视卡片（asset_buckets）
    - bucket 只能从：美股、港股、黄金、美债、汇率、大宗商品 中选择
    - 必须至少生成 3 个桶；PB 客户的核心配置桶优先级应为：美股、港股、美债，其次才是黄金；大宗商品不是默认核心桶
@@ -3445,11 +3478,16 @@ ${narrativeHistorySection}
    按资产类型的IC判断逻辑：
 
    美股：
-   - 如果SPX/NDX 5日涨幅≥3%（接近或处于历史高位）：
-     → implication应判断"高位持仓是否应该锁定部分获利"或"没有仓位的客户此时不建议追高，等待回调机会"
+   - 如果上方财报日历显示今日/明日有重要财报（如TSLA、GEV、UNH等）：
+     → portfolio_implication必须提及财报是"验证反弹成色"的关键测试，不宜在财报前追高
+   - 如果SPX/NDX 5日涨幅≥3%（接近或处于历史高位）且有近期财报：
+     → 明确判断：高位+财报窗口 = 不建议追高，等财报确认盈利韧性后再判断
+   - 如果SPX/NDX 5日涨幅≥3%但无近期财报：
+     → 判断是否为获利节点；说明反弹是否由盈利支撑还是空头回补/流动性驱动
    - 如果SPX/NDX今日下跌：
-     → 判断是否是地缘/宏观催化，还是技术性回调
-   - 香港白天默认写“昨日收盘标普/纳指…”，不是“今日上涨/今日下跌”
+     → 判断是否是地缘/宏观催化，还是财报不及预期触发
+   - 香港白天默认写"昨收标普/纳指…"，不是"今日上涨/今日下跌"
+   - 如果市场数据包含绝对价格（如SPX 5570），优先引用绝对位置而非只说涨幅%
    - 禁止："复核行业分布是否过度暴露于某板块"这类无方向判断
 
    港股：
@@ -3498,7 +3536,7 @@ ${narrativeHistorySection}
 - 禁止输出任何教科书式风险管理语言` },
                     { role: 'user', content: userPrompt }
                 ],
-                max_tokens: 650,
+                max_tokens: 750,
                 temperature: 0.3
             })
         });
