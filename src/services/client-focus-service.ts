@@ -2818,20 +2818,20 @@ function buildFallbackDailyNarrative(
     if (usEquitySignal) {
         const spxPct = spx?.change_pct ?? null;
         const spx5d = spx?.change_5d_pct ?? null;
-        let usAttribution = '美股回吐更像周末地缘扰动与财报前仓位回摆，尚不足以定义主线逆转。';
-        let usImplication = '继续看本周财报能否验证反弹质量，并留意联储路径预期会否被事件与听证再度改写。';
+        let usAttribution = '昨夜美股小幅回吐，更像周末地缘扰动下的仓位回摆，反弹质量仍要等财报季来验证。';
+        let usImplication = '接下来重点看权重股财报与联储路径预期，确认这波修复是盈利支撑，还是流动性与空头回补主导。';
         if (typeof spx5d === 'number' && spx5d >= 4) {
-            usAttribution = '美股5日累涨后仍在高位，当前更像流动性与空头回补推动下等待财报验证的阶段。';
-            usImplication = '重点看财报季能否证明这波上涨由盈利支撑，而不只是高位情绪延续。';
+            usAttribution = '美股5日累涨后仍在高位，当前更像流动性与空头回补先推高估值，财报季才是反弹质量的正式验证窗口。';
+            usImplication = '接下来重点看权重股财报能否证明盈利在接棒，而不是让高位反弹停留在情绪与仓位挤压层面。';
         } else if (typeof spxPct === 'number' && spxPct <= -1.5) {
-            usAttribution = '昨夜美股明显回落，更像地缘与宏观扰动压制风险偏好，而非盈利主线突然逆转。';
-            usImplication = '继续看财报与政策路径能否稳住风险偏好，判断回调是噪音还是反弹质量转弱。';
+            usAttribution = '昨夜美股明显回落，更像地缘与宏观扰动压制短线情绪，而不是盈利主线被突然改写。';
+            usImplication = '接下来重点看财报与政策路径能否稳住情绪，判断这次回调只是headline噪音，还是反弹成色开始转弱。';
         } else if (typeof spxPct === 'number' && spxPct > -1 && spxPct < 0 && typeof spx5d === 'number' && spx5d >= 2.5) {
-            usAttribution = '昨夜小幅回吐更像创新高后的温和整固，周末headline放大了短线情绪但未改写主线。';
-            usImplication = '继续看财报窗口是否能验证AI与权重股盈利韧性，而不是把这波回吐当成主线转弱。';
+            usAttribution = '昨夜小幅回吐更像创新高后的温和整固，周末headline放大了短线波动，但没有直接改写美股主线。';
+            usImplication = '接下来重点看财报窗口能否验证权重股盈利韧性，确认这波回吐只是整固，而非反弹质量下降。';
         } else if (typeof spxPct === 'number' && spxPct >= 1) {
-            usAttribution = '美股反弹更多反映地缘缓和后的risk-on延续，但成色仍取决于接下来的财报验证。';
-            usImplication = '继续看财报季与利率路径是否支持这轮上涨从情绪修复扩散到盈利主线。';
+            usAttribution = '美股反弹更多反映地缘缓和后的risk-on延续，但这波上涨能否站稳仍取决于财报季的盈利验证。';
+            usImplication = '接下来重点看财报季与利率路径，确认上涨能否从情绪修复扩散到更扎实的盈利主线。';
         }
         assetBuckets.push({
             bucket: '美股',
@@ -2844,17 +2844,17 @@ function buildFallbackDailyNarrative(
     const hkSignal = joinMonitoringContexts([hsi, hstech]);
     if (hkSignal) {
         const hsi5d = hsi?.change_5d_pct ?? null;
-        let hkAttribution = '港股反弹更多反映地缘缓和、油价回落与中国增长/政策底对风险偏好的支撑。';
-        let hkImplication = '继续看这波修复能否从流动性与情绪扩散到更广泛的盈利与政策主线。';
+        let hkAttribution = '港股在波动中收住升幅，更多反映地缘缓和预期、油价回落与中国增长/政策底对市场情绪的支撑。';
+        let hkImplication = '接下来重点看这波修复能否从科技与流动性交易扩散到更广泛的盈利与政策主线，否则更像情绪修复而非趋势确认。';
         if (typeof hsi5d === 'number' && hsi5d >= 3) {
-            hkAttribution = '港股连续修复说明风险偏好回暖，但当前仍更多由流动性改善与主题热度驱动。';
-            hkImplication = '继续看这波上行能否被盈利、政策与更广泛行业扩散验证，而不只停留在情绪提振。';
+            hkAttribution = '港股连续修复说明风险偏好回暖，但当前更像流动性改善与科技/IPO主题热度先行，尚未完全扩散到更广泛基本面。';
+            hkImplication = '接下来重点看盈利、政策与更广泛行业表现能否接棒，否则这波上行更像风格与流动性驱动。';
         } else if (typeof hsi5d === 'number' && hsi5d <= -3) {
-            hkAttribution = '港股仍处在修复早段，单日反弹更像情绪回补，尚不足以单独确认趋势反转。';
-            hkImplication = '继续看中国增长与政策信号能否稳住修复节奏，而不是把单日回升当成趋势确认。';
+            hkAttribution = '港股仍处在修复早段，单日反弹更像情绪回补与政策底支撑，尚不足以单独确认趋势反转。';
+            hkImplication = '接下来重点看中国增长与政策信号能否稳住修复节奏，不要把单日回升直接当成趋势确认。';
         } else if (typeof (hsi?.change_pct) === 'number' && Math.abs(hsi.change_pct) < 1) {
-            hkAttribution = '港股今天在波动中收涨，说明市场更愿意交易地缘缓和与政策底，而不是重新进入避险模式。';
-            hkImplication = '继续留意风险偏好修复会否扩散到IPO、科技与更广泛中国资产，而不只是一日情绪修复。';
+            hkAttribution = '港股今天在早盘波动后仍能收涨，说明市场更愿意交易地缘缓和、油价回落和政策底，而不是重新回到避险模式。';
+            hkImplication = '接下来重点看这波修复会否从IPO与科技主题扩散到更广泛中国资产，否则仍偏向一轮情绪修复。';
         }
         assetBuckets.push({
             bucket: '港股',
@@ -2878,14 +2878,14 @@ function buildFallbackDailyNarrative(
         );
     if (goldSignal && shouldShowGold) {
         const goldPct = gold?.change_pct ?? null;
-        let goldAttribution = '黄金当前更像短期避险溢价回吐，不等于年内黄金主线已被逆转。';
-        let goldImplication = '继续看谈判结果、油价与实际利率是否共振，判断这轮回调是短期risk-on还是主线转弱。';
+        let goldAttribution = '黄金当前更像短期避险溢价回吐，不等于年内黄金主线已经逆转。';
+        let goldImplication = '接下来重点看谈判结果、油价与实际利率是否共振，确认这轮回调只是短期risk-on，还是逻辑重估继续加深。';
         if (typeof goldPct === 'number' && goldPct <= -1) {
             goldAttribution = '黄金回落更像地缘风险溢价被挤出，短期避险需求弱化快于长期配置逻辑变化。';
-            goldImplication = '继续看油价与实际利率是否继续压制黄金，确认这是短期回吐还是更持久的逻辑重估。';
+            goldImplication = '接下来重点看油价与实际利率是否继续压制黄金，确认这是短期回吐，还是更持久的逻辑重估。';
         } else if (Math.abs(goldPct ?? 0) < 1 && equityRiskOn && strongTreasuryMove) {
             goldAttribution = '黄金自身波动不大，但与债股联动显示避险需求正在被风险偏好修复边际压制。';
-            goldImplication = '继续看美债与风险资产的共振是否延续，再判断黄金是短期整理还是避险角色继续弱化。';
+            goldImplication = '接下来重点看美债与风险资产的共振是否延续，再判断黄金是短期整理，还是避险角色继续弱化。';
         }
         assetBuckets.push({
             bucket: '黄金',
@@ -3377,7 +3377,7 @@ ${narrativeHistorySection}
    - 必须至少生成 3 个桶；PB 客户的核心配置桶优先级应为：美股、港股、美债，其次才是黄金
    - 每个 bucket 必须包含：
      - today_signal：市场情况，≤40字，必须包含今日真实数字；若5日或YTD能帮助判断是否已处于阶段性高位/低位，应一并写出
-     - thesis_check：归因，≤35字，解释今天为什么这样走；虽然字段名叫 thesis_check，但这里不要写问句，不要直接写客户持仓复核
+     - thesis_check：市场总结+归因，≤45字，先交代今天发生了什么，再解释为什么这样走；虽然字段名叫 thesis_check，但这里不要写问句，不要直接写客户持仓复核
      - portfolio_implication：今日需留意，≤40字，告诉RM接下来1-3天该盯什么催化、风险点或验证窗口；如确有必要，可轻带一句持仓含义，但不能喧宾夺主
 - 先把今天市场讲明白，再告诉RM接下来该盯什么；不要一上来就写持仓复核模板
 - 香港白天语境下，美股/美债/美元指数默认表述为“昨日收盘”或“隔夜”，不要写成“今日上涨/今日下跌”
@@ -3399,7 +3399,7 @@ ${narrativeHistorySection}
     {
       "bucket": "美股|港股|黄金|美债|汇率",
       "today_signal": "市场情况，必须包含今日真实数字；如相关可同时包含5日或YTD，≤40字",
-      "thesis_check": "归因：解释今天为何这样走，≤35字，不写问句",
+      "thesis_check": "市场总结+归因：先讲今天发生什么，再讲为什么，≤45字，不写问句",
       "portfolio_implication": "今日需留意：未来1-3天最关键的催化或风险点，≤40字"
     }
   ]
@@ -3459,8 +3459,8 @@ ${narrativeHistorySection}
    - 这是“市场情况”，先交代今天发生了什么
 
    【thesis_check】
-   - 虽然字段名叫 thesis_check，但这里承载的是“归因”
-   - 用一句话解释今天为什么这样走，≤35字，不写问句
+   - 虽然字段名叫 thesis_check，但这里承载的是“市场总结+归因”
+   - 用一句话先讲今天发生了什么，再解释为什么这样走，≤45字，不写问句
    - 优先引用地缘、政策、财报、流动性、利率、油价等真正驱动，而不是泛泛风险提示
 
    【portfolio_implication】
@@ -3468,16 +3468,17 @@ ${narrativeHistorySection}
    - 用一句话告诉RM接下来1-3天最该盯什么：财报、谈判、PMI、油价、联储路径、支撑位/风险点
    - 如确有必要，可轻带一句持仓含义，但不要把整句写成生硬的“若客户持仓…”模板
    - 禁止直接投资建议
+   - 禁止空泛写法，如“继续观察”“验证持续性”“关注后续变化”“风险偏好修复”等；如果使用这些词，后面必须立刻接上具体对象与原因
 
    按资产类型的IC判断逻辑：
 
    美股：
    - 如果顶部财报日历显示近期有财报：
-     → portfolio_implication必须明确：继续看财报能否验证这波反弹是盈利支撑还是空头回补；禁止点名具体公司
+     → portfolio_implication必须明确：接下来重点看财报能否验证这波反弹是盈利支撑还是空头回补；禁止点名具体公司
    - 如果SPX/NDX 5日涨幅≥3% 且 有近期财报：
-     → 高位+财报窗口 = 核对客户持仓是否在5日累涨后仍以盈利韧性为假设前提，财报结果出来前该假设尚未被验证
+     → 高位+财报窗口 = 说明这波反弹尚未经过盈利验证，接下来重点看权重股财报能否证明高位仍有基本面支撑
    - 如果SPX/NDX 5日涨幅≥3% 但 无近期财报：
-     → 判断反弹质量：是否为空头回补/流动性驱动（而非盈利支撑）；核对客户持仓是否在5日累涨后已承担过多预期，而非盈利韧性得到验证
+     → 判断反弹质量：是否为空头回补/流动性驱动（而非盈利支撑）；接下来重点看这波累涨是否有盈利与财报继续接棒，而不是停留在情绪和仓位推动
    - 如果市场数据包含SPX绝对价位，优先引用（如"标普现报5,570点"），而非只说涨幅%
    - 香港白天默认写"昨收标普/纳指…"，不写"今日上涨/今日下跌"
    - 禁止："复核行业分布是否过度暴露于某板块"这类无方向判断
@@ -3486,7 +3487,7 @@ ${narrativeHistorySection}
    - 优先写清楚今天港股涨/跌的直接原因：谈判预期、油价、GDP/LPR、政策支持、IPO/科技主题热度
    - 南向资金只能作为流动性与风险偏好的解释变量，不能写成客户原始买入 thesis
    - 可以提科技次新股和IPO热度，但要写成市场风格和流动性扩散，而不是简单区分“有没有南向资金流入”
-   - 如果只是温和反弹，应写成“风险偏好修复但尚待更广泛盈利与政策验证”，不要写成强趋势判断
+   - 如果只是温和反弹，应写成“早盘波动后仍能收住升幅，更多反映地缘缓和、油价回落与政策底支撑；接下来重点看能否扩散到更广泛盈利与政策主线”，不要写成强趋势判断
 
    黄金：
    - 必须判断：当前避险逻辑是否仍然成立（地缘缓和 = 避险逻辑弱化）
@@ -3527,6 +3528,7 @@ ${narrativeHistorySection}
 - today_signal数字必须来自上方提供的市场数据，不可编造
 - 生成 today_signal 时，优先使用“昨日收盘/今日 + 5日 + YTD”的监测框架，而不是只写单日波动
 - 如果上方topic摘要中有传导链内容，portfolio_implication应优先引用其中的具体判断，而不是另起炉灶
+- thesis_check 与 portfolio_implication 拼在一起后，应该自然形成“一段能读通的晨会摘要”，不能像两条拼接的模板句
 - 禁止输出任何教科书式风险管理语言` },
                     { role: 'user', content: userPrompt }
                 ],
