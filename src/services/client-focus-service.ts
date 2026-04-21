@@ -3154,7 +3154,7 @@ function buildTreasuryBucket(
     const strongFiveDayBackup = typeof fiveDayChange === 'number' && fiveDayChange >= 8;
 
     if (!hasSignal) {
-        thesisCheck = '美债波动仍温和，当前更像核心利率桶的常态跟踪，而不是新一轮久期压力突然开启。';
+        thesisCheck = '美债波动仍温和，当前更像核心利率桶的常态跟踪，尚未形成新的长端主导因子。';
         portfolioImplication = '继续看本周PMI、油价与联储路径预期会否把收益率重新推回上行通道。';
     } else if (oilDown && (tnxDown || strongFiveDayRelief)) {
         thesisCheck = '收益率回落更像油价下行带来通胀溢价缓解，久期压力阶段性释放。';
@@ -3169,24 +3169,24 @@ function buildTreasuryBucket(
         thesisCheck = '收益率回落更像联储路径被重新前移，市场重新押注更早的宽松窗口。';
         portfolioImplication = '继续看本周数据和联储表态能否延续这条路径；若成立，久期与高质量固收会继续受益。';
     } else if ((tnxUp || strongFiveDayBackup) && (dxyUp || longEndStillElevated)) {
-        thesisCheck = '长端收益率走高更像财政供给与term premium重新主导，而不只是降息预期被推迟。';
+        thesisCheck = '长端收益率走高，财政供给与term premium重新主导，非单纯降息预期可解释。';
         portfolioImplication = '继续看长债供给、拍卖与财政压力是否重新成为主因；若是，久期与AT1都会面临更高折价压力。';
     } else if ((tnxDown || strongFiveDayRelief) && equityRiskOn && !oilDown) {
-        thesisCheck = '债股同步回稳说明利率压力在缓解，但这更像情绪修复，不等于长端风险已经消失。';
+        thesisCheck = '收益率随风险资产回稳同步缓解，反映利率压力暂时释放而非降息预期升温。';
         portfolioImplication = '继续看这轮risk-on是否能持续压低收益率；若只是短期情绪修复，久期仍会重新回到供给与联储框架。';
     } else if (longEndSoftenedYtd && !tnxUp) {
-        thesisCheck = '年内收益率从高位回落，说明久期压力已阶段性缓解，但未必等于利率下行主线已坐实。';
+        thesisCheck = '年内长端收益率已从高位回落，与财政担忧阶段性缓和和risk-off情绪退潮一致。';
         portfolioImplication = '继续看收益率回落背后是通胀缓和还是联储路径变化，判断这一缓解是阶段性还是可持续。';
     }
 
     if (primarySlug === 'usd-strength') {
-        thesisCheck = '美元与美债同向变化，说明利率与汇率避险逻辑再次绑定。';
+        thesisCheck = '美元走强同期推动避险需求，美债收益率的方向受美元与利率预期双重牵引。';
         portfolioImplication = '继续看美元与收益率是否继续同向走强，判断当前防守资产表现是否仍由同一条宏观主线驱动。';
     } else if (primarySlug === 'gold-repricing') {
-        thesisCheck = '黄金重估背景下，美债更像实际利率与避险偏好的对照资产。';
+        thesisCheck = '黄金重估背景下美债与黄金同步受益实际利率回落，避险与利率对冲逻辑重叠。';
         portfolioImplication = '继续看黄金与美债是否重新同向，判断当前市场究竟在交易避险回吐还是实际利率再定价。';
     } else if (primarySlug === 'private-credit-stress') {
-        thesisCheck = '私募信用压力扩散时，美债更像流动性缓冲与信用利差对照资产。';
+        thesisCheck = '私募信用压力扩散推动资金向流动性更强的美债转移，形成防守性需求。';
         portfolioImplication = '继续看信用压力是否外溢到AT1与更广泛固收，判断美债防守价值会否继续抬升。';
     }
 
@@ -3232,7 +3232,7 @@ function buildFxBucket(
     const todaySignal = joinMonitoringContexts(signalItems) || '美元与主要融资货币方向出现变化。';
 
     // Determine primary FX narrative
-    let thesisCheck = '汇率方向变化更多反映融资货币、人民币与美元主线的重新定价。';
+    let thesisCheck = '汇率出现方向性波动，由美元趋势与风险偏好变化共同驱动。';
     let portfolioImplication = '继续看这波汇率变化会否扩散到carry trade、港股或CNH资产表现。';
 
     const jpyAppreciating = typeof usdjpy?.change_pct === 'number' && usdjpy.change_pct < -0.5;
@@ -3242,20 +3242,20 @@ function buildFxBucket(
 
     if (jpyAppreciating || chfAppreciating) {
         const currencies = [jpyAppreciating && '日元', chfAppreciating && '瑞郎'].filter(Boolean).join('、');
-        thesisCheck = `${currencies}升值说明carry unwind压力上升，融资货币重新回到市场焦点。`;
+        thesisCheck = `${currencies}升值由避险情绪升温与carry unwind抛压共同推动。`;
         portfolioImplication = `继续看${currencies}是否延续升值并压缩套利空间，判断套息仓位压力会否继续扩大。`;
     } else if (cnhStrengthening) {
-        thesisCheck = '人民币走强说明中资资产的汇率环境边际改善，也减轻了港股的外部压力。';
+        thesisCheck = '人民币走强反映中国增长预期改善与政策底支撑，资金向CNH资产回流。';
         portfolioImplication = '继续看USDCNH是否延续回落，判断这波人民币修复能否继续支撑港股与CNH资产表现。';
     } else if (cnhWeakening) {
-        thesisCheck = '人民币走弱会重新抬高港股与中资资产的汇兑压力，说明美元主线仍未明显松动。';
+        thesisCheck = '人民币走弱更多反映出口压力与市场对中国复苏节奏的重新定价。';
         portfolioImplication = '继续看USDCNH是否进一步上行，判断人民币贬值会否压制港股与中资资产的修复节奏。';
     } else if (dxyTrending && dxy && typeof dxy.change_5d_pct === 'number') {
         if (dxy.change_5d_pct > 0) {
-            thesisCheck = '美元5日持续走强，说明EM与港股仍面临系统性估值与资金压力。';
+            thesisCheck = '美元持续走强由利率预期上修与避险需求叠加驱动，对EM资产形成系统性压力。';
             portfolioImplication = '继续看美元强势是否扩散到更广泛EM资产，判断港股和非美资产修复会否受限。';
         } else {
-            thesisCheck = '美元5日走弱，说明非美资产面临的系统性压力开始边际缓和。';
+            thesisCheck = '美元走弱反映联储路径预期软化与全球risk-on情绪回暖，利好非美资产。';
             portfolioImplication = '继续看美元回落能否延续，判断这是否足以支持港股与其他非美资产风险偏好回升。';
         }
     }
@@ -3424,7 +3424,6 @@ ${narrativeHistorySection}
 - 这是给RM早晨扫一眼的市场解释工具，不是交易信号，也不是先做持仓复核
 - 每个资产类别要先把今天市场讲明白，再提示接下来最该盯什么
 - today_signal必须锚定今日真实数据点（使用提供的市场数据中的具体数字）
-- 不生成通用分析；每条都要对应一个具体的持仓复核场景
 
 输出格式（严格JSON，不加任何额外文字）：
 {
@@ -3474,7 +3473,7 @@ ${narrativeHistorySection}
 
    美股：
    - 如果顶部财报日历显示近期有财报：
-     → portfolio_implication必须明确：市场进入财报验证窗口，需核对持仓在当前反弹后是否已承担过多未经盈利支撑的预期；禁止点名具体公司
+     → portfolio_implication必须明确：继续看财报能否验证这波反弹是盈利支撑还是空头回补；禁止点名具体公司
    - 如果SPX/NDX 5日涨幅≥3% 且 有近期财报：
      → 高位+财报窗口 = 核对客户持仓是否在5日累涨后仍以盈利韧性为假设前提，财报结果出来前该假设尚未被验证
    - 如果SPX/NDX 5日涨幅≥3% 但 无近期财报：
