@@ -2818,19 +2818,24 @@ function buildFallbackDailyNarrative(
     if (usEquitySignal) {
         const spxPct = spx?.change_pct ?? null;
         const spx5d = spx?.change_5d_pct ?? null;
-        let usImplication = '若客户持有美股，更应把当前回吐理解为创高后的仓位回摆，而非主线已经逆转。';
+        let usAttribution = '美股回吐更像周末地缘扰动与财报前仓位回摆，尚不足以定义主线逆转。';
+        let usImplication = '继续看本周财报能否验证反弹质量，并留意联储路径预期会否被事件与听证再度改写。';
         if (typeof spx5d === 'number' && spx5d >= 4) {
-            usImplication = '若客户美股仓位已偏高，可讨论是否先锁定部分获利；没有仓位的客户此时不宜追高。';
+            usAttribution = '美股5日累涨后仍在高位，当前更像流动性与空头回补推动下等待财报验证的阶段。';
+            usImplication = '重点看财报季能否证明这波上涨由盈利支撑，而不只是高位情绪延续。';
         } else if (typeof spxPct === 'number' && spxPct <= -1.5) {
-            usImplication = '若昨日收盘美股回落明显，需先判断是宏观催化还是技术性回调，再核对持仓逻辑。';
+            usAttribution = '昨夜美股明显回落，更像地缘与宏观扰动压制风险偏好，而非盈利主线突然逆转。';
+            usImplication = '继续看财报与政策路径能否稳住风险偏好，判断回调是噪音还是反弹质量转弱。';
         } else if (typeof spxPct === 'number' && spxPct > -1 && spxPct < 0 && typeof spx5d === 'number' && spx5d >= 2.5) {
-            usImplication = '若客户持有美股，当前更像创新高后的温和回吐，适合核对仓位是否仍押注AI盈利主线，而非周末headline噪音。';
+            usAttribution = '昨夜小幅回吐更像创新高后的温和整固，周末headline放大了短线情绪但未改写主线。';
+            usImplication = '继续看财报窗口是否能验证AI与权重股盈利韧性，而不是把这波回吐当成主线转弱。';
         } else if (typeof spxPct === 'number' && spxPct >= 1) {
-            usImplication = '若客户持有美股，可把昨日上涨理解为停火预期带来的risk-on延续，再核对仓位是否已计入过多乐观预期。';
+            usAttribution = '美股反弹更多反映地缘缓和后的risk-on延续，但成色仍取决于接下来的财报验证。';
+            usImplication = '继续看财报季与利率路径是否支持这轮上涨从情绪修复扩散到盈利主线。';
         }
         assetBuckets.push({
             bucket: '美股',
-            thesis_check: '关税/宏观扰动持续 → 若客户持仓基于AI资本开支或增长逻辑，此轮波动是否动摇核心thesis？',
+            thesis_check: usAttribution,
             today_signal: usEquitySignal,
             portfolio_implication: usImplication
         });
@@ -2839,17 +2844,21 @@ function buildFallbackDailyNarrative(
     const hkSignal = joinMonitoringContexts([hsi, hstech]);
     if (hkSignal) {
         const hsi5d = hsi?.change_5d_pct ?? null;
-        let hkImplication = '若客户近期增配港股，可确认其依据是资金回流预期，还是政策与盈利修复判断。';
+        let hkAttribution = '港股反弹更多反映地缘缓和、油价回落与中国增长/政策底对风险偏好的支撑。';
+        let hkImplication = '继续看这波修复能否从流动性与情绪扩散到更广泛的盈利与政策主线。';
         if (typeof hsi5d === 'number' && hsi5d >= 3) {
-            hkImplication = '若客户近期追入港股，可确认这轮上行依赖的是南向资金与科技主题，还是更广泛的盈利修复。';
+            hkAttribution = '港股连续修复说明风险偏好回暖，但当前仍更多由流动性改善与主题热度驱动。';
+            hkImplication = '继续看这波上行能否被盈利、政策与更广泛行业扩散验证，而不只停留在情绪提振。';
         } else if (typeof hsi5d === 'number' && hsi5d <= -3) {
-            hkImplication = '若客户港股仓位偏重，可先核对中国修复判断是否仍成立，而不是把单日反弹当成趋势反转。';
+            hkAttribution = '港股仍处在修复早段，单日反弹更像情绪回补，尚不足以单独确认趋势反转。';
+            hkImplication = '继续看中国增长与政策信号能否稳住修复节奏，而不是把单日回升当成趋势确认。';
         } else if (typeof (hsi?.change_pct) === 'number' && Math.abs(hsi.change_pct) < 1) {
-            hkImplication = '若客户持有港股，当前反弹仍偏温和，更适合核对原先配置逻辑，而非把它当成强趋势确认。';
+            hkAttribution = '港股今天在波动中收涨，说明市场更愿意交易地缘缓和与政策底，而不是重新进入避险模式。';
+            hkImplication = '继续留意风险偏好修复会否扩散到IPO、科技与更广泛中国资产，而不只是一日情绪修复。';
         }
         assetBuckets.push({
             bucket: '港股',
-            thesis_check: '港股南向与政策双线驱动 → 若客户持仓基于中国复苏逻辑，当前信号是否仍支持该判断？',
+            thesis_check: hkAttribution,
             today_signal: hkSignal,
             portfolio_implication: hkImplication
         });
@@ -2869,15 +2878,18 @@ function buildFallbackDailyNarrative(
         );
     if (goldSignal && shouldShowGold) {
         const goldPct = gold?.change_pct ?? null;
-        let goldImplication = '若客户持有黄金，可结合美债与风险资产表现，确认它承担的是避险还是实际利率对冲角色。';
+        let goldAttribution = '黄金当前更像短期避险溢价回吐，不等于年内黄金主线已被逆转。';
+        let goldImplication = '继续看谈判结果、油价与实际利率是否共振，判断这轮回调是短期risk-on还是主线转弱。';
         if (typeof goldPct === 'number' && goldPct <= -1) {
-            goldImplication = '若客户黄金配置以避险为主，可确认当前回落是否意味着地缘溢价正在被挤出。';
+            goldAttribution = '黄金回落更像地缘风险溢价被挤出，短期避险需求弱化快于长期配置逻辑变化。';
+            goldImplication = '继续看油价与实际利率是否继续压制黄金，确认这是短期回吐还是更持久的逻辑重估。';
         } else if (Math.abs(goldPct ?? 0) < 1 && equityRiskOn && strongTreasuryMove) {
-            goldImplication = '若客户持有黄金，当前波动本身不足以单独触发调整，更应结合美债与风险资产同步变化复核其角色。';
+            goldAttribution = '黄金自身波动不大，但与债股联动显示避险需求正在被风险偏好修复边际压制。';
+            goldImplication = '继续看美债与风险资产的共振是否延续，再判断黄金是短期整理还是避险角色继续弱化。';
         }
         assetBuckets.push({
             bucket: '黄金',
-            thesis_check: '黄金波动 → 若客户持有黄金目的是避险保护，实际利率与风险资产的走向是否正在动摇这一逻辑？',
+            thesis_check: goldAttribution,
             today_signal: goldSignal,
             portfolio_implication: goldImplication
         });
@@ -3121,8 +3133,8 @@ function buildTreasuryBucket(
 
     const todaySignal = formatMonitoringContext(tnx) ?? '美债收益率路径出现变化，利率预期重新定价。';
 
-    let thesisCheck = '客户配置美债是基于避险保护，还是押注降息路径兑现？';
-    let portfolioImplication = '若客户持有美债，可把它先当作组合里的核心利率桶，确认债券基金与长期国债ETF是否仍承担防守与票息配置角色。';
+    let thesisCheck = '美债当前更多反映利率与避险再定价，关键是区分通胀缓和、联储路径还是长端供给主导。';
+    let portfolioImplication = '继续看收益率变化背后是通胀回落、避险买盘还是term premium回升，判断久期压力是缓解还是重来。';
 
     const oilDown = typeof oil?.change_pct === 'number' && oil.change_pct <= -3;
     const oilUp = typeof oil?.change_pct === 'number' && oil.change_pct >= 3;
@@ -3142,40 +3154,40 @@ function buildTreasuryBucket(
     const strongFiveDayBackup = typeof fiveDayChange === 'number' && fiveDayChange >= 8;
 
     if (!hasSignal) {
-        thesisCheck = '客户配置美债时，更看重票息防守，还是中期久期判断？';
-        portfolioImplication = '若客户持有美债，当前利率波动仍温和，更适合作为核心配置桶持续跟踪，而不是仅在大波动日才复核。';
+        thesisCheck = '美债波动仍温和，当前更像核心利率桶的常态跟踪，而不是新一轮久期压力突然开启。';
+        portfolioImplication = '继续看本周PMI、油价与联储路径预期会否把收益率重新推回上行通道。';
     } else if (oilDown && (tnxDown || strongFiveDayRelief)) {
-        thesisCheck = '客户配置美债时，押注的是通胀回落，还是单纯把它当防守仓位？';
-        portfolioImplication = '若客户持有美债，当前更像油价回落后通胀溢价缓解，久期压力阶段性释放，IG债券与长期国债ETF更直接受益。';
+        thesisCheck = '收益率回落更像油价下行带来通胀溢价缓解，久期压力阶段性释放。';
+        portfolioImplication = '继续看油价与通胀预期会否再次反弹；若没有，IG债券与长期国债ETF的久期压力仍可维持缓和。';
     } else if (oilUp && (tnxUp || strongFiveDayBackup)) {
-        thesisCheck = '客户配置美债时，是否低估了油价反弹对通胀与久期的再压制？';
-        portfolioImplication = '若客户持有美债，当前更像油价重新推升通胀担忧，长久期回撤会更直接，不宜把利率上行简单理解为噪音。';
+        thesisCheck = '收益率走高更像油价反弹重新推升通胀担忧，久期再度承压。';
+        portfolioImplication = '继续看油价是否把通胀预期重新抬高，若持续发酵，长久期与AT1利差都会更容易受压。';
     } else if ((primarySlug === 'middle-east-tensions' || equityRiskOff) && tnxDown) {
-        thesisCheck = '客户配置美债是为了对冲风险资产波动，还是为了提前做多久期？';
-        portfolioImplication = '若客户持有美债，当前更像避险买盘压低收益率，债券基金与长期国债ETF的防守价值重新抬升。';
+        thesisCheck = '收益率下行更像地缘扰动下的避险买盘回流，而不是久期主线本身被重新定价。';
+        portfolioImplication = '继续看谈判进展是否逆转这波避险需求；若地缘缓和，当前压低的收益率可能会再度回摆。';
     } else if ((dxyDown || primarySlug === 'private-credit-stress') && tnxDown) {
-        thesisCheck = '客户配置美债是押注联储路径前移，还是为了给组合增加流动性缓冲？';
-        portfolioImplication = '若客户持有美债，当前更像联储路径重新前移带来的久期受益，可确认债券仓位是否仍符合 house view 的久期方向。';
+        thesisCheck = '收益率回落更像联储路径被重新前移，市场重新押注更早的宽松窗口。';
+        portfolioImplication = '继续看本周数据和联储表态能否延续这条路径；若成立，久期与高质量固收会继续受益。';
     } else if ((tnxUp || strongFiveDayBackup) && (dxyUp || longEndStillElevated)) {
-        thesisCheck = '长端收益率走高 → 若客户持仓基于降息预期，财政供给与term premium压力是否已动摇这一判断？';
-        portfolioImplication = '若客户持有美债，当前更像财政供给与term premium重新主导长端，久期仓位不宜只按降息逻辑理解。';
+        thesisCheck = '长端收益率走高更像财政供给与term premium重新主导，而不只是降息预期被推迟。';
+        portfolioImplication = '继续看长债供给、拍卖与财政压力是否重新成为主因；若是，久期与AT1都会面临更高折价压力。';
     } else if ((tnxDown || strongFiveDayRelief) && equityRiskOn && !oilDown) {
-        thesisCheck = '隔夜利率缓解 → 若客户美债是为股票仓位提供对冲，当前债股同步回稳是否意味着缓冲作用已减弱？';
-        portfolioImplication = '若客户持有美债，当前更像在风险资产回稳中利率压力同步缓解，适合确认债券仓位是否仍承担组合缓冲角色。';
+        thesisCheck = '债股同步回稳说明利率压力在缓解，但这更像情绪修复，不等于长端风险已经消失。';
+        portfolioImplication = '继续看这轮risk-on是否能持续压低收益率；若只是短期情绪修复，久期仍会重新回到供给与联储框架。';
     } else if (longEndSoftenedYtd && !tnxUp) {
-        thesisCheck = '年内长端收益率已从高位回落 → 若客户持仓基于久期收益，原先判断是否已兑现，还是仍有空间？';
-        portfolioImplication = '若客户持有美债，年内收益率已从高位明显回落，当前更适合核对久期仓位是否已兑现原先判断，而非继续机械加码。';
+        thesisCheck = '年内收益率从高位回落，说明久期压力已阶段性缓解，但未必等于利率下行主线已坐实。';
+        portfolioImplication = '继续看收益率回落背后是通胀缓和还是联储路径变化，判断这一缓解是阶段性还是可持续。';
     }
 
     if (primarySlug === 'usd-strength') {
-        thesisCheck = '美元走强同期出现 → 若客户美债是基于美元避险而非降息逻辑，两者方向是否仍然一致？';
-        portfolioImplication = '复核美债与美元敞口，确认利率与汇率判断是否仍然一致。';
+        thesisCheck = '美元与美债同向变化，说明利率与汇率避险逻辑再次绑定。';
+        portfolioImplication = '继续看美元与收益率是否继续同向走强，判断当前防守资产表现是否仍由同一条宏观主线驱动。';
     } else if (primarySlug === 'gold-repricing') {
-        thesisCheck = '黄金重估背景下 → 若客户美债是为对冲实际利率，黄金与美债的避险角色是否出现分工混乱？';
-        portfolioImplication = '核对美债与黄金的分工，确认避险与利率保护逻辑是否仍然成立。';
+        thesisCheck = '黄金重估背景下，美债更像实际利率与避险偏好的对照资产。';
+        portfolioImplication = '继续看黄金与美债是否重新同向，判断当前市场究竟在交易避险回吐还是实际利率再定价。';
     } else if (primarySlug === 'private-credit-stress') {
-        thesisCheck = '私募信用压力背景下 → 若客户美债是流动性缓冲，当前久期配置是否仍匹配该目的？';
-        portfolioImplication = '复核美债久期与信用资产比例，确认防守仓位是否仍匹配当前压力源。';
+        thesisCheck = '私募信用压力扩散时，美债更像流动性缓冲与信用利差对照资产。';
+        portfolioImplication = '继续看信用压力是否外溢到AT1与更广泛固收，判断美债防守价值会否继续抬升。';
     }
 
     return {
@@ -3220,8 +3232,8 @@ function buildFxBucket(
     const todaySignal = joinMonitoringContexts(signalItems) || '美元与主要融资货币方向出现变化。';
 
     // Determine primary FX narrative
-    let thesisCheck = '汇率出现方向性波动 → 若客户有carry trade或外币计价仓位，当前变化是否动摇原始配置逻辑？';
-    let portfolioImplication = '复核客户FX敞口，确认当前汇率走势是否改变原始配置逻辑。';
+    let thesisCheck = '汇率方向变化更多反映融资货币、人民币与美元主线的重新定价。';
+    let portfolioImplication = '继续看这波汇率变化会否扩散到carry trade、港股或CNH资产表现。';
 
     const jpyAppreciating = typeof usdjpy?.change_pct === 'number' && usdjpy.change_pct < -0.5;
     const chfAppreciating = typeof usdchf?.change_pct === 'number' && usdchf.change_pct < -0.5;
@@ -3230,21 +3242,21 @@ function buildFxBucket(
 
     if (jpyAppreciating || chfAppreciating) {
         const currencies = [jpyAppreciating && '日元', chfAppreciating && '瑞郎'].filter(Boolean).join('、');
-        thesisCheck = `${currencies}升值触发carry unwind → 若客户有套息融资仓位，当前升值幅度是否已触及亏损区间？`;
-        portfolioImplication = `${currencies}升值是carry unwind信号，需复核客户套息仓位是否已面临亏损压力，必要时控制敞口。`;
+        thesisCheck = `${currencies}升值说明carry unwind压力上升，融资货币重新回到市场焦点。`;
+        portfolioImplication = `继续看${currencies}是否延续升值并压缩套利空间，判断套息仓位压力会否继续扩大。`;
     } else if (cnhStrengthening) {
-        thesisCheck = '人民币走强 → 若客户持仓基于人民币贬值或美元强势逻辑，此信号是否动摇该判断？';
-        portfolioImplication = '人民币走强更利于港股与CNH资产表现，可与客户核对其美元与人民币敞口比例是否仍匹配原先判断。';
+        thesisCheck = '人民币走强说明中资资产的汇率环境边际改善，也减轻了港股的外部压力。';
+        portfolioImplication = '继续看USDCNH是否延续回落，判断这波人民币修复能否继续支撑港股与CNH资产表现。';
     } else if (cnhWeakening) {
-        thesisCheck = '人民币走弱 → 若客户港股或中资资产未对冲汇率，此贬值幅度是否已影响预期收益？';
-        portfolioImplication = '人民币走弱会加大港股和中资资产的汇率压力，可先核对客户是否已有相应对冲。';
+        thesisCheck = '人民币走弱会重新抬高港股与中资资产的汇兑压力，说明美元主线仍未明显松动。';
+        portfolioImplication = '继续看USDCNH是否进一步上行，判断人民币贬值会否压制港股与中资资产的修复节奏。';
     } else if (dxyTrending && dxy && typeof dxy.change_5d_pct === 'number') {
         if (dxy.change_5d_pct > 0) {
-            thesisCheck = '美元5日持续走强 → 若客户持有EM或港股仓位，这一系统性压力是否已纳入持仓逻辑？';
-            portfolioImplication = '美元持续走强对EM资产形成压力，复核客户持有的港股及EM债券是否需要减少敞口。';
+            thesisCheck = '美元5日持续走强，说明EM与港股仍面临系统性估值与资金压力。';
+            portfolioImplication = '继续看美元强势是否扩散到更广泛EM资产，判断港股和非美资产修复会否受限。';
         } else {
-            thesisCheck = '美元5日走弱 → 若客户持仓基于美元强势，此方向性转变是否动摇原有判断？';
-            portfolioImplication = '美元走弱利好EM及港股，可与客户讨论是否适当增加非美货币计价资产的配置。';
+            thesisCheck = '美元5日走弱，说明非美资产面临的系统性压力开始边际缓和。';
+            portfolioImplication = '继续看美元回落能否延续，判断这是否足以支持港股与其他非美资产风险偏好回升。';
         }
     }
 
@@ -3364,10 +3376,10 @@ ${narrativeHistorySection}
    - bucket 只能从：美股、港股、黄金、美债、汇率 中选择；大宗商品不生成独立bucket（原油只作为传导因子，体现在相关bucket的portfolio_implication里）
    - 必须至少生成 3 个桶；PB 客户的核心配置桶优先级应为：美股、港股、美债，其次才是黄金
    - 每个 bucket 必须包含：
-     - thesis_check：格式为”[今日数字+触发因素] → 若客户持仓基于[具体逻辑]，此信号是否动摇该判断？”，≤35字，直接从信号数字入手，禁止使用”您”，禁止纯方向性问题（”是否应减仓？”），必须把 today_signal 的核心数字带入thesis_check形成数据→逻辑的闭环
-     - today_signal：≤40字，必须包含今日真实数字；若5日或YTD能帮助判断是否已处于阶段性高位/低位，应一并写出
-     - portfolio_implication：≤35字，必须是持仓复核动作，不是市场评论；禁止出现"持仓可维持/建议加仓/可减少敞口/建议持有"等直接投资建议；只能是"需核对X"/"复核Y是否仍成立"/"确认Z逻辑是否已变化"等检查动作
-- 不生成通用分析；每条都要对应一个具体的持仓复核场景
+     - today_signal：市场情况，≤40字，必须包含今日真实数字；若5日或YTD能帮助判断是否已处于阶段性高位/低位，应一并写出
+     - thesis_check：归因，≤35字，解释今天为什么这样走；虽然字段名叫 thesis_check，但这里不要写问句，不要直接写客户持仓复核
+     - portfolio_implication：今日需留意，≤40字，告诉RM接下来1-3天该盯什么催化、风险点或验证窗口；如确有必要，可轻带一句持仓含义，但不能喧宾夺主
+- 先把今天市场讲明白，再告诉RM接下来该盯什么；不要一上来就写持仓复核模板
 - 香港白天语境下，美股/美债/美元指数默认表述为“昨日收盘”或“隔夜”，不要写成“今日上涨/今日下跌”
 - 若单日波动很小（例如黄金<1%、汇率信号未达显著阈值），不要硬写成“今天需要review”，可省略该 bucket，或明确说明“当前不足以单独触发复核”
 - 今日/5日/YTD 的组合更适合 PB 监测语境：今日负责触发，5日负责判断是否过热，YTD负责判断中期趋势
@@ -3386,9 +3398,9 @@ ${narrativeHistorySection}
   "asset_buckets": [
     {
       "bucket": "美股|港股|黄金|美债|汇率",
-      "thesis_check": "今日数字+触发因素 → 若客户持仓基于X逻辑，此信号是否动摇该判断？例如：昨收纳指跌2.3%，关税新政为导火索 → 若客户押注AI资本开支周期，此轮下跌是否动摇核心逻辑？",
-      "today_signal": "必须包含今日真实数字的1句话；如相关可同时包含5日或YTD，≤40字",
-      "portfolio_implication": "持仓行动含义，≤35字，以'若...'或动词开头"
+      "today_signal": "市场情况，必须包含今日真实数字；如相关可同时包含5日或YTD，≤40字",
+      "thesis_check": "归因：解释今天为何这样走，≤35字，不写问句",
+      "portfolio_implication": "今日需留意：未来1-3天最关键的催化或风险点，≤40字"
     }
   ]
 }
@@ -3409,8 +3421,8 @@ ${narrativeHistorySection}
 你的输出将渲染成一个按大类资产折叠的卡片，RM根据客户持仓选择展开哪个资产类别。
 
 核心哲学：
-- 这是SAA持仓审视工具，不是交易信号
-- 每个资产类别的内容必须帮助RM问出"客户当初买这个资产的thesis还成立吗"
+- 这是给RM早晨扫一眼的市场解释工具，不是交易信号，也不是先做持仓复核
+- 每个资产类别要先把今天市场讲明白，再提示接下来最该盯什么
 - today_signal必须锚定今日真实数据点（使用提供的市场数据中的具体数字）
 - 不生成通用分析；每条都要对应一个具体的持仓复核场景
 
@@ -3426,9 +3438,9 @@ ${narrativeHistorySection}
   "asset_buckets": [
     {
       "bucket": "美股|港股|黄金|美债|汇率",
-      "thesis_check": "[数字+触发因素] → 若客户持仓基于X逻辑，此信号是否动摇该判断？≤35字",
-      "today_signal": "必须包含今日真实数字的1句话，≤30字",
-      "portfolio_implication": "持仓行动含义，≤35字，以若或动词开头"
+      "today_signal": "市场情况，必须包含今日真实数字的1句话，≤30字",
+      "thesis_check": "归因，≤35字，不写问句",
+      "portfolio_implication": "今日需留意，≤40字"
     }
   ]
 }
@@ -3440,21 +3452,23 @@ ${narrativeHistorySection}
 
    每个 bucket 的三个字段生成规则：
 
-   【thesis_check】
-   - 格式：[今日数字+触发因素] → 若客户持仓基于[具体逻辑]，此信号是否动摇该判断？
-   - ≤35字，直接从信号数字入手，禁止使用"您"
-   - 必须把 today_signal 的核心数字带入，形成"数据→逻辑张力"的闭环
-   - 目的：RM读完后脑子里已经在想"我的客户是哪种情况"，而不是"今天行情怎样"
-   - 禁止纯方向性问题（"客户是否应减仓？"），必须锚定今日数据与特定持仓thesis之间的张力
-
    【today_signal】
    - 必须包含今日真实数字，≤40字
    - 来自上方市场数据，不可编造
    - 如果该资产5日涨幅超过3%，必须提及（这是判断是否处于极端位置的依据）
    - 如果YTD方向已经很明确，优先加上YTD，帮助RM判断这是不是阶段性回摆而非主线逆转
+   - 这是“市场情况”，先交代今天发生了什么
+
+   【thesis_check】
+   - 虽然字段名叫 thesis_check，但这里承载的是“归因”
+   - 用一句话解释今天为什么这样走，≤35字，不写问句
+   - 优先引用地缘、政策、财报、流动性、利率、油价等真正驱动，而不是泛泛风险提示
 
    【portfolio_implication】
-   ⚠️ 这是最关键字段，必须有IC判断角度，不能是教科书式风险提示。
+   ⚠️ 这里承载的是“今日需留意”
+   - 用一句话告诉RM接下来1-3天最该盯什么：财报、谈判、PMI、油价、联储路径、支撑位/风险点
+   - 如确有必要，可轻带一句持仓含义，但不要把整句写成生硬的“若客户持仓…”模板
+   - 禁止直接投资建议
 
    按资产类型的IC判断逻辑：
 
@@ -3470,17 +3484,17 @@ ${narrativeHistorySection}
    - 禁止："复核行业分布是否过度暴露于某板块"这类无方向判断
 
    港股：
-   - 优先结合今日结构性亮点（传导链或最新动态中提到的具体板块/个股主题）
-   - 如果提到AI/科技次新股或南向资金，直接引用
-   - 停火后港股作为EM资金回流受益标的，这个角度要体现
-   - 禁止：用单日涨幅微小来判断"拖累弹性"这类无意义评论
-   - 如果只是温和反弹，应写成“确认原先配置逻辑”，不要写成强趋势判断
+   - 优先写清楚今天港股涨/跌的直接原因：谈判预期、油价、GDP/LPR、政策支持、IPO/科技主题热度
+   - 南向资金只能作为流动性与风险偏好的解释变量，不能写成客户原始买入 thesis
+   - 可以提科技次新股和IPO热度，但要写成市场风格和流动性扩散，而不是简单区分“有没有南向资金流入”
+   - 如果只是温和反弹，应写成“风险偏好修复但尚待更广泛盈利与政策验证”，不要写成强趋势判断
 
    黄金：
    - 必须判断：当前避险逻辑是否仍然成立（地缘缓和 = 避险逻辑弱化）
    - 如果黄金今日下跌而风险资产上涨：直接点出"避险溢价正在被挤出"
    - 如果输入的topic摘要中有"黄金逻辑重估"相关内容：引用其核心传导逻辑
    - 如果黄金单日波动小于1%，且没有与美债/风险资产形成明显背离，不要强行写成“今天需要review”
+   - 要区分“短期避险溢价回吐”和“长期黄金主线逆转”，不能把单日油价变化写成过强结论
    - 禁止："结合美元走势评估相对吸引力"这类模糊判断
 
    美债：
@@ -3505,12 +3519,12 @@ ${narrativeHistorySection}
    - 原油是传导因子，不是PB客户持仓对象；禁止生成大宗商品bucket
    - 油价信号应体现在其他bucket的portfolio_implication里：例如油价大涨→通胀预期上升→美债收益率受压→体现在美债bucket；油价暴跌+地缘缓和→风险溢价回落→体现在美股或港股bucket
 
-4. 选择今日IC判断最有价值、最需要RM向客户核实的资产作为 default_expanded_bucket
+4. 选择今天最值得RM先点开的资产作为 default_expanded_bucket，优先给“市场情况最清楚、归因最完整、接下来催化最具体”的那一项
 
 规则：
-- portfolio_implication是整张卡最重要的字段：必须有方向性判断，不能是"关注走势"/"评估是否变化"/"复核是否合适"这类无行动含义的废话；同时严禁出现"持仓可维持/建议加仓/可减少敞口/建议持有"等直接投资建议，只能是"需核对X"/"复核Y是否仍成立"/"确认Z逻辑是否已改变"等检查性动作
+- 输出优先级必须是：市场总结 → 归因 → 今日需留意
+- portfolio_implication不是投资建议，而是RM今天最该继续盯的催化、验证窗口或风险点
 - 你是一位有10年经验的PB IC，这是给RM在客户见面前5分钟看的，必须有具体IC角度
-- thesis_check必须以"客户"开头，禁止使用"您"
 - today_signal数字必须来自上方提供的市场数据，不可编造
 - 生成 today_signal 时，优先使用“昨日收盘/今日 + 5日 + YTD”的监测框架，而不是只写单日波动
 - 如果上方topic摘要中有传导链内容，portfolio_implication应优先引用其中的具体判断，而不是另起炉灶
