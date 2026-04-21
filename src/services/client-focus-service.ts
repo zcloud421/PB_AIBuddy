@@ -2894,18 +2894,7 @@ function buildFallbackDailyNarrative(
         assetBuckets.push(fxBucket);
     }
 
-    const commoditySignal = formatMonitoringContext(oil);
-    const commodityLed =
-        (typeof oil?.change_pct === 'number' && Math.abs(oil.change_pct) >= 3)
-        || primaryTopic.slug === 'middle-east-tensions';
-    if (commoditySignal && commodityLed && assetBuckets.length < 5) {
-        assetBuckets.push({
-            bucket: '大宗商品',
-            thesis_check: '原油走势由地缘溢价主导 → 若客户持有商品相关资产，当前地缘变化是否已传导至预期的仓位方向？',
-            today_signal: commoditySignal,
-            portfolio_implication: '若客户持有商品相关资产，可确认其配置逻辑押注的是地缘溢价，还是供需基本面。'
-        });
-    }
+    // 大宗商品不作为独立bucket——原油是传导因子，PB客户不直接持有WTI
 
     if (assetBuckets.length === 0) {
         return null;
@@ -3066,7 +3055,7 @@ async function buildEarningsCalendarSection(): Promise<string> {
     }
 }
 
-const DAILY_NARRATIVE_BUCKETS = ['美股', '港股', '黄金', '美债', '汇率', '大宗商品'] as const;
+const DAILY_NARRATIVE_BUCKETS = ['美股', '港股', '黄金', '美债', '汇率'] as const;
 
 function isValidDailyNarrativeBucket(
     value: unknown
@@ -3275,14 +3264,10 @@ function ensurePriorityAssetBuckets(
         if (nextBuckets.length < 5) {
             nextBuckets.push(treasuryBucket);
         } else {
-            const commodityIndex = nextBuckets.findIndex((item) => item.bucket === '大宗商品');
-            if (commodityIndex !== -1) {
-                nextBuckets.splice(commodityIndex, 1, treasuryBucket);
-            } else {
-                const fxIndex = nextBuckets.findIndex((item) => item.bucket === '汇率');
-                if (fxIndex !== -1) {
-                    nextBuckets.splice(fxIndex, 1, treasuryBucket);
-                }
+            // 美债是核心桶，可替换汇率腾出位置
+            const fxIndex = nextBuckets.findIndex((item) => item.bucket === '汇率');
+            if (fxIndex !== -1) {
+                nextBuckets.splice(fxIndex, 1, treasuryBucket);
             }
         }
     }
@@ -3292,16 +3277,11 @@ function ensurePriorityAssetBuckets(
     if (fxBucket && !nextBuckets.some((item) => item.bucket === '汇率')) {
         if (nextBuckets.length < 5) {
             nextBuckets.push(fxBucket);
-        } else {
-            // 汇率不是核心桶，只替换大宗商品，不挤掉美债
-            const commodityIndex = nextBuckets.findIndex((item) => item.bucket === '大宗商品');
-            if (commodityIndex !== -1) {
-                nextBuckets.splice(commodityIndex, 1, fxBucket);
-            }
         }
+        // 汇率不是核心桶，满5个时不强制插入
     }
 
-    const orderedBuckets = ['美股', '港股', '美债', '黄金', '汇率', '大宗商品'] as const;
+    const orderedBuckets = ['美股', '港股', '美债', '黄金', '汇率'] as const;
 
     return orderedBuckets
         .filter((bucket) => nextBuckets.some((item) => item.bucket === bucket))
@@ -3381,12 +3361,12 @@ ${narrativeHistorySection}
    - 如果顶部财报日历显示今日或明日有关键财报，narrative必须体现"财报季是验证反弹成色的测试窗口"这一判断
    - 财报事件的结构性重要性高于单日价格跳动
 3. 生成 3-5 个资产桶审视卡片（asset_buckets）
-   - bucket 只能从：美股、港股、黄金、美债、汇率、大宗商品 中选择
-   - 必须至少生成 3 个桶；PB 客户的核心配置桶优先级应为：美股、港股、美债，其次才是黄金；大宗商品不是默认核心桶
+   - bucket 只能从：美股、港股、黄金、美债、汇率 中选择；大宗商品不生成独立bucket（原油只作为传导因子，体现在相关bucket的portfolio_implication里）
+   - 必须至少生成 3 个桶；PB 客户的核心配置桶优先级应为：美股、港股、美债，其次才是黄金
    - 每个 bucket 必须包含：
      - thesis_check：格式为”[今日数字+触发因素] → 若客户持仓基于[具体逻辑]，此信号是否动摇该判断？”，≤35字，直接从信号数字入手，禁止使用”您”，禁止纯方向性问题（”是否应减仓？”），必须把 today_signal 的核心数字带入thesis_check形成数据→逻辑的闭环
      - today_signal：≤40字，必须包含今日真实数字；若5日或YTD能帮助判断是否已处于阶段性高位/低位，应一并写出
-     - portfolio_implication：≤35字，必须是持仓复核动作，不是市场评论
+     - portfolio_implication：≤35字，必须是持仓复核动作，不是市场评论；禁止出现"持仓可维持/建议加仓/可减少敞口/建议持有"等直接投资建议；只能是"需核对X"/"复核Y是否仍成立"/"确认Z逻辑是否已变化"等检查动作
 - 不生成通用分析；每条都要对应一个具体的持仓复核场景
 - 香港白天语境下，美股/美债/美元指数默认表述为“昨日收盘”或“隔夜”，不要写成“今日上涨/今日下跌”
 - 若单日波动很小（例如黄金<1%、汇率信号未达显著阈值），不要硬写成“今天需要review”，可省略该 bucket，或明确说明“当前不足以单独触发复核”
@@ -3405,7 +3385,7 @@ ${narrativeHistorySection}
   "default_expanded_bucket": "今日信号最强的资产类别",
   "asset_buckets": [
     {
-      "bucket": "美股|港股|黄金|美债|汇率|大宗商品",
+      "bucket": "美股|港股|黄金|美债|汇率",
       "thesis_check": "今日数字+触发因素 → 若客户持仓基于X逻辑，此信号是否动摇该判断？例如：昨收纳指跌2.3%，关税新政为导火索 → 若客户押注AI资本开支周期，此轮下跌是否动摇核心逻辑？",
       "today_signal": "必须包含今日真实数字的1句话；如相关可同时包含5日或YTD，≤40字",
       "portfolio_implication": "持仓行动含义，≤35字，以'若...'或动词开头"
@@ -3445,7 +3425,7 @@ ${narrativeHistorySection}
   "default_expanded_bucket": "今日信号最强的资产类别",
   "asset_buckets": [
     {
-      "bucket": "美股|港股|黄金|美债|汇率|大宗商品",
+      "bucket": "美股|港股|黄金|美债|汇率",
       "thesis_check": "[数字+触发因素] → 若客户持仓基于X逻辑，此信号是否动摇该判断？≤35字",
       "today_signal": "必须包含今日真实数字的1句话，≤30字",
       "portfolio_implication": "持仓行动含义，≤35字，以若或动词开头"
@@ -3454,10 +3434,9 @@ ${narrativeHistorySection}
 }
 
 3. 生成 3-5 个资产桶复核卡片（asset_buckets）
-   - bucket 只能从：美股、港股、黄金、美债、汇率、大宗商品 中选择
+   - bucket 只能从：美股、港股、黄金、美债、汇率 中选择；大宗商品不生成独立bucket
    - 必须至少包含：美股、港股、美债（PB客户核心持仓，除非无任何市场数据否则必须生成）
    - 黄金：在避险/实际利率/黄金重估逻辑下优先生成；弱信号时可省略
-   - 大宗商品：只在 commodity-led 场景（原油/贵金属主导跨资产走势）才包含；不作为默认桶，也不应挤掉美债
 
    每个 bucket 的三个字段生成规则：
 
@@ -3522,16 +3501,14 @@ ${narrativeHistorySection}
    - 若当日FX波动很小，不要伪造紧迫感
    - portfolio_implication必须明确指出：是carry unwind风险、是人民币方向变化的配置含义，还是美元趋势对EM的影响
 
-   大宗商品（仅在commodity-led场景生成）：
-   - 原油在本系统中是传导因子，不是独立持仓建议对象：油价上涨 → 通胀预期上升 → 利率预期上修 → 债券/股票受压，这是它影响客户组合的路径
-   - 只有当客户明确持有能源股、商品基金或原油相关结构性产品时，才生成大宗商品 bucket
-   - 若生成，portfolio_implication必须指明：客户买入是基于地缘溢价还是供需基本面——两个逻辑在停火/缓和时的仓位应对完全不同
-   - 禁止把大宗商品 bucket 当作"油价大涨就必须提一下"的补充说明用
+   大宗商品（不生成独立bucket）：
+   - 原油是传导因子，不是PB客户持仓对象；禁止生成大宗商品bucket
+   - 油价信号应体现在其他bucket的portfolio_implication里：例如油价大涨→通胀预期上升→美债收益率受压→体现在美债bucket；油价暴跌+地缘缓和→风险溢价回落→体现在美股或港股bucket
 
 4. 选择今日IC判断最有价值、最需要RM向客户核实的资产作为 default_expanded_bucket
 
 规则：
-- portfolio_implication是整张卡最重要的字段：必须有方向性判断，不能是"关注走势"/"评估是否变化"/"复核是否合适"这类无行动含义的废话
+- portfolio_implication是整张卡最重要的字段：必须有方向性判断，不能是"关注走势"/"评估是否变化"/"复核是否合适"这类无行动含义的废话；同时严禁出现"持仓可维持/建议加仓/可减少敞口/建议持有"等直接投资建议，只能是"需核对X"/"复核Y是否仍成立"/"确认Z逻辑是否已改变"等检查性动作
 - 你是一位有10年经验的PB IC，这是给RM在客户见面前5分钟看的，必须有具体IC角度
 - thesis_check必须以"客户"开头，禁止使用"您"
 - today_signal数字必须来自上方提供的市场数据，不可编造

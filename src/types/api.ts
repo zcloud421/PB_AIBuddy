@@ -248,12 +248,12 @@ export interface DailyMarketNarrative {
     rank_changes: Record<string, 'up' | 'down' | 'stable'>;
     momentum_days: number;
     asset_buckets: AssetBucketNarrative[];
-    default_expanded_bucket: '美股' | '港股' | '黄金' | '美债' | '汇率' | '大宗商品';
+    default_expanded_bucket: '美股' | '港股' | '黄金' | '美债' | '汇率';
     generated_at: string;
 }
 
 export interface AssetBucketNarrative {
-    bucket: '美股' | '港股' | '黄金' | '美债' | '汇率' | '大宗商品';
+    bucket: '美股' | '港股' | '黄金' | '美债' | '汇率';
     thesis_check: string;
     today_signal: string;
     portfolio_implication: string;
