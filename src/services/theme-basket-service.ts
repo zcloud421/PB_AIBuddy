@@ -2,6 +2,7 @@ import { MassiveDataFetcher } from '../data/massive-fetcher';
 import { THEME_BASKETS, type ThemeBasket } from '../constants/theme-baskets';
 import { upsertThemeBasketResult } from '../db/queries/ideas';
 import type { ThemeBasketItem, ThemeWinnersLosersResult } from '../types/api';
+import { getDailyMarketNarrative } from './client-focus-service';
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
 const PRICE_FETCH_DELAY_MS = 2000;
@@ -43,6 +44,39 @@ interface DeepSeekThemeBasketResponse {
 }
 
 const fetcher = new MassiveDataFetcher();
+
+async function buildDailyNarrativeContextSection(slug: string): Promise<string> {
+    try {
+        const narrative = await getDailyMarketNarrative();
+        if (!narrative) {
+            return '';
+        }
+
+        const assetLines = narrative.asset_buckets
+            .map((bucket) => {
+                const parts: string[] = [bucket.bucket];
+                if (bucket.thesis_check) {
+                    parts.push(`市场总结与归因：${bucket.thesis_check}`);
+                }
+                if (bucket.portfolio_implication) {
+                    parts.push(`今日需留意：${bucket.portfolio_implication}`);
+                }
+                return `- ${parts.join('；')}`;
+            })
+            .join('\n');
+
+        return `
+今日叙事主线（用于和板块表现解读保持一致，但不要直接照抄）：
+- primary_slug: ${narrative.primary_slug}
+- regime_label: ${narrative.regime_label}
+- narrative: ${narrative.narrative}
+- 当前正在生成的情景主题: ${slug}
+${assetLines ? `- 分资产拆解：\n${assetLines}` : ''}
+`.trim();
+    } catch {
+        return '';
+    }
+}
 
 export async function computeBasketPerf(basket: ThemeBasket): Promise<BasketRawPerf | null> {
     const perSymbolResults: BasketRawPerf[] = [];
@@ -124,11 +158,14 @@ async function generateThemeWinnersLosers(
     }));
     const scenarioLabel = getScenarioLabel(slug);
     const updatedAt = new Date().toISOString();
+    const dailyNarrativeContext = await buildDailyNarrativeContextSection(slug);
     const userPrompt = `
 你是一名私人银行市场分析助手。
 以下是各主题板块在${scenarioLabel}情景下的实际表现数据，由系统实时计算：
 
 ${JSON.stringify(basketPerformanceData, null, 2)}
+
+${dailyNarrativeContext ? `\n${dailyNarrativeContext}\n` : ''}
 
 字段说明：
 - war_perf：冲突升级阶段的板块平均涨跌幅（%）
@@ -157,6 +194,8 @@ interpretation 写作规则：
 - interpretation.client：给 RM 一句客户沟通提示，说明这组结构更像在交易什么，以及接下来最该看什么
 - 三句都必须动态跟随当前结果变化，不能默认写 AI 算力链或企业软件，除非它们今天真的在对应分组里
 - 禁止复述固定模板，禁止输出与 winners / losers 结果不一致的行业
+- 如果上方提供了“今日叙事主线”，interpretation 必须和这条主线保持一致：即沿用同一市场背景和主要驱动，再下钻到 sector winners / losers 的原因
+- 但不要直接照抄今日叙事原句；你的任务是解释“在这条主线下，为什么这些板块赢、为什么这些板块输、接下来 sector 层面该看什么”
 
 输出以下 JSON，不得输出任何 JSON 以外的内容：
 
