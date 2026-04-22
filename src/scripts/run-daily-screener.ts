@@ -52,6 +52,41 @@ const BATCH_COOLDOWN_MS = 15000;
 const BATCH_SIZE = 5;
 const FAILURE_COOLDOWN_MS = 60000;
 
+function resolveFocusRefreshBaseUrl() {
+    return (
+        process.env.FOCUS_API_REFRESH_BASE_URL?.trim() ??
+        process.env.API_BASE_URL?.trim() ??
+        process.env.PUBLIC_API_BASE_URL?.trim() ??
+        'https://backend-production-02fa.up.railway.app'
+    );
+}
+
+async function refreshApiDailyNarrativeCache(): Promise<void> {
+    const setupToken = process.env.SETUP_TOKEN?.trim();
+    if (!setupToken) {
+        console.warn('[focus-daily] api refresh skipped: missing SETUP_TOKEN');
+        return;
+    }
+
+    const baseUrl = resolveFocusRefreshBaseUrl();
+    const response = await fetch(`${baseUrl}/ideas/focus/daily-narrative/refresh`, {
+        method: 'POST',
+        headers: {
+            'x-setup-token': setupToken
+        }
+    });
+
+    if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`refresh endpoint ${response.status}: ${body || 'empty body'}`);
+    }
+
+    const payload = (await response.json()) as { generated_at?: string; primary_slug?: string };
+    console.log(
+        `[focus-daily] api cache refreshed (${payload.primary_slug ?? 'unknown'} / ${payload.generated_at ?? 'no generated_at'})`
+    );
+}
+
 async function main(): Promise<void> {
     const client = await pool.connect();
     let runId: string | null = null;
@@ -307,6 +342,14 @@ async function main(): Promise<void> {
                 );
             } else {
                 console.warn('[focus-daily] daily narrative skipped: no renderable output');
+            }
+
+            try {
+                console.log('[focus-daily] api refresh started');
+                await refreshApiDailyNarrativeCache();
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                console.warn(`[focus-daily] api refresh failed (${message})`);
             }
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);

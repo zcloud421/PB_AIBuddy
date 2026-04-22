@@ -45,6 +45,7 @@ import {
     getClientFocusDetail as getClientFocusDetailPayload,
     getClientFocusList as getClientFocusListPayload,
     getDailyMarketNarrative as getDailyMarketNarrativePayload,
+    refreshDailyMarketNarrativeNow as refreshDailyMarketNarrativeNowPayload,
     getClientFocusStatusesSnapshot,
     getClientFocusMarketState as getClientFocusMarketStatePayload,
     getMiddleEastPolymarket as getMiddleEastPolymarketPayload
@@ -3712,6 +3713,10 @@ export async function getClientFocusMarketState(): Promise<ClientFocusMarketStat
 
 export async function getDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
     return getDailyMarketNarrativePayload();
+}
+
+export async function refreshDailyMarketNarrativeNow(): Promise<DailyMarketNarrative | null> {
+    return refreshDailyMarketNarrativeNowPayload();
 }
 
 export async function getClientFocusDetail(slug: string): Promise<ClientFocusDetailResponse | null> {

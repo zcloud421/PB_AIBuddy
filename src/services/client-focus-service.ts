@@ -6865,6 +6865,10 @@ export async function getDailyMarketNarrative(): Promise<DailyMarketNarrative | 
     return refreshDailyMarketNarrative(null);
 }
 
+export async function refreshDailyMarketNarrativeNow(): Promise<DailyMarketNarrative | null> {
+    return refreshDailyMarketNarrative(null);
+}
+
 export async function getClientFocusDetail(slug: string): Promise<ClientFocusDetailResponse | null> {
     const topic = getFocusTopic(slug);
     if (!topic) {

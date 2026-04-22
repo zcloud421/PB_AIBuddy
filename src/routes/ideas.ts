@@ -5,6 +5,7 @@ import {
     getClientFocusDetailController,
     getClientFocusListController,
     getDailyMarketNarrativeController,
+    refreshDailyMarketNarrativeController,
     getClientFocusMarketStateController,
     getMiddleEastPolymarketController,
     getSymbolIdeaController,
@@ -19,6 +20,7 @@ export const ideasRouter = Router();
 ideasRouter.get('/today', asyncHandler(getTodayIdeasController));
 ideasRouter.get('/focus', asyncHandler(getClientFocusListController));
 ideasRouter.get('/focus/daily-narrative', asyncHandler(getDailyMarketNarrativeController));
+ideasRouter.post('/focus/daily-narrative/refresh', asyncHandler(refreshDailyMarketNarrativeController));
 ideasRouter.get('/focus/market-state', asyncHandler(getClientFocusMarketStateController));
 ideasRouter.get('/focus/middle-east-polymarket', asyncHandler(getMiddleEastPolymarketController));
 ideasRouter.get('/focus/:slug', asyncHandler(getClientFocusDetailController));

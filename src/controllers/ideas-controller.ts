@@ -4,6 +4,7 @@ import {
     getClientFocusDetail,
     getClientFocusList,
     getDailyMarketNarrative,
+    refreshDailyMarketNarrativeNow,
     getClientFocusMarketState,
     getMiddleEastPolymarket,
     getSymbolIdea,
@@ -45,6 +46,25 @@ export async function getClientFocusMarketStateController(_req: Request, res: Re
 export async function getDailyMarketNarrativeController(_req: Request, res: Response): Promise<void> {
     const payload = await getDailyMarketNarrative();
     res.setHeader('Cache-Control', 'private, max-age=300');
+    res.status(200).json(payload);
+}
+
+export async function refreshDailyMarketNarrativeController(req: Request, res: Response): Promise<void> {
+    const rawSetupToken = process.env.SETUP_TOKEN;
+    const rawProvidedToken =
+        (typeof req.query.token === 'string' ? req.query.token : null) ??
+        req.header('x-setup-token') ??
+        null;
+    const setupToken = rawSetupToken?.trim() ?? null;
+    const providedToken = rawProvidedToken?.trim() ?? null;
+
+    if (!setupToken || providedToken !== setupToken) {
+        res.status(403).json({ error: 'forbidden' });
+        return;
+    }
+
+    const payload = await refreshDailyMarketNarrativeNow();
+    res.setHeader('Cache-Control', 'private, no-cache');
     res.status(200).json(payload);
 }
 
