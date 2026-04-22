@@ -3048,20 +3048,29 @@ async function buildEarningsCalendarSection(): Promise<string> {
         const rows = await getUpcomingEarningsNextNDays(2);
         if (rows.length === 0) return '';
 
-        const today: string[] = [];
-        const tomorrow: string[] = [];
+        // earnings_calendar only stores the earnings date, not whether the print is
+        // pre-market or after-close. To avoid stale wording like "等待UNH财报" after
+        // the company has already reported, only feed clearly unreleased earnings
+        // (days_until >= 1) into the daily narrative prompt.
+        const upcomingRows = rows.filter((row) => row.days_until >= 1);
+        if (upcomingRows.length === 0) return '';
 
-        for (const row of rows) {
-            if (row.days_until === 0) today.push(row.symbol);
-            else if (row.days_until === 1) tomorrow.push(row.symbol);
+        const byDaysUntil = new Map<number, string[]>();
+        for (const row of upcomingRows) {
+            const existing = byDaysUntil.get(row.days_until) ?? [];
+            existing.push(row.symbol);
+            byDaysUntil.set(row.days_until, existing);
         }
 
-        const lines: string[] = [];
-        if (today.length > 0) lines.push(`今日财报：${today.join('、')}`);
-        if (tomorrow.length > 0) lines.push(`明日财报：${tomorrow.join('、')}`);
+        const lines: string[] = Array.from(byDaysUntil.entries())
+            .sort((left, right) => left[0] - right[0])
+            .map(([daysUntil, symbols]) => {
+                const label = daysUntil === 1 ? '明日待发财报' : `${daysUntil}日后待发财报`;
+                return `${label}：${symbols.join('、')}`;
+            });
         if (lines.length === 0) return '';
 
-        return `⚠️ 关键财报（优先级最高，必须在 narrative 和美股 bucket 中体现）：\n${lines.join('\n')}`;
+        return `⚠️ 关键待发财报（优先级最高，仅包含未发布财报，必须在 narrative 和美股 bucket 中体现）：\n${lines.join('\n')}`;
     } catch {
         return '';
     }
@@ -3380,6 +3389,7 @@ ${narrativeHistorySection}
    - 如果顶部财报日历显示近期有财报，narrative必须体现"市场进入财报验证窗口"这一结构性判断，不要点名具体公司
    - 财报季窗口的结构性重要性高于单日价格跳动
    - 语气要像晨会开场白：先说今天市场主线，再点出最关键的驱动，不要只写抽象概念
+   - 优先写“市场焦点正在从A切换到B”，例如从地缘headline切回财报、从避险切回盈利、从指数反弹切到板块分化
 3. 生成 3-5 个资产桶审视卡片（asset_buckets）
    - bucket 只能从：美股、港股、黄金、美债、汇率 中选择；大宗商品不生成独立bucket（原油只作为传导因子，体现在相关bucket的portfolio_implication里）
    - 必须至少生成 3 个桶；PB 客户的核心配置桶优先级应为：美股、港股、美债，其次才是黄金
@@ -3393,6 +3403,8 @@ ${narrativeHistorySection}
 - 今日/5日/YTD 的组合更适合 PB 监测语境：今日负责触发，5日负责判断是否过热，YTD负责判断中期趋势
 - 写法上优先采用“盘面事实 + 直接驱动 + 下一观察点”的交易台摘要语气，而不是抽象术语堆叠
 - 尽量写出相对表现、量能/流动性、板块轮动、风险偏好是否扩散，而不是只说“上涨/下跌”
+- 如果市场更像在消化旧headline、切回基本面、或进入拥挤交易验证阶段，要直接写出来，不要只写“情绪改善/风险偏好修复”
+- 可以适度使用交易台语言去描述 flow / positioning，例如“空头回补”“低配追补”“买盘驱动”“better seller/卖盘占优”“双向活跃”，但必须和当天盘面事实绑定，不能空泛套用
 4. 选择今日信号最强的资产类别作为 default_expanded_bucket
 5. 将所有主题按今日客户关注度排序（ranked_slugs）
 
@@ -3473,6 +3485,8 @@ ${narrativeHistorySection}
    - 用一句话先讲今天发生了什么，再解释为什么这样走，≤45字，不写问句
    - 优先引用地缘、政策、财报、流动性、利率、油价等真正驱动，而不是泛泛风险提示
    - 若有条件，优先写成“盘中/隔夜怎么走 + 谁在领涨/承压 + 为什么”这种可视化盘面语言
+   - 若盘面存在明显的焦点切换（例如从地缘切回财报、从指数反弹切到板块分化），应直接写出这种叙事切换
+   - 若盘面明显体现仓位与资金行为，可适度写出“空头回补”“低配追补”“买盘驱动”“卖盘占优”“双向活跃”等 flow / positioning 语言
 
    【portfolio_implication】
    ⚠️ 这里承载的是“今日需留意”
@@ -3485,23 +3499,27 @@ ${narrativeHistorySection}
    按资产类型的IC判断逻辑：
 
    美股：
+   - 如果当天更像“市场淡化地缘headline，重新聚焦财报/盈利”，应直接写出这种焦点切换，不要只写“等待验证”
    - 如果顶部财报日历显示近期有财报：
      → portfolio_implication必须明确：接下来重点看财报能否验证这波反弹是盈利支撑还是空头回补；禁止点名具体公司
    - 如果SPX/NDX 5日涨幅≥3% 且 有近期财报：
      → 高位+财报窗口 = 说明这波反弹尚未经过盈利验证，接下来重点看权重股财报能否证明高位仍有基本面支撑
    - 如果SPX/NDX 5日涨幅≥3% 但 无近期财报：
      → 判断反弹质量：是否为空头回补/流动性驱动（而非盈利支撑）；接下来重点看这波累涨是否有盈利与财报继续接棒，而不是停留在情绪和仓位推动
+   - 若涨幅已大、主题明显拥挤，应判断这波反弹是否开始对空头/低配形成压力，而不只是简单重复“高位盘整”
    - 如果市场数据包含SPX绝对价位，优先引用（如"标普现报5,570点"），而非只说涨幅%
    - 美股从HK视角永远写"隔夜"或"昨收"，不写"今日上涨/今日下跌"
    - 禁止："复核行业分布是否过度暴露于某板块"这类无方向判断
 
    港股：
    - 优先写清楚今天港股涨/跌的直接原因：谈判预期、油价、GDP/LPR、政策支持、IPO/科技主题热度
+   - 如果市场焦点正从中东/地缘切回企业盈利、科技主题或政策验证，要直接写出这种切换
    - 南向资金只能作为流动性与风险偏好的解释变量，不能写成客户原始买入 thesis
    - 可以提科技次新股和IPO热度，但要写成市场风格和流动性扩散，而不是简单区分“有没有南向资金流入”
    - 如果只是温和反弹，应写成“早盘波动后仍能收住升幅，更多反映地缘缓和、油价回落与政策底支撑；接下来重点看能否扩散到更广泛盈利与政策主线”，不要写成强趋势判断
    - 如果港股表现落后于亚洲其他市场，或量能明显回落，应直接写出“表现有韧性但成交偏弱/落后区域市场”，帮助RM判断这波上涨质量
    - 优先用“早盘波动后收复”“成交回落”“科技/IPO主题活跃”“空头回补/买盘驱动”等盘面词，而不是抽象的“情绪改善”
+   - 若只有局部主题活跃、没有扩散到更广泛指数/板块，应明确写成“结构性活跃”或“扩散不足”，不要把局部热点误写成全面risk-on
 
    黄金：
    - 必须判断：当前避险逻辑是否仍然成立（地缘缓和 = 避险逻辑弱化）
@@ -3543,6 +3561,9 @@ ${narrativeHistorySection}
 - 生成 today_signal 时，优先使用“昨日收盘/今日 + 5日 + YTD”的监测框架，而不是只写单日波动
 - 如果上方topic摘要中有传导链内容，portfolio_implication应优先引用其中的具体判断，而不是另起炉灶
 - thesis_check 与 portfolio_implication 拼在一起后，应该自然形成“一段能读通的晨会摘要”，不能像两条拼接的模板句
+- narrative 与各 bucket 优先写“焦点切换”和“谁在承压/谁在领涨”，而不是空泛地写“情绪改善/风险偏好修复”
+- 可以用交易台常见的 flow / positioning 语言，但必须落在事实上：例如空头回补、低配追补、买盘驱动、卖盘占优、双向活跃、主题拥挤
+- 若存在相对表现信息（落后区域市场、领涨/领跌板块、局部热点未扩散），优先写出这种内部结构，而不是只报指数点位
 - 最终语气应接近交易台/IC晨会摘要：具体、有盘感、有驱动链，不要像教科书式宏观总结
 - 禁止输出任何教科书式风险管理语言` },
                     { role: 'user', content: userPrompt }
