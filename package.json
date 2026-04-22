@@ -10,6 +10,7 @@
     "smoke": "ts-node src/scripts/smoke-test.ts",
     "seed": "ts-node src/scripts/seed-underlyings.ts",
     "screener": "ts-node src/scripts/run-daily-screener.ts",
+    "narrative:refresh": "ts-node src/scripts/run-daily-narrative-refresh.ts",
     "tracker": "ts-node src/scripts/run-price-tracker.ts",
     "tracker:review:telegram": "ts-node src/scripts/send-tracker-review-telegram.ts",
     "migrate": "ts-node src/scripts/migrate-add-narrative-columns.ts",
