@@ -131,9 +131,16 @@ export async function runThemeBasketDaily(slug: string): Promise<void> {
         throw new Error(`No valid theme basket results for ${slug}`);
     }
 
-    const result = await generateThemeWinnersLosers(slug, rawResults);
+    let result: ThemeWinnersLosersResult | null = null;
+    try {
+        result = await generateThemeWinnersLosers(slug, rawResults);
+    } catch (error) {
+        console.warn(`[theme-baskets] ${slug} DeepSeek analysis failed, using deterministic fallback`, error);
+        result = buildDeterministicThemeWinnersLosers(slug, rawResults);
+    }
+
     if (!result) {
-        throw new Error(`Failed to generate theme basket analysis for ${slug}`);
+        result = buildDeterministicThemeWinnersLosers(slug, rawResults);
     }
 
     await upsertThemeBasketResult(slug, getTodayIsoDate(), result);
@@ -196,6 +203,7 @@ interpretation 写作规则：
 - 禁止复述固定模板，禁止输出与 winners / losers 结果不一致的行业
 - 如果上方提供了“今日叙事主线”，interpretation 必须和这条主线保持一致：即沿用同一市场背景和主要驱动，再下钻到 sector winners / losers 的原因
 - 但不要直接照抄今日叙事原句；你的任务是解释“在这条主线下，为什么这些板块赢、为什么这些板块输、接下来 sector 层面该看什么”
+- interpretation 中出现板块名称时，必须使用传入数据中的原始 label 字段，不可缩写、改写或使用同义词
 
 输出以下 JSON，不得输出任何 JSON 以外的内容：
 
@@ -335,6 +343,99 @@ function rebuildBasketItems(
             };
         })
         .filter((item): item is ThemeBasketItem => item !== null);
+}
+
+function buildDeterministicThemeWinnersLosers(
+    slug: string,
+    rawPerf: BasketPerfWithMeta[],
+): ThemeWinnersLosersResult {
+    const items = rawPerf
+        .filter(hasCompletePerf)
+        .map((item) => ({
+            id: item.id,
+            label: item.label,
+            labelEn: item.labelEn,
+            war_perf: roundToOneDecimal(item.war_perf),
+            ceasefire_perf: roundToOneDecimal(item.ceasefire_perf),
+            ytd_perf: roundToOneDecimal(item.ytd_perf),
+            driver: getFallbackDriver(item.id),
+        }));
+
+    const winners = items
+        .filter((item) => item.ytd_perf > 0)
+        .sort((left, right) => right.ytd_perf - left.ytd_perf || right.war_perf - left.war_perf);
+    const losers = items
+        .filter((item) => item.ytd_perf <= 0)
+        .sort((left, right) => left.ytd_perf - right.ytd_perf || left.war_perf - right.war_perf);
+
+    return {
+        scenario_label: getScenarioLabel(slug),
+        updated_at: new Date().toISOString(),
+        interpretation: buildDeterministicInterpretation(slug, winners, losers),
+        winners,
+        losers,
+    };
+}
+
+function hasCompletePerf(item: BasketPerfWithMeta): item is BasketPerfWithMeta & {
+    war_perf: number;
+    ceasefire_perf: number;
+    ytd_perf: number;
+} {
+    return typeof item.war_perf === 'number'
+        && Number.isFinite(item.war_perf)
+        && typeof item.ceasefire_perf === 'number'
+        && Number.isFinite(item.ceasefire_perf)
+        && typeof item.ytd_perf === 'number'
+        && Number.isFinite(item.ytd_perf);
+}
+
+function buildDeterministicInterpretation(
+    slug: string,
+    winners: ThemeBasketItem[],
+    losers: ThemeBasketItem[],
+) {
+    const topWinners = winners.slice(0, 3).map((item) => item.label).join('、');
+    const topLosers = losers.slice(0, 2).map((item) => item.label).join('、');
+
+    if (slug === 'gold-repricing') {
+        return {
+            summary: topWinners
+                ? `跑赢板块集中在${topWinners}，说明市场仍在围绕黄金重估与防守需求定价。`
+                : '当前跑赢板块有限，黄金重估尚未形成明确扩散。',
+            laggards: topLosers
+                ? `落后板块集中在${topLosers}，反映利率与风险偏好变化仍压制部分高估值资产。`
+                : '年内明确跑输板块有限，当前更像强弱分化而非全面风险收缩。',
+            client: '客户沟通可先区分金价重估受益链条与仍受实际利率约束的板块。',
+        };
+    }
+
+    return {
+        summary: topWinners
+            ? `跑赢板块集中在${topWinners}，说明市场仍在区分地缘冲击与中期资本开支主线。`
+            : '当前跑赢板块有限，中东冲突尚未形成明确的板块扩散主线。',
+        laggards: topLosers
+            ? `落后板块集中在${topLosers}，反映高估值与结构性压力在事件扰动下更容易被放大。`
+            : '年内明确跑输板块有限，当前更多是相对强弱轮动而非全面风险回撤。',
+        client: '客户沟通可先区分哪些板块在交易事件风险溢价，哪些仍由中期主线支撑。',
+    };
+}
+
+function getFallbackDriver(id: string): string {
+    const drivers: Record<string, string> = {
+        'ai-infra': 'AI资本开支支撑',
+        'data-center': '算力需求支撑估值',
+        'optical-networking': 'AI光模块需求拉动',
+        'memory-storage': '存储周期与AI需求',
+        'energy-oil': '供给风险抬升油价',
+        defense: '地缘预算预期升温',
+        'gold-miners': '避险买盘推升金矿',
+        'enterprise-software': '高估值受利率压制',
+        'it-services': 'AI替代压力拖累',
+        'china-tech': '政策与资金修复',
+    };
+
+    return drivers[id] ?? '相对动能变化';
 }
 
 function computePerfFromHistory(

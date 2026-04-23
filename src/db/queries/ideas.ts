@@ -1868,7 +1868,7 @@ export async function getLatestThemeBasketResult(
         SELECT result_json, run_date::text
         FROM theme_basket_results
         WHERE slug = $1
-          AND run_date IN (CURRENT_DATE, (CURRENT_DATE - INTERVAL '1 day')::date)
+          AND run_date >= (CURRENT_DATE - INTERVAL '7 days')::date
         ORDER BY run_date DESC
         LIMIT 1
         `,
