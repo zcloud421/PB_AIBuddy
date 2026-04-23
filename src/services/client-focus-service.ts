@@ -3121,12 +3121,55 @@ function normalizeAssetBuckets(
                 && item.portfolio_implication.trim().length > 0
         )
         .slice(0, 5)
-        .map((item) => ({
+        .map((item) => sanitizeDailyNarrativeBucket({
             bucket: item.bucket,
             thesis_check: item.thesis_check.trim(),
             today_signal: item.today_signal.trim(),
             portfolio_implication: item.portfolio_implication.trim()
         }));
+}
+
+const SINGLE_STOCK_TICKER_PATTERN =
+    /\b(?:AAPL|AMD|AMZN|AVGO|BABA|BIDU|COIN|GOOG|GOOGL|HOOD|INTC|META|MSFT|MU|NFLX|NVDA|ORCL|PDD|PLTR|TSLA|TSM|UNH|VRT|XOM)\b/i;
+
+function cleanDailyNarrativeSentence(text: string) {
+    return text
+        .replace(/\s+/g, ' ')
+        .replace(/([\u4e00-\u9fff])\s+(DXY|USDCNH|USDJPY|USDCHF|TNX|SPX|NDX)\b/g, '$1，$2')
+        .replace(/\b(DXY|USDCNH|USDJPY|USDCHF|TNX|SPX|NDX)\s+([\u4e00-\u9fff])/g, '$1$2')
+        .trim();
+}
+
+function containsSingleStockEarningsLeak(text: string) {
+    return SINGLE_STOCK_TICKER_PATTERN.test(text) && /财报|earnings/i.test(text);
+}
+
+function sanitizeDailyNarrativeBucket(
+    bucket: DailyMarketNarrative['asset_buckets'][number]
+): DailyMarketNarrative['asset_buckets'][number] {
+    const sanitized = {
+        ...bucket,
+        thesis_check: cleanDailyNarrativeSentence(bucket.thesis_check),
+        today_signal: cleanDailyNarrativeSentence(bucket.today_signal),
+        portfolio_implication: cleanDailyNarrativeSentence(bucket.portfolio_implication)
+    };
+
+    if (sanitized.bucket !== '美股') {
+        const combinedText = `${sanitized.thesis_check} ${sanitized.portfolio_implication}`;
+        if (containsSingleStockEarningsLeak(combinedText)) {
+            if (sanitized.bucket === '美债') {
+                sanitized.portfolio_implication = '继续看10Y收益率、通胀预期与联储路径，判断久期和AT1利差压力是否缓解。';
+            } else if (sanitized.bucket === '汇率') {
+                sanitized.portfolio_implication = '继续看DXY、USDCNH与融资货币方向，判断美元压力是否扩散到非美资产。';
+            } else if (sanitized.bucket === '黄金') {
+                sanitized.portfolio_implication = '继续看实际利率与避险需求变化，判断黄金是短期波动还是主线转弱。';
+            } else if (sanitized.bucket === '港股') {
+                sanitized.portfolio_implication = '继续看南向资金、恒指与恒科分化，判断港股压力是否仍局限在指数层面。';
+            }
+        }
+    }
+
+    return sanitized;
 }
 
 function buildTreasuryBucket(
@@ -3414,6 +3457,8 @@ ${narrativeHistorySection}
 - 若单日波动很小（例如黄金<1%、汇率信号未达显著阈值），不要硬写成“今天需要review”，可省略该 bucket，或明确说明“当前不足以单独触发复核”
 - 今日/5日/YTD 的组合更适合 PB 监测语境：今日负责触发，5日负责判断是否过热，YTD负责判断中期趋势
 - 写法上优先采用“盘面事实 + 直接驱动 + 下一观察点”的交易台摘要语气，而不是抽象术语堆叠
+- 中文必须自然通顺：每个 bucket 的 thesis_check + portfolio_implication 合起来最多两句，句内必须用逗号/分号分隔因果，不允许把多个判断无标点硬拼在一起
+- 严禁跨资产串线：美债 bucket 只讲收益率、通胀预期、联储路径、term premium、久期、信用利差/AT1；汇率 bucket 只讲DXY、USDCNH、USDJPY、USDCHF、carry unwind与非美资产传导；非美股 bucket 禁止出现单一股票代码或单一公司财报
 - 在输入明确提供相对表现、量能/流动性、板块轮动、风险偏好扩散等信息时，应优先使用这些信息解释盘面质量；若输入没有这些信息，禁止编造
 - 亚洲/中国/香港市场必须尽量区分：区域市场相对表现、A股与港股、恒指与恒生科技、指数与板块内部结构；不要用单一指数或单一板块概括整个市场
 - 若输入信息包含成交额、融资余额、南向资金、空头回补、散户参与或板块轮动，应优先把它们写成盘面质量判断；没有这些输入时不要编造，也不要套用交易台材料里的具体板块例子
@@ -3563,6 +3608,7 @@ ${narrativeHistorySection}
    - 如果 primary_slug 是 middle-east-tensions 或 private-credit-stress：
      → portfolio_implication必须额外提及 AT1 债券（HSBC/BACR/BNP等）的信用利差敞口——地缘风险溢价上升或信贷压力扩散时，AT1是HK PB客户最直接受影响的固收持仓
    - 美债从HK视角永远写"隔夜"或"昨收10Y收益率…"，不是"今日收益率…"
+   - 美债 bucket 禁止提及单一公司财报或股票代码（例如INTC、TSLA、NVDA）；即使财报影响风险资产，也只能写“风险资产/财报季对利率风险偏好的间接扰动”，不能把个股财报作为美债watchpoint
    - 禁止："确认久期配置是否服务原先的判断"这类空话
 
    汇率（触发条件：USDJPY或USDCHF单日变动≥0.5%，或USDCNH单日变动≥0.3%，或DXY 5日变动≥1.5%）：
@@ -3576,6 +3622,8 @@ ${narrativeHistorySection}
    - 只有当USDCNH单日上行≥0.3%或5日上行≥0.8%时，才可讨论人民币贬值对港股/中资资产的实际压力
    - 如果DXY走强但USDCNH仅微涨或基本稳定，应写成“美元偏强但人民币端尚未确认压力”，不要把DXY压力机械外推到港股估值
    - portfolio_implication必须明确指出：是carry unwind风险、是人民币方向变化的配置含义，还是美元趋势对EM的影响
+   - 汇率 bucket 必须只保留一条清晰传导链，不能同时堆叠“美元、油价、港股、EM、人民币”多个方向；若USDCNH稳定，应优先写“美元偏强是背景变量，人民币端暂未确认压力”
+   - 汇率句子必须用自然中文标点连接，例如“美元小幅反弹，但人民币端尚未确认压力；继续看DXY与USDCNH是否同向走强”，禁止输出缺逗号的拼接句
 
    大宗商品（不生成独立bucket）：
    - 原油是传导因子，不是PB客户持仓对象；禁止生成大宗商品bucket
