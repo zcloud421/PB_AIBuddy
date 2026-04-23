@@ -1714,6 +1714,9 @@ async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<Wha
   示例：【特朗普】在内阁会议宣称伊朗已放行10艘油轮作为"礼物"
   示例：【IRGC】发动第86波导弹和无人机攻势，目标为以军南部基地
   禁止：
+  - 【媒体】【市场】【消息】【报道】【投资者】【各方】【双方】这类伪主语；必须写具体国家、机构、人物或资产变量
+  - "媒体油价上涨""市场担忧升温""消息称局势变化"这类不通顺句子
+  - "伊朗-US"这类中英混排；必须写"美伊"
   - "各方态势评估""局势升级""引发不确定性""主持会议""发表声明"等模糊表述
   - 主语模糊（不允许"某方""双方""各方"，必须说明是哪个国家/机构/人物）
   - 省略关键数字或具体细节（有数字尽量保留：波次、枚数、桶/日、美元价格）
@@ -4143,7 +4146,12 @@ function buildFallbackWhatChangedGroups(newsItems: NewsItem[]): WhatChangedGroup
 }
 
 function sanitizeGeneratedMiddleEastHeadline(headline: string) {
-    const trimmed = headline.replace(/\s+/g, ' ').trim();
+    const trimmed = headline
+        .replace(/\s+/g, ' ')
+        .replace(/^[。；;,.，、\s]+/, '')
+        .replace(/伊朗\s*[-/]\s*(US|U\.S\.|美国)/gi, '美伊')
+        .replace(/Iran\s*[-/]\s*(US|U\.S\.|United States)/gi, '美伊')
+        .trim();
     if (!trimmed || isBadMiddleEastHeadline(trimmed)) {
         return '';
     }
@@ -4161,6 +4169,20 @@ function isBadMiddleEastHeadline(headline: string) {
     const chineseMatches = normalized.match(/[\u4e00-\u9fff]/g) ?? [];
     const latinWordMatches = normalized.match(/[A-Za-z]{3,}/g) ?? [];
     const contentAfterActor = normalized.replace(/^【[^】]+】/, '').trim();
+    const actorMatch = normalized.match(/^【([^】]+)】/);
+    const actor = actorMatch?.[1]?.trim() ?? '';
+    const blockedActors = new Set([
+        '媒体',
+        '市场',
+        '消息',
+        '报道',
+        '外媒',
+        '投资者',
+        '各方',
+        '双方',
+        '相关人士',
+        '分析师'
+    ]);
     const blockedFragments = [
         'bitcoin',
         'crypto',
@@ -4170,8 +4192,30 @@ function isBadMiddleEastHeadline(headline: string) {
         'live updates',
         'breaking news'
     ];
+    const blockedChinesePatterns = [
+        /^媒体/,
+        /^市场/,
+        /^消息/,
+        /^报道/,
+        /^外媒/,
+        /^投资者/,
+        /^各方/,
+        /^双方/,
+        /媒体油价/,
+        /市场油价/,
+        /伊朗\s*[-/]\s*(US|U\.S\.|美国)/i,
+        /Iran\s*[-/]\s*(US|U\.S\.|United States)/i
+    ];
 
     if (blockedFragments.some((fragment) => lower.includes(fragment))) {
+        return true;
+    }
+
+    if (blockedActors.has(actor)) {
+        return true;
+    }
+
+    if (blockedChinesePatterns.some((pattern) => pattern.test(normalized))) {
         return true;
     }
 
