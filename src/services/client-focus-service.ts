@@ -6880,16 +6880,9 @@ export async function getDailyMarketNarrative(): Promise<DailyMarketNarrative | 
         dailyNarrativeCache.expiresAt = 0;
     }
 
-    if (cached && dailyNarrativeCache.expiresAt > Date.now()) {
-        return cached;
-    }
-
-    if (cached) {
-        void refreshDailyMarketNarrative(cached);
-        return cached;
-    }
-
-    return refreshDailyMarketNarrative(null);
+    // Daily narrative is a scheduled briefing, not a user-triggered live commentary.
+    // Only the protected refresh endpoint should generate new content.
+    return cached;
 }
 
 export async function refreshDailyMarketNarrativeNow(): Promise<DailyMarketNarrative | null> {
