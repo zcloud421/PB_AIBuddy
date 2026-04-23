@@ -1,5 +1,5 @@
 import { pool } from '../client';
-import type { DailyBestCard, DrawdownAttribution, Flag, NewsItem, SymbolIdeaResponse, TodayIdeasResponse } from '../../types/api';
+import type { DailyBestCard, DailyMarketNarrative, DrawdownAttribution, Flag, NewsItem, SymbolIdeaResponse, TodayIdeasResponse } from '../../types/api';
 import type { DailyPriceBar } from '../../data/massive-fetcher';
 
 export interface LatestCompletedRun {
@@ -1758,6 +1758,50 @@ export async function ensureClientFocusDailyVerdictsTable(): Promise<void> {
             verdict_json JSONB NOT NULL,
             created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (slug, run_date)
+        )
+    `);
+}
+
+export async function upsertDailyMarketNarrative(
+    runDate: string,
+    narrative: DailyMarketNarrative
+): Promise<void> {
+    await pool.query(
+        `
+        INSERT INTO daily_market_narratives (
+            run_date,
+            narrative_json
+        )
+        VALUES ($1::date, $2::jsonb)
+        ON CONFLICT (run_date)
+        DO UPDATE SET
+            narrative_json = EXCLUDED.narrative_json,
+            created_at = NOW()
+        `,
+        [runDate, JSON.stringify(narrative)]
+    );
+}
+
+export async function getLatestDailyMarketNarrative(): Promise<{ narrative_json: DailyMarketNarrative; run_date: string } | null> {
+    const result = await pool.query<{ narrative_json: DailyMarketNarrative; run_date: string }>(
+        `
+        SELECT narrative_json, run_date::text
+        FROM daily_market_narratives
+        WHERE run_date >= (CURRENT_DATE - INTERVAL '7 days')::date
+        ORDER BY run_date DESC, created_at DESC
+        LIMIT 1
+        `
+    );
+
+    return result.rows[0] ?? null;
+}
+
+export async function ensureDailyMarketNarrativesTable(): Promise<void> {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS daily_market_narratives (
+            run_date       DATE PRIMARY KEY,
+            narrative_json JSONB NOT NULL,
+            created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     `);
 }

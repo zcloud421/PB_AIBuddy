@@ -25,7 +25,13 @@ import type {
 import { fetchNewsItemsByQuery, fetchNewsItemsFromNewsData } from '../data/news-fetcher';
 import { MassiveDataFetcher } from '../data/massive-fetcher';
 import { MassiveClient } from '../data/massive-client';
-import { getLatestClientFocusDailyVerdict, getLatestThemeBasketResult, getUpcomingEarningsNextNDays } from '../db/queries/ideas';
+import {
+    getLatestClientFocusDailyVerdict,
+    getLatestDailyMarketNarrative,
+    getLatestThemeBasketResult,
+    getUpcomingEarningsNextNDays,
+    upsertDailyMarketNarrative
+} from '../db/queries/ideas';
 import axios from 'axios';
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
@@ -6868,6 +6874,7 @@ async function refreshDailyMarketNarrative(
             dailyNarrativeCache.value = nextValue;
             dailyNarrativeCache.schemaVersion = DAILY_NARRATIVE_CACHE_SCHEMA_VERSION;
             dailyNarrativeCache.expiresAt = Date.now() + DAILY_NARRATIVE_CACHE_TTL_MS;
+            await upsertDailyMarketNarrative(nextValue.generated_at.slice(0, 10), nextValue);
             return nextValue;
         } catch {
             return fallback;
@@ -6891,6 +6898,16 @@ export async function getDailyMarketNarrative(): Promise<DailyMarketNarrative | 
     if (dailyNarrativeCache.value && !cached) {
         dailyNarrativeCache.value = null;
         dailyNarrativeCache.expiresAt = 0;
+    }
+
+    if (!cached) {
+        const latest = await getLatestDailyMarketNarrative().catch(() => null);
+        const persisted = isRenderableDailyNarrative(latest?.narrative_json) ? latest.narrative_json : null;
+        if (persisted) {
+            dailyNarrativeCache.value = persisted;
+            dailyNarrativeCache.expiresAt = Date.now() + DAILY_NARRATIVE_CACHE_TTL_MS;
+            return persisted;
+        }
     }
 
     // Daily narrative is a scheduled briefing, not a user-triggered live commentary.

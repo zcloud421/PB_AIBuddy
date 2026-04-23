@@ -8,6 +8,7 @@ import {
     ensureClientFocusDailyVerdictsTable,
     createIdeaRun,
     ensureDailyBestHistoryTable,
+    ensureDailyMarketNarrativesTable,
     ensureDailyRecommendationHistoryTable,
     ensureEarningsCalendarColumns,
     ensureIdeaCandidatePriceColumns,
@@ -110,6 +111,7 @@ async function main(): Promise<void> {
         console.log('[screener] Rate limit mode: standard (3s between symbols)');
 
         await ensureDailyBestHistoryTable();
+        await ensureDailyMarketNarrativesTable();
         await ensureDailyRecommendationHistoryTable();
         await ensureIdeaCandidatePriceColumns();
         await ensureEarningsCalendarColumns();
