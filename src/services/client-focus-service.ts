@@ -7130,6 +7130,35 @@ function isRenderableDailyNarrative(value: DailyMarketNarrative | null | undefin
     );
 }
 
+function hydrateDailyNarrativePitchCards(
+    value: DailyMarketNarrative | null | undefined
+): DailyMarketNarrative | null {
+    if (!value || typeof value.momentum_days !== 'number') {
+        return null;
+    }
+
+    const existingPitchTriggers = normalizeDailyPitchTriggers((value as any).daily_pitch_triggers);
+    if (existingPitchTriggers.length > 0) {
+        return {
+            ...value,
+            daily_pitch_triggers: existingPitchTriggers,
+            asset_buckets: Array.isArray((value as any).asset_buckets) ? (value as any).asset_buckets : []
+        };
+    }
+
+    const legacyBuckets = normalizeAssetBuckets((value as any).asset_buckets);
+    const derivedPitchTriggers = buildPitchTriggersFromBuckets(legacyBuckets);
+    if (derivedPitchTriggers.length < 1) {
+        return null;
+    }
+
+    return {
+        ...value,
+        daily_pitch_triggers: derivedPitchTriggers,
+        asset_buckets: legacyBuckets
+    };
+}
+
 async function refreshDailyMarketNarrative(
     fallback: DailyMarketNarrative | null
 ): Promise<DailyMarketNarrative | null> {
@@ -7182,7 +7211,7 @@ export async function getDailyMarketNarrative(): Promise<DailyMarketNarrative | 
         dailyNarrativeCache.schemaVersion = DAILY_NARRATIVE_CACHE_SCHEMA_VERSION;
     }
 
-    const cached = isRenderableDailyNarrative(dailyNarrativeCache.value) ? dailyNarrativeCache.value : null;
+    const cached = hydrateDailyNarrativePitchCards(dailyNarrativeCache.value);
 
     if (dailyNarrativeCache.value && !cached) {
         dailyNarrativeCache.value = null;
@@ -7191,7 +7220,7 @@ export async function getDailyMarketNarrative(): Promise<DailyMarketNarrative | 
 
     if (!cached) {
         const latest = await getLatestDailyMarketNarrative().catch(() => null);
-        const persisted = isRenderableDailyNarrative(latest?.narrative_json) ? latest.narrative_json : null;
+        const persisted = hydrateDailyNarrativePitchCards(latest?.narrative_json);
         if (persisted) {
             dailyNarrativeCache.value = persisted;
             dailyNarrativeCache.expiresAt = Date.now() + DAILY_NARRATIVE_CACHE_TTL_MS;

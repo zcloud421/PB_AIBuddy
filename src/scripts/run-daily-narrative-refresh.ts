@@ -35,18 +35,19 @@ async function main(): Promise<void> {
     const payload = (await response.json()) as {
         generated_at?: string;
         primary_slug?: string;
+        daily_pitch_triggers?: Array<{ hook?: string }>;
         asset_buckets?: Array<{ bucket?: string }>;
     } | null;
 
-    const bucketSummary = Array.isArray(payload?.asset_buckets)
-        ? payload.asset_buckets
-              .map((item) => item.bucket)
-              .filter((bucket): bucket is string => typeof bucket === 'string' && bucket.length > 0)
+    const pitchSummary = Array.isArray(payload?.daily_pitch_triggers)
+        ? payload.daily_pitch_triggers
+              .map((item) => item.hook)
+              .filter((hook): hook is string => typeof hook === 'string' && hook.length > 0)
               .join(', ')
         : '';
 
     console.log(
-        `[focus-refresh] narrative refreshed (${payload?.primary_slug ?? 'unknown'} / ${bucketSummary || 'no buckets'} / ${payload?.generated_at ?? 'no generated_at'})`
+        `[focus-refresh] narrative refreshed (${payload?.primary_slug ?? 'unknown'} / ${pitchSummary || 'no pitch cards'} / ${payload?.generated_at ?? 'no generated_at'})`
     );
 }
 
