@@ -254,9 +254,19 @@ export interface DailyMarketNarrative {
     ranked_slugs: string[];
     rank_changes: Record<string, 'up' | 'down' | 'stable'>;
     momentum_days: number;
+    daily_pitch_triggers?: DailyPitchTrigger[];
     asset_buckets: AssetBucketNarrative[];
     default_expanded_bucket: '美股' | '港股' | '黄金' | '美债' | '汇率';
     generated_at: string;
+}
+
+export interface DailyPitchTrigger {
+    hook: string;
+    why_now: string;
+    client_type: string;
+    pitch_line: string;
+    watchpoints: string[];
+    related_assets?: string[];
 }
 
 export interface AssetBucketNarrative {

@@ -2931,6 +2931,7 @@ function buildFallbackDailyNarrative(
     }
 
     const prioritizedBuckets = ensurePriorityAssetBuckets(assetBuckets.slice(0, 5), primaryTopic.slug, marketSnapshot);
+    const dailyPitchTriggers = buildPitchTriggersFromBuckets(prioritizedBuckets);
 
     return {
         primary_slug: primaryTopic.slug,
@@ -2939,6 +2940,7 @@ function buildFallbackDailyNarrative(
         ranked_slugs: rankedSlugs,
         rank_changes: {},
         momentum_days: 1,
+        daily_pitch_triggers: dailyPitchTriggers,
         asset_buckets: prioritizedBuckets,
         default_expanded_bucket: prioritizedBuckets.some((item) => item.bucket === '美股') ? '美股' : prioritizedBuckets[0].bucket,
         generated_at: new Date().toISOString(),
@@ -3149,6 +3151,74 @@ function normalizeAssetBuckets(
             ...(typeof item.pitch_line === 'string' && item.pitch_line.trim().length > 0
                 ? { pitch_line: item.pitch_line.trim() }
                 : {})
+        }));
+}
+
+function normalizeDailyPitchTriggers(
+    triggers: unknown
+): NonNullable<DailyMarketNarrative['daily_pitch_triggers']> {
+    if (!Array.isArray(triggers)) {
+        return [];
+    }
+
+    return triggers
+        .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+        .flatMap((item) => {
+            if (
+                typeof item.hook !== 'string'
+                || typeof item.why_now !== 'string'
+                || typeof item.client_type !== 'string'
+                || typeof item.pitch_line !== 'string'
+                || !Array.isArray(item.watchpoints)
+                || item.hook.trim().length === 0
+                || item.why_now.trim().length === 0
+                || item.client_type.trim().length === 0
+                || item.pitch_line.trim().length === 0
+            ) {
+                return [];
+            }
+
+            const watchpoints = item.watchpoints
+                .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+                .map((value) => cleanDailyNarrativeSentence(value).slice(0, 32))
+                .slice(0, 3);
+
+            if (watchpoints.length === 0) {
+                return [];
+            }
+
+            const related_assets = Array.isArray(item.related_assets)
+                ? item.related_assets
+                    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+                    .map((value) => cleanDailyNarrativeSentence(value).slice(0, 16))
+                    .slice(0, 5)
+                : undefined;
+
+            return [{
+                hook: cleanDailyNarrativeSentence(item.hook).slice(0, 28),
+                why_now: cleanDailyNarrativeSentence(item.why_now).slice(0, 70),
+                client_type: cleanDailyNarrativeSentence(item.client_type).slice(0, 24),
+                pitch_line: cleanDailyNarrativeSentence(item.pitch_line).slice(0, 48),
+                watchpoints,
+                ...(related_assets && related_assets.length > 0 ? { related_assets } : {})
+            }];
+        })
+        .slice(0, 3);
+}
+
+function buildPitchTriggersFromBuckets(
+    assetBuckets: DailyMarketNarrative['asset_buckets']
+): NonNullable<DailyMarketNarrative['daily_pitch_triggers']> {
+    return assetBuckets
+        .filter((bucket) => bucket.trigger || bucket.pitch_line)
+        .slice(0, 3)
+        .map((bucket) => ({
+            hook: bucket.trigger ?? `${bucket.bucket}出现可聊信号`,
+            why_now: bucket.thesis_check,
+            client_type: bucket.client_type ?? `${bucket.bucket}相关持仓客户`,
+            pitch_line: bucket.pitch_line ?? bucket.portfolio_implication,
+            watchpoints: [bucket.portfolio_implication],
+            related_assets: [bucket.bucket]
         }));
 }
 
@@ -3492,7 +3562,21 @@ ${narrativeHistorySection}
    - 优先写“市场焦点正在从A切换到B”，例如从地缘headline切回财报、从避险切回盈利、从指数反弹切到板块分化
    - 若当前香港时间为早晨且港股未开盘，narrative必须以“前一日港股收盘 + 隔夜美股收盘 + 已发布的盘后权重财报”作为回顾基准，不能写成盘前等待状态
    - narrative必须尽量同时覆盖股票市场总体现况与主导跨资产的驱动，避免只写能源/地缘而忽略美股或港股
-3. 生成 3-5 个资产桶审视卡片（asset_buckets）
+3. 生成 3 条 RM 今日可聊触发器（daily_pitch_triggers）
+   - 这是最重要的输出，目标不是替代 CIO office，而是 bridge last mile：告诉RM今天最值得主动和客户聊什么
+   - 每条必须是“客户可开口话题”，不是市场总结；优先选择纪录级连涨/连跌、关键点位突破、财报落地、资金流异动、板块极端分化、宏观事件转折
+   - 不能泛泛写“美股反弹”“港股承压”“市场波动”；必须有具体 hook，例如“SOX半导体连续多日上涨”“南向逆势净买入”“10Y收益率突破区间”“黄金与美元同涨背离”
+   - 每条必须包含：
+     - hook：可聊话题标题，≤24字，必须像RM看到后会想点开的 headline
+     - why_now：为什么今天值得聊，≤60字，必须有数字/事件/分化/纪录之一；没有证据不要编造
+     - client_type：适合主动触达的客户类型，≤20字，必须落到敞口
+     - pitch_line：RM可直接说出口的开场白，≤40字，自然口语，不给买卖建议
+     - watchpoints：接下来1-3个观察点，每个≤20字，必须具体
+     - related_assets：相关资产/标的/指数，最多5个，例如 SOX、SMH、NVDA、AMD、TSM
+   - 这三条要跨资产筛选“最值得聊”，不必平均覆盖美股/港股/美债；哪个更有客户开口价值就选哪个
+   - 如果输入没有足够强的异动或事件，宁可写“财报验证窗口”“资金流背离”“利率区间突破”这类真实触发，不要硬造热门话题
+   - 语言像交易台给RM的 call prep，不像研究报告摘要
+4. 生成 3-5 个资产桶审视卡片（asset_buckets，作为兜底结构）
    - bucket 只能从：美股、港股、黄金、美债、汇率 中选择；大宗商品不生成独立bucket（原油只作为传导因子，体现在相关bucket的portfolio_implication里）
    - 必须至少生成 3 个桶；PB 客户的核心配置桶优先级应为：美股、港股、美债，其次才是黄金
    - 每个 bucket 必须包含：
@@ -3517,8 +3601,8 @@ ${narrativeHistorySection}
 - 若输入信息包含成交额、融资余额、南向资金、空头回补、散户参与或板块轮动，应优先把它们写成盘面质量判断；没有这些输入时不要编造，也不要套用交易台材料里的具体板块例子
 - 如果市场更像在消化旧headline、切回基本面、或进入拥挤交易验证阶段，要直接写出来，不要只写“情绪改善/风险偏好修复”
 - 可以适度使用交易台语言去描述 flow / positioning，例如“空头回补”“低配追补”“买盘驱动”“better seller/卖盘占优”“双向活跃”，但必须和当天盘面事实绑定，不能空泛套用
-4. 选择今日信号最强的资产类别作为 default_expanded_bucket
-5. 将所有主题按今日客户关注度排序（ranked_slugs）
+5. 选择今日信号最强的资产类别作为 default_expanded_bucket
+6. 将所有主题按今日客户关注度排序（ranked_slugs）
 
 输出 JSON（只输出 JSON，不加任何额外文字）：
 {
@@ -3528,6 +3612,16 @@ ${narrativeHistorySection}
   "ranked_slugs": ["slug1", "slug2"],
   "rank_changes": {"slug": "up|down|stable"},
   "momentum_days": 2,
+  "daily_pitch_triggers": [
+    {
+      "hook": "可聊话题标题，≤24字",
+      "why_now": "为什么今天值得聊，必须有数字/事件/分化/纪录之一，≤60字",
+      "client_type": "适合哪类客户，≤20字",
+      "pitch_line": "RM可直接说出口的开场白，≤40字",
+      "watchpoints": ["观察点1", "观察点2"],
+      "related_assets": ["SOX", "NVDA"]
+    }
+  ],
   "default_expanded_bucket": "今日信号最强的资产类别",
   "asset_buckets": [
     {
@@ -3570,6 +3664,16 @@ ${narrativeHistorySection}
   "ranked_slugs": ["slug1", "slug2", "按客户关注度排序"],
   "rank_changes": {"slug": "up|down|stable"},
   "momentum_days": 2,
+  "daily_pitch_triggers": [
+    {
+      "hook": "可聊话题标题，≤24字",
+      "why_now": "为什么今天值得聊，必须有数字/事件/分化/纪录之一，≤60字",
+      "client_type": "适合哪类客户，≤20字",
+      "pitch_line": "RM可直接说出口的开场白，≤40字",
+      "watchpoints": ["观察点1", "观察点2"],
+      "related_assets": ["SOX", "NVDA"]
+    }
+  ],
   "default_expanded_bucket": "今日信号最强的资产类别",
   "asset_buckets": [
     {
@@ -3584,7 +3688,14 @@ ${narrativeHistorySection}
   ]
 }
 
-3. 生成 3-5 个资产桶可聊卡片（asset_buckets）
+3. 先生成 3 条 RM 今日可聊触发器（daily_pitch_triggers）
+   - daily_pitch_triggers 是前端主展示，asset_buckets 只是兜底
+   - 每条必须是 RM 今天能主动联系客户的开口话题，不是市场复述
+   - 优先选择：纪录级连涨/连跌、关键点位突破、财报落地、资金流异动、板块极端分化、宏观事件转折
+   - hook ≤24字；why_now ≤60字且必须有数字/事件/分化/纪录之一；client_type ≤20字；pitch_line ≤40字；watchpoints 1-3个；related_assets 最多5个
+   - pitch_line 要像 RM 给客户发消息或打电话的自然开场，不要像研究报告，也不要给买卖建议
+
+4. 生成 3-5 个资产桶可聊卡片（asset_buckets）
    - bucket 只能从：美股、港股、黄金、美债、汇率 中选择；大宗商品不生成独立bucket
    - 必须至少包含：美股、港股、美债（PB客户核心持仓，除非无任何市场数据否则必须生成）
    - 黄金：在避险/实际利率/黄金重估逻辑下优先生成；弱信号时可省略
@@ -3742,7 +3853,7 @@ ${narrativeHistorySection}
 - 禁止输出任何教科书式风险管理语言` },
                     { role: 'user', content: userPrompt }
                 ],
-                max_tokens: 800,
+                max_tokens: 1200,
                 temperature: 0.3
             })
         });
@@ -3782,6 +3893,7 @@ ${narrativeHistorySection}
         const default_expanded_bucket = isValidDailyNarrativeBucket(parsed.default_expanded_bucket)
             ? parsed.default_expanded_bucket
             : asset_buckets[0].bucket;
+        const daily_pitch_triggers = normalizeDailyPitchTriggers((parsed as any).daily_pitch_triggers);
 
         const rank_changes: Record<string, 'up' | 'down' | 'stable'> = {};
         if (previousRankedSlugs.length > 0) {
@@ -3807,6 +3919,9 @@ ${narrativeHistorySection}
             ranked_slugs,
             rank_changes,
             momentum_days: 1,
+            daily_pitch_triggers: daily_pitch_triggers.length > 0
+                ? daily_pitch_triggers
+                : buildPitchTriggersFromBuckets(asset_buckets),
             asset_buckets,
             default_expanded_bucket,
             generated_at: new Date().toISOString(),
