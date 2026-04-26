@@ -18,6 +18,7 @@ import type {
     ClientFocusSectorRotation,
     ClientFocusTransmissionItem,
     ClientFocusUpdate,
+    DailyPitchTrigger,
     DailyMarketNarrative,
     NewsItem,
     WhatChangedGroup
@@ -3164,16 +3165,20 @@ function normalizeDailyPitchTriggers(
     return triggers
         .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
         .flatMap((item) => {
+            const hookValue = typeof item.headline === 'string' ? item.headline : item.hook;
+            const whyNowValue = typeof item.context === 'string' ? item.context : item.why_now;
+            const pitchLineValue = typeof item.talking_point === 'string' ? item.talking_point : item.pitch_line;
+            const assetTagsValue = Array.isArray(item.asset_tags) ? item.asset_tags : item.related_assets;
             if (
-                typeof item.hook !== 'string'
-                || typeof item.why_now !== 'string'
+                typeof hookValue !== 'string'
+                || typeof whyNowValue !== 'string'
                 || typeof item.client_type !== 'string'
-                || typeof item.pitch_line !== 'string'
+                || typeof pitchLineValue !== 'string'
                 || !Array.isArray(item.watchpoints)
-                || item.hook.trim().length === 0
-                || item.why_now.trim().length === 0
+                || hookValue.trim().length === 0
+                || whyNowValue.trim().length === 0
                 || item.client_type.trim().length === 0
-                || item.pitch_line.trim().length === 0
+                || pitchLineValue.trim().length === 0
             ) {
                 return [];
             }
@@ -3187,20 +3192,39 @@ function normalizeDailyPitchTriggers(
                 return [];
             }
 
-            const related_assets = Array.isArray(item.related_assets)
-                ? item.related_assets
+            const related_assets = Array.isArray(assetTagsValue)
+                ? assetTagsValue
                     .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
                     .map((value) => cleanDailyNarrativeSentence(value).slice(0, 16))
                     .slice(0, 5)
                 : undefined;
+            const materiality_trigger = typeof item.materiality_trigger === 'string' && item.materiality_trigger.trim().length > 0
+                ? item.materiality_trigger.trim().slice(0, 120)
+                : undefined;
+            const source_summary = typeof item.source_summary === 'string' && item.source_summary.trim().length > 0
+                ? cleanDailyNarrativeSentence(item.source_summary).slice(0, 120)
+                : undefined;
+            const time_sensitivity: DailyPitchTrigger['time_sensitivity'] =
+                item.time_sensitivity === 'immediate' || item.time_sensitivity === 'this_week' || item.time_sensitivity === 'watch'
+                    ? item.time_sensitivity
+                    : undefined;
+            const id = typeof item.id === 'number' && Number.isFinite(item.id) ? item.id : undefined;
 
             return [{
-                hook: cleanDailyNarrativeSentence(item.hook).slice(0, 28),
-                why_now: cleanDailyNarrativeSentence(item.why_now).slice(0, 70),
+                ...(id ? { id } : {}),
+                headline: cleanDailyNarrativeSentence(hookValue).slice(0, 28),
+                context: cleanDailyNarrativeSentence(whyNowValue).slice(0, 120),
+                talking_point: cleanDailyNarrativeSentence(pitchLineValue).slice(0, 120),
+                hook: cleanDailyNarrativeSentence(hookValue).slice(0, 28),
+                why_now: cleanDailyNarrativeSentence(whyNowValue).slice(0, 120),
                 client_type: cleanDailyNarrativeSentence(item.client_type).slice(0, 24),
-                pitch_line: cleanDailyNarrativeSentence(item.pitch_line).slice(0, 48),
+                pitch_line: cleanDailyNarrativeSentence(pitchLineValue).slice(0, 120),
                 watchpoints,
-                ...(related_assets && related_assets.length > 0 ? { related_assets } : {})
+                risk_flag: item.risk_flag === true,
+                ...(related_assets && related_assets.length > 0 ? { related_assets, asset_tags: related_assets } : {}),
+                ...(materiality_trigger ? { materiality_trigger } : {}),
+                ...(time_sensitivity ? { time_sensitivity } : {}),
+                ...(source_summary ? { source_summary } : {})
             }];
         })
         .slice(0, 3);
@@ -3213,12 +3237,20 @@ function buildPitchTriggersFromBuckets(
         .filter((bucket) => bucket.trigger || bucket.pitch_line)
         .slice(0, 3)
         .map((bucket) => ({
+            headline: bucket.trigger ?? `${bucket.bucket}出现可聊信号`,
+            context: bucket.thesis_check,
+            talking_point: bucket.pitch_line ?? bucket.portfolio_implication,
             hook: bucket.trigger ?? `${bucket.bucket}出现可聊信号`,
             why_now: bucket.thesis_check,
             client_type: bucket.client_type ?? `${bucket.bucket}相关持仓客户`,
             pitch_line: bucket.pitch_line ?? bucket.portfolio_implication,
             watchpoints: [bucket.portfolio_implication],
-            related_assets: [bucket.bucket]
+            related_assets: [bucket.bucket],
+            asset_tags: [bucket.bucket],
+            materiality_trigger: 'legacy: derived from asset bucket',
+            risk_flag: false,
+            time_sensitivity: 'watch' as const,
+            source_summary: '由旧版资产桶数据转换生成。'
         }));
 }
 
@@ -3537,10 +3569,22 @@ ${latestUpdatesSection}${transmissionChainSection}
     const hktMinute = nowHKT.getMinutes();
     const hktTimeLabel = `${String(hktHour).padStart(2, '0')}:${String(hktMinute).padStart(2, '0')}`;
     const hkMarketClosed = hktHour >= 16;
+    const hktDateLabel = nowHKT.toISOString().slice(0, 10);
+    const hktDayOfWeek = nowHKT.getDay();
+    const hktDayLabel = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][hktDayOfWeek];
+    const timeWindowLabel =
+        hktDayOfWeek === 1
+            ? '上周五16:00 HKT 至 今日08:00 HKT（覆盖完整周末）'
+            : hktDayOfWeek === 0 || hktDayOfWeek === 6
+                ? '上周五16:00 HKT 至当前时间'
+                : '前一日16:00 HKT 至 今日08:00 HKT';
 
     const userPrompt = `
 你是香港私人银行资深策略师，职责是帮助 RM 每天识别真正影响客户 SAA 组合的结构性变量，而不是追逐 headline。
+当前日期：${hktDateLabel}
+星期：${hktDayLabel}
 当前香港时间：${hktTimeLabel}（港股${hkMarketClosed ? '已收盘' : '盘中/未开盘'}）
+本次 briefing 时间窗口：${timeWindowLabel}
 ${earningsSection ? `\n${earningsSection}\n` : ''}
 今日客户焦点话题摘要：
 
@@ -3563,19 +3607,31 @@ ${narrativeHistorySection}
    - 若当前香港时间为早晨且港股未开盘，narrative必须以“前一日港股收盘 + 隔夜美股收盘 + 已发布的盘后权重财报”作为回顾基准，不能写成盘前等待状态
    - narrative必须尽量同时覆盖股票市场总体现况与主导跨资产的驱动，避免只写能源/地缘而忽略美股或港股
 3. 生成 3 条 RM 今日可聊触发器（daily_pitch_triggers）
-   - 这是最重要的输出，目标不是替代 CIO office，而是 bridge last mile：告诉RM今天最值得主动和客户聊什么
-   - 每条必须是“客户可开口话题”，不是市场总结；优先选择纪录级连涨/连跌、关键点位突破、财报落地、资金流异动、板块极端分化、宏观事件转折
-   - 不能泛泛写“美股反弹”“港股承压”“市场波动”；必须有具体 hook，例如“SOX半导体连续多日上涨”“南向逆势净买入”“10Y收益率突破区间”“黄金与美元同涨背离”
+   - 这是唯一主输出，目标不是替代 CIO office，而是 bridge last mile：告诉RM今天最值得主动和客户聊什么
+   - 你不能联网搜索；只能使用上方已注入的新闻摘要、市场数据、财报日历、主题详情和监测信号。没有数据锚点就不要编造
+   - 从以下 surveillance universe 中筛选候选：股票市场结构、AI/半导体/港股/能源等主题、宏观央行/FX/Rates、地缘尾部风险、固收/信用/AT1、结构性产品/波动率、黄金/另类资产
+   - 每条必须满足至少一个 materiality trigger：
+     3A 统计极值：主要指数/ETF单日>|3%|、连续涨跌>10日、偏离200日均线>20%、YTD>|30%|、相关性/利差/比率创多年极值
+     3B 事件临近：未来5个交易日内>$200B公司财报、央行会议，或未来2个交易日内CPI/PCE/NFP/GDP等高影响数据
+     3C regime change：VIX穿越20/30、领导板块反转、股债相关性切换、央行语言明显转向
+     3D 地缘二元事件：停火达成/破裂、制裁、霍尔木兹/苏伊士等关键通道扰动、军事升级/降级
+     3E 私行特异性：FCN常见底层IV显著变化、AT1/GSIB资本工具新闻、HK SFC/MAS分销适当性、家办/UHNWI结构性议题
+   - 三条必须满足多样性约束：至少覆盖2个资产类别；纯宏观/央行不超过1条；单一股票不超过1条，除非它有明确跨资产传导；同等重要时优先最近12小时与更清晰的PB客户组合含义
    - 每条必须包含：
-     - hook：可聊话题标题，≤24字，必须像RM看到后会想点开的 headline
-     - why_now：为什么今天值得聊，≤60字，必须有数字/事件/分化/纪录之一；没有证据不要编造
-     - client_type：适合主动触达的客户类型，≤20字，必须落到敞口
-     - pitch_line：RM可直接说出口的开场白，≤40字，自然口语，不给买卖建议
-     - watchpoints：接下来1-3个观察点，每个≤20字，必须具体
-     - related_assets：相关资产/标的/指数，最多5个，例如 SOX、SMH、NVDA、AMD、TSM
-   - 这三条要跨资产筛选“最值得聊”，不必平均覆盖美股/港股/美债；哪个更有客户开口价值就选哪个
-   - 如果输入没有足够强的异动或事件，宁可写“财报验证窗口”“资金流背离”“利率区间突破”这类真实触发，不要硬造热门话题
-   - 语言像交易台给RM的 call prep，不像研究报告摘要
+     - id：1、2、3
+     - headline：≤20个中文字符，像 Bloomberg alert / internal note，不像零售新闻标题
+     - context：80-120个中文字符，写给RM理解为什么重要；必须包含具体数字/事件、传导机制和组合含义方向
+     - talking_point：60-100个中文字符，写成RM对高净值客户开口的话；专业、自然、可开启对话，不给直接买卖建议
+     - client_type：≤20字，最适合主动触达的客户类型，必须落到敞口
+     - watchpoints：1-3个具体观察点，每个≤20字
+     - asset_tags：资产类别和具体工具/指数，最多5个
+     - materiality_trigger：触发标准，例如 "3A: consecutive streak > 10 sessions"
+     - risk_flag：若涉及尾部风险、下行风险或地缘升级则 true
+     - time_sensitivity："immediate" | "this_week" | "watch"
+     - source_summary：一句话说明数据/来源依据，必须来自上方输入而不是虚构外部网页
+   - 同步填充旧字段以兼容前端：hook=headline，why_now=context，pitch_line=talking_point，related_assets=asset_tags
+   - 禁止零售语气：不要写“AI钱花出去了吗”“散户”“韭菜”“这波行情”“大家关注”等
+   - talking_point 必须像资深IC打开对话，结尾可以是问题或隐含邀请客户回应
 4. asset_buckets 是旧版兼容字段，前端不再展示；优先返回空数组 []
    - 不要为了填 asset_buckets 牺牲 daily_pitch_triggers 的质量
    - 如果确实需要兼容旧客户端，bucket 只能从：美股、港股、黄金、美债、汇率 中选择；大宗商品不生成独立bucket（原油只作为传导因子，体现在相关bucket的portfolio_implication里）
@@ -3615,11 +3671,20 @@ ${narrativeHistorySection}
   "momentum_days": 2,
   "daily_pitch_triggers": [
     {
-      "hook": "可聊话题标题，≤24字",
-      "why_now": "为什么今天值得聊，必须有数字/事件/分化/纪录之一，≤60字",
+      "id": 1,
+      "headline": "≤20个中文字符的可聊话题标题",
+      "context": "80-120个中文字符，包含具体数字/事件、机制和组合含义",
+      "talking_point": "60-100个中文字符，RM对高净值客户的自然开场白",
       "client_type": "适合哪类客户，≤20字",
-      "pitch_line": "RM可直接说出口的开场白，≤40字",
       "watchpoints": ["观察点1", "观察点2"],
+      "asset_tags": ["US Equities", "SOX"],
+      "materiality_trigger": "3A: consecutive streak > 10 sessions",
+      "risk_flag": true,
+      "time_sensitivity": "immediate",
+      "source_summary": "一句话说明来自上方输入的依据",
+      "hook": "同headline",
+      "why_now": "同context",
+      "pitch_line": "同talking_point",
       "related_assets": ["SOX", "NVDA"]
     }
   ],
@@ -3657,11 +3722,20 @@ ${narrativeHistorySection}
   "momentum_days": 2,
   "daily_pitch_triggers": [
     {
-      "hook": "可聊话题标题，≤24字",
-      "why_now": "为什么今天值得聊，必须有数字/事件/分化/纪录之一，≤60字",
+      "id": 1,
+      "headline": "≤20个中文字符的可聊话题标题",
+      "context": "80-120个中文字符，包含具体数字/事件、机制和组合含义",
+      "talking_point": "60-100个中文字符，RM对高净值客户的自然开场白",
       "client_type": "适合哪类客户，≤20字",
-      "pitch_line": "RM可直接说出口的开场白，≤40字",
       "watchpoints": ["观察点1", "观察点2"],
+      "asset_tags": ["US Equities", "SOX"],
+      "materiality_trigger": "3A: consecutive streak > 10 sessions",
+      "risk_flag": true,
+      "time_sensitivity": "immediate",
+      "source_summary": "一句话说明来自输入数据的依据",
+      "hook": "同headline",
+      "why_now": "同context",
+      "pitch_line": "同talking_point",
       "related_assets": ["SOX", "NVDA"]
     }
   ],
@@ -3671,10 +3745,13 @@ ${narrativeHistorySection}
 
 3. 生成 3 条 RM 今日可聊触发器（daily_pitch_triggers）
    - daily_pitch_triggers 是唯一前端主展示；asset_buckets 是旧版兼容字段，默认返回 []
+   - 不要假设你能联网；只能使用用户消息提供的市场信号、新闻摘要、财报日历和监测数据
    - 每条必须是 RM 今天能主动联系客户的开口话题，不是市场复述
-   - 优先选择：纪录级连涨/连跌、关键点位突破、财报落地、资金流异动、板块极端分化、宏观事件转折
-   - hook ≤24字；why_now ≤60字且必须有数字/事件/分化/纪录之一；client_type ≤20字；pitch_line ≤40字；watchpoints 1-3个；related_assets 最多5个
-   - pitch_line 要像 RM 给客户发消息或打电话的自然开场，不要像研究报告，也不要给买卖建议
+   - 每条必须满足 materiality trigger：统计极值、事件临近、regime change、地缘二元事件、或私行特异性之一
+   - 三条至少覆盖2个资产类别；纯宏观/央行不超过1条；单一股票不超过1条，除非有明确跨资产传导
+   - headline ≤20个中文字符；context 80-120字且必须有数字/事件/传导机制；talking_point 60-100字，像资深IC对客户开口
+   - 必须填 materiality_trigger、risk_flag、time_sensitivity、source_summary、asset_tags
+   - 同步填旧字段：hook=headline，why_now=context，pitch_line=talking_point，related_assets=asset_tags
 
 4. 旧版 asset_buckets 兼容规则（前端不再展示，默认返回 []）
    - 除非需要兼容旧客户端，否则 asset_buckets 直接返回 []

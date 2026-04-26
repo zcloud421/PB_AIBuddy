@@ -261,6 +261,15 @@ export interface DailyMarketNarrative {
 }
 
 export interface DailyPitchTrigger {
+    id?: number;
+    headline?: string;
+    context?: string;
+    talking_point?: string;
+    asset_tags?: string[];
+    materiality_trigger?: string;
+    risk_flag?: boolean;
+    time_sensitivity?: 'immediate' | 'this_week' | 'watch';
+    source_summary?: string;
     hook: string;
     why_now: string;
     client_type: string;
