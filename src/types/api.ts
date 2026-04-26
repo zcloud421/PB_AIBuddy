@@ -264,6 +264,9 @@ export interface AssetBucketNarrative {
     thesis_check: string;
     today_signal: string;
     portfolio_implication: string;
+    trigger?: string;
+    client_type?: string;
+    pitch_line?: string;
 }
 
 export interface ClientFocusMarketSnapshotItem {

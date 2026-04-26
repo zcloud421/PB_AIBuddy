@@ -2846,7 +2846,10 @@ function buildFallbackDailyNarrative(
             bucket: '美股',
             thesis_check: usAttribution,
             today_signal: usEquitySignal,
-            portfolio_implication: usImplication
+            portfolio_implication: usImplication,
+            trigger: '财报验证反弹质量',
+            client_type: '美股或科技仓位客户',
+            pitch_line: '这波美股反弹，今天重点看财报能不能接住。'
         });
     }
 
@@ -2869,7 +2872,10 @@ function buildFallbackDailyNarrative(
             bucket: '港股',
             thesis_check: hkAttribution,
             today_signal: hkSignal,
-            portfolio_implication: hkImplication
+            portfolio_implication: hkImplication,
+            trigger: '港股资金与结构分化',
+            client_type: '港股持仓或低配客户',
+            pitch_line: '今天港股要看南向和结构热点有没有继续扩散。'
         });
     }
 
@@ -2900,7 +2906,10 @@ function buildFallbackDailyNarrative(
             bucket: '黄金',
             thesis_check: goldAttribution,
             today_signal: goldSignal,
-            portfolio_implication: goldImplication
+            portfolio_implication: goldImplication,
+            trigger: '黄金避险溢价重定价',
+            client_type: '黄金票据或配置客户',
+            pitch_line: '黄金这波变化，重点不是涨跌，是避险逻辑有没有变。'
         });
     }
 
@@ -3102,30 +3111,44 @@ function normalizeAssetBuckets(
 
     return assetBuckets
         .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
-        .map((item) => ({
-            bucket: item.bucket,
-            thesis_check: item.thesis_check,
-            today_signal: item.today_signal,
-            portfolio_implication: item.portfolio_implication
-        }))
-        .filter(
-            (
-                item
-            ): item is DailyMarketNarrative['asset_buckets'][number] =>
-                isValidDailyNarrativeBucket(item.bucket)
-                && typeof item.thesis_check === 'string'
-                && typeof item.today_signal === 'string'
-                && typeof item.portfolio_implication === 'string'
-                && item.thesis_check.trim().length > 0
-                && item.today_signal.trim().length > 0
-                && item.portfolio_implication.trim().length > 0
-        )
+        .flatMap((item) => {
+            if (
+                !isValidDailyNarrativeBucket(item.bucket)
+                || typeof item.thesis_check !== 'string'
+                || typeof item.today_signal !== 'string'
+                || typeof item.portfolio_implication !== 'string'
+                || item.thesis_check.trim().length === 0
+                || item.today_signal.trim().length === 0
+                || item.portfolio_implication.trim().length === 0
+            ) {
+                return [];
+            }
+
+            return [{
+                bucket: item.bucket,
+                thesis_check: item.thesis_check,
+                today_signal: item.today_signal,
+                portfolio_implication: item.portfolio_implication,
+                trigger: item.trigger,
+                client_type: item.client_type,
+                pitch_line: item.pitch_line
+            }];
+        })
         .slice(0, 5)
         .map((item) => sanitizeDailyNarrativeBucket({
             bucket: item.bucket,
             thesis_check: item.thesis_check.trim(),
             today_signal: item.today_signal.trim(),
-            portfolio_implication: item.portfolio_implication.trim()
+            portfolio_implication: item.portfolio_implication.trim(),
+            ...(typeof item.trigger === 'string' && item.trigger.trim().length > 0
+                ? { trigger: item.trigger.trim() }
+                : {}),
+            ...(typeof item.client_type === 'string' && item.client_type.trim().length > 0
+                ? { client_type: item.client_type.trim() }
+                : {}),
+            ...(typeof item.pitch_line === 'string' && item.pitch_line.trim().length > 0
+                ? { pitch_line: item.pitch_line.trim() }
+                : {})
         }));
 }
 
@@ -3151,7 +3174,10 @@ function sanitizeDailyNarrativeBucket(
         ...bucket,
         thesis_check: cleanDailyNarrativeSentence(bucket.thesis_check),
         today_signal: cleanDailyNarrativeSentence(bucket.today_signal),
-        portfolio_implication: cleanDailyNarrativeSentence(bucket.portfolio_implication)
+        portfolio_implication: cleanDailyNarrativeSentence(bucket.portfolio_implication),
+        ...(bucket.trigger ? { trigger: cleanDailyNarrativeSentence(bucket.trigger) } : {}),
+        ...(bucket.client_type ? { client_type: cleanDailyNarrativeSentence(bucket.client_type) } : {}),
+        ...(bucket.pitch_line ? { pitch_line: cleanDailyNarrativeSentence(bucket.pitch_line) } : {})
     };
 
     if (sanitized.bucket !== '美股') {
@@ -3266,7 +3292,10 @@ function buildTreasuryBucket(
         bucket: '美债',
         thesis_check: thesisCheck,
         today_signal: todaySignal,
-        portfolio_implication: portfolioImplication
+        portfolio_implication: portfolioImplication,
+        trigger: '10Y收益率重新定价',
+        client_type: '债券或AT1客户',
+        pitch_line: '今天可以和债券客户聊利率波动对久期和AT1的影响。'
     };
 }
 
@@ -3332,7 +3361,15 @@ function buildFxBucket(
         }
     }
 
-    return { bucket: '汇率', thesis_check: thesisCheck, today_signal: todaySignal, portfolio_implication: portfolioImplication };
+    return {
+        bucket: '汇率',
+        thesis_check: thesisCheck,
+        today_signal: todaySignal,
+        portfolio_implication: portfolioImplication,
+        trigger: '美元与融资货币异动',
+        client_type: 'FX或非美资产客户',
+        pitch_line: '今天可以提醒客户看美元变化有没有传导到非美资产。'
+    };
 }
 
 function ensurePriorityAssetBuckets(
@@ -3462,6 +3499,9 @@ ${narrativeHistorySection}
      - today_signal：市场情况，≤40字，必须包含今日真实数字；若5日或YTD能帮助判断是否已处于阶段性高位/低位，应一并写出
      - thesis_check：市场总结+归因，≤45字，先交代今天发生了什么，再解释为什么这样走；虽然字段名叫 thesis_check，但这里不要写问句，不要直接写客户持仓复核
      - portfolio_implication：今日需留意，≤40字，告诉RM接下来1-3天该盯什么催化、风险点或验证窗口；如确有必要，可轻带一句持仓含义，但不能喧宾夺主
+     - trigger：今天为什么值得主动联系客户，≤25字。必须有具体触发原因（价格突破/数据发布/事件转折），不写泛泛的"市场波动"
+     - client_type：最适合主动触达的客户类型，≤20字。例如"持有AT1或长久期债券客户"、"有黄金票据敞口客户"、"港股低配客户"
+     - pitch_line：RM 可直接对客户说的30秒开场白，≤40字。语气自然，像口语，不是书面总结
 - 先把今天市场讲明白，再告诉RM接下来该盯什么；不要一上来就写持仓复核模板
 - 时间表述规则：美股/美债/美元指数从HK视角永远是”隔夜”或”昨收”（美市在HKT凌晨4点收盘）；港股时间表述根据当前香港时间判断：港股已收盘时写”今收”，港股未收盘时写”今日”
 - 若当前香港时间是周四或周五，而输入里没有明确的宏观日历，禁止把 PCE/CPI/NFP/FOMC 写成“本周”事件；对尚未发布的数据只能写“下周/下次/本月”
@@ -3494,7 +3534,10 @@ ${narrativeHistorySection}
       "bucket": "美股|港股|黄金|美债|汇率",
       "today_signal": "市场情况，必须包含今日真实数字；如相关可同时包含5日或YTD，≤40字",
       "thesis_check": "市场总结+归因：先讲今天发生什么，再讲为什么，≤45字，不写问句",
-      "portfolio_implication": "今日需留意：未来1-3天最关键的催化或风险点，≤40字"
+      "portfolio_implication": "今日需留意：未来1-3天最关键的催化或风险点，≤40字",
+      "trigger": "为什么今天值得主动联系，≤25字",
+      "client_type": "适合哪类客户，≤20字",
+      "pitch_line": "RM可直接说的30秒口径，≤40字"
     }
   ]
 }
@@ -3515,8 +3558,8 @@ ${narrativeHistorySection}
 你的输出将渲染成一个按大类资产折叠的卡片，RM根据客户持仓选择展开哪个资产类别。
 
 核心哲学：
-- 这是给RM早晨扫一眼的市场解释工具，不是交易信号，也不是先做持仓复核
-- 每个资产类别要先把今天市场讲明白，再提示接下来最该盯什么
+- 这是给RM早晨扫一眼的客户触达工具，不是交易信号，也不是先做持仓复核
+- 每个资产类别要先把今天市场讲明白，再告诉RM今天适合主动聊哪类客户、怎么开口
 - today_signal必须锚定今日真实数据点（使用提供的市场数据中的具体数字）
 
 输出格式（严格JSON，不加任何额外文字）：
@@ -3533,17 +3576,20 @@ ${narrativeHistorySection}
       "bucket": "美股|港股|黄金|美债|汇率",
       "today_signal": "市场情况，必须包含今日真实数字的1句话，≤30字",
       "thesis_check": "归因，≤35字，不写问句",
-      "portfolio_implication": "今日需留意，≤40字"
+      "portfolio_implication": "今日需留意，≤40字",
+      "trigger": "为什么今天值得主动联系，≤25字",
+      "client_type": "适合哪类客户，≤20字",
+      "pitch_line": "RM可直接说的30秒口径，≤40字"
     }
   ]
 }
 
-3. 生成 3-5 个资产桶复核卡片（asset_buckets）
+3. 生成 3-5 个资产桶可聊卡片（asset_buckets）
    - bucket 只能从：美股、港股、黄金、美债、汇率 中选择；大宗商品不生成独立bucket
    - 必须至少包含：美股、港股、美债（PB客户核心持仓，除非无任何市场数据否则必须生成）
    - 黄金：在避险/实际利率/黄金重估逻辑下优先生成；弱信号时可省略
 
-   每个 bucket 的三个字段生成规则：
+   每个 bucket 的字段生成规则：
 
    【today_signal】
    - 必须包含今日真实数字，≤40字
@@ -3567,6 +3613,20 @@ ${narrativeHistorySection}
    - 禁止直接投资建议
    - 禁止空泛写法，如“继续观察”“验证持续性”“关注后续变化”“风险偏好修复”等；如果使用这些词，后面必须立刻接上具体对象与原因
    - watchpoint 必须具体到事件或变量：如“谈判截止日”“权重股财报”“PMI/LPR/GDP”“油价能否回吐”“量能是否扩散”，不能只写“看后续变化”
+
+   【trigger】
+   - 今天为什么值得主动联系客户，≤25字
+   - 必须有具体触发原因：价格突破、数据发布、事件转折、财报落地、资金流变化、收益率/汇率异动
+   - 禁止泛泛写“市场波动”“风险上升”“关注变化”
+
+   【client_type】
+   - 最适合主动触达的客户类型，≤20字
+   - 必须落到可识别敞口，例如“持有AT1或长久期债券客户”“有黄金票据敞口客户”“港股低配客户”“美股科技仓位客户”
+
+   【pitch_line】
+   - RM 可直接对客户说的30秒开场白，≤40字
+   - 语气自然，像客户电话开场，不要像书面总结
+   - 必须包含“为什么今天聊”或“今天先看什么”，但不能直接给买卖建议
 
    资产类别语言栈（必须遵守，避免把股票交易台话术误用于所有资产）：
 
