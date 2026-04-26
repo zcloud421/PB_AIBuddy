@@ -307,7 +307,7 @@ const focusChainCache = new Map<string, { expiresAt: number; value: ClientFocusT
 const focusMarketChartCache = new Map<string, { expiresAt: number; value: ClientFocusMarketChart | null }>();
 const polymarketCache = new Map<string, { expiresAt: number; value: ClientFocusPolymarketResponse }>();
 const focusMarketStateCache = new Map<string, { expiresAt: number; value: ClientFocusMarketStateResponse }>();
-const DAILY_NARRATIVE_CACHE_SCHEMA_VERSION = 3;
+const DAILY_NARRATIVE_CACHE_SCHEMA_VERSION = 4;
 const dailyNarrativeCache = {
     expiresAt: 0,
     schemaVersion: DAILY_NARRATIVE_CACHE_SCHEMA_VERSION,
@@ -3576,9 +3576,10 @@ ${narrativeHistorySection}
    - 这三条要跨资产筛选“最值得聊”，不必平均覆盖美股/港股/美债；哪个更有客户开口价值就选哪个
    - 如果输入没有足够强的异动或事件，宁可写“财报验证窗口”“资金流背离”“利率区间突破”这类真实触发，不要硬造热门话题
    - 语言像交易台给RM的 call prep，不像研究报告摘要
-4. 生成 3-5 个资产桶审视卡片（asset_buckets，作为兜底结构）
-   - bucket 只能从：美股、港股、黄金、美债、汇率 中选择；大宗商品不生成独立bucket（原油只作为传导因子，体现在相关bucket的portfolio_implication里）
-   - 必须至少生成 3 个桶；PB 客户的核心配置桶优先级应为：美股、港股、美债，其次才是黄金
+4. asset_buckets 是旧版兼容字段，前端不再展示；优先返回空数组 []
+   - 不要为了填 asset_buckets 牺牲 daily_pitch_triggers 的质量
+   - 如果确实需要兼容旧客户端，bucket 只能从：美股、港股、黄金、美债、汇率 中选择；大宗商品不生成独立bucket（原油只作为传导因子，体现在相关bucket的portfolio_implication里）
+   - 不再要求生成资产桶；如果返回 asset_buckets，必须只作为旧版兼容数据
    - 每个 bucket 必须包含：
      - today_signal：市场情况，≤40字，必须包含今日真实数字；若5日或YTD能帮助判断是否已处于阶段性高位/低位，应一并写出
      - thesis_check：市场总结+归因，≤45字，先交代今天发生了什么，再解释为什么这样走；虽然字段名叫 thesis_check，但这里不要写问句，不要直接写客户持仓复核
@@ -3623,17 +3624,7 @@ ${narrativeHistorySection}
     }
   ],
   "default_expanded_bucket": "今日信号最强的资产类别",
-  "asset_buckets": [
-    {
-      "bucket": "美股|港股|黄金|美债|汇率",
-      "today_signal": "市场情况，必须包含今日真实数字；如相关可同时包含5日或YTD，≤40字",
-      "thesis_check": "市场总结+归因：先讲今天发生什么，再讲为什么，≤45字，不写问句",
-      "portfolio_implication": "今日需留意：未来1-3天最关键的催化或风险点，≤40字",
-      "trigger": "为什么今天值得主动联系，≤25字",
-      "client_type": "适合哪类客户，≤20字",
-      "pitch_line": "RM可直接说的30秒口径，≤40字"
-    }
-  ]
+  "asset_buckets": []
 }
 `.trim();
 
@@ -3649,7 +3640,7 @@ ${narrativeHistorySection}
                 messages: [
                     { role: 'system', content: `你是一位私人银行策略师，为RM（关系经理）准备客户面谈前的资产审视工具。
 
-你的输出将渲染成一个按大类资产折叠的卡片，RM根据客户持仓选择展开哪个资产类别。
+你的输出将渲染成 3 张 RM 今日可聊 pitch card，不再渲染旧版大类资产折叠卡片。
 
 核心哲学：
 - 这是给RM早晨扫一眼的客户触达工具，不是交易信号，也不是先做持仓复核
@@ -3674,30 +3665,21 @@ ${narrativeHistorySection}
       "related_assets": ["SOX", "NVDA"]
     }
   ],
-  "default_expanded_bucket": "今日信号最强的资产类别",
-  "asset_buckets": [
-    {
-      "bucket": "美股|港股|黄金|美债|汇率",
-      "today_signal": "市场情况，必须包含今日真实数字的1句话，≤30字",
-      "thesis_check": "归因，≤35字，不写问句",
-      "portfolio_implication": "今日需留意，≤40字",
-      "trigger": "为什么今天值得主动联系，≤25字",
-      "client_type": "适合哪类客户，≤20字",
-      "pitch_line": "RM可直接说的30秒口径，≤40字"
-    }
-  ]
+  "default_expanded_bucket": "美股",
+  "asset_buckets": []
 }
 
-3. 先生成 3 条 RM 今日可聊触发器（daily_pitch_triggers）
-   - daily_pitch_triggers 是前端主展示，asset_buckets 只是兜底
+3. 生成 3 条 RM 今日可聊触发器（daily_pitch_triggers）
+   - daily_pitch_triggers 是唯一前端主展示；asset_buckets 是旧版兼容字段，默认返回 []
    - 每条必须是 RM 今天能主动联系客户的开口话题，不是市场复述
    - 优先选择：纪录级连涨/连跌、关键点位突破、财报落地、资金流异动、板块极端分化、宏观事件转折
    - hook ≤24字；why_now ≤60字且必须有数字/事件/分化/纪录之一；client_type ≤20字；pitch_line ≤40字；watchpoints 1-3个；related_assets 最多5个
    - pitch_line 要像 RM 给客户发消息或打电话的自然开场，不要像研究报告，也不要给买卖建议
 
-4. 生成 3-5 个资产桶可聊卡片（asset_buckets）
+4. 旧版 asset_buckets 兼容规则（前端不再展示，默认返回 []）
+   - 除非需要兼容旧客户端，否则 asset_buckets 直接返回 []
    - bucket 只能从：美股、港股、黄金、美债、汇率 中选择；大宗商品不生成独立bucket
-   - 必须至少包含：美股、港股、美债（PB客户核心持仓，除非无任何市场数据否则必须生成）
+   - 不再要求必须生成美股、港股、美债
    - 黄金：在避险/实际利率/黄金重估逻辑下优先生成；弱信号时可省略
 
    每个 bucket 的字段生成规则：
@@ -3872,7 +3854,6 @@ ${narrativeHistorySection}
             || typeof parsed.primary_slug !== 'string'
             || typeof parsed.narrative !== 'string'
             || !Array.isArray(parsed.ranked_slugs)
-            || !Array.isArray((parsed as any).asset_buckets)
         ) {
             throw new Error('Invalid daily narrative schema');
         }
@@ -3882,18 +3863,23 @@ ${narrativeHistorySection}
         if (!validSlugs.has(parsed.primary_slug)) {
             throw new Error('Invalid primary slug');
         }
-        const asset_buckets = ensurePriorityAssetBuckets(
-            normalizeAssetBuckets((parsed as any).asset_buckets),
-            parsed.primary_slug,
-            marketSnapshot
-        );
-        if (asset_buckets.length < 1) {
-            throw new Error('Missing asset buckets');
-        }
+        const rawAssetBuckets = Array.isArray((parsed as any).asset_buckets)
+            ? (parsed as any).asset_buckets
+            : [];
+        const normalizedAssetBuckets = normalizeAssetBuckets(rawAssetBuckets);
+        const asset_buckets = normalizedAssetBuckets.length > 0
+            ? ensurePriorityAssetBuckets(normalizedAssetBuckets, parsed.primary_slug, marketSnapshot)
+            : [];
         const default_expanded_bucket = isValidDailyNarrativeBucket(parsed.default_expanded_bucket)
             ? parsed.default_expanded_bucket
-            : asset_buckets[0].bucket;
+            : asset_buckets[0]?.bucket ?? '美股';
         const daily_pitch_triggers = normalizeDailyPitchTriggers((parsed as any).daily_pitch_triggers);
+        const resolvedPitchTriggers = daily_pitch_triggers.length > 0
+            ? daily_pitch_triggers
+            : buildPitchTriggersFromBuckets(asset_buckets);
+        if (resolvedPitchTriggers.length < 1) {
+            throw new Error('Missing daily pitch triggers');
+        }
 
         const rank_changes: Record<string, 'up' | 'down' | 'stable'> = {};
         if (previousRankedSlugs.length > 0) {
@@ -3919,9 +3905,7 @@ ${narrativeHistorySection}
             ranked_slugs,
             rank_changes,
             momentum_days: 1,
-            daily_pitch_triggers: daily_pitch_triggers.length > 0
-                ? daily_pitch_triggers
-                : buildPitchTriggersFromBuckets(asset_buckets),
+            daily_pitch_triggers: resolvedPitchTriggers,
             asset_buckets,
             default_expanded_bucket,
             generated_at: new Date().toISOString(),
@@ -7140,8 +7124,8 @@ export async function getClientFocusMarketState(): Promise<ClientFocusMarketStat
 function isRenderableDailyNarrative(value: DailyMarketNarrative | null | undefined): value is DailyMarketNarrative {
     return Boolean(
         value
-        && Array.isArray((value as any).asset_buckets)
-        && (value as any).asset_buckets.length > 0
+        && Array.isArray((value as any).daily_pitch_triggers)
+        && (value as any).daily_pitch_triggers.length > 0
         && typeof value.momentum_days === 'number'
     );
 }
