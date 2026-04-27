@@ -3345,6 +3345,185 @@ async function buildDailyPitchCandidateSection(
     ].join('\n\n');
 }
 
+async function buildDeterministicDailyPitchTriggers(
+    marketSnapshot: ClientFocusMarketStateResponse | null
+): Promise<NonNullable<DailyMarketNarrative['daily_pitch_triggers']>> {
+    const triggers: NonNullable<DailyMarketNarrative['daily_pitch_triggers']> = [];
+    const indices = marketSnapshot?.indices ?? [];
+    const byCode = new Map(indices.map((item) => [item.code, item]));
+    const megaCapOrCommonFcnUnderlyings = new Set([
+        'AAPL',
+        'MSFT',
+        'NVDA',
+        'AMZN',
+        'GOOG',
+        'GOOGL',
+        'META',
+        'TSLA',
+        'AVGO',
+        'TSM',
+        'BABA',
+        'AMD',
+        'NFLX',
+        'ORCL',
+        'INTC',
+        'UNH'
+    ]);
+
+    try {
+        const earningsRows = (await getUpcomingEarningsNextNDays(7))
+            .filter((row) => row.days_until >= 1 && megaCapOrCommonFcnUnderlyings.has(row.symbol))
+            .slice(0, 8);
+        if (earningsRows.length >= 2) {
+            const grouped = earningsRows
+                .map((row) => `${row.symbol}${row.days_until === 1 ? '明日' : `${row.days_until}日后`}`)
+                .join('、');
+            triggers.push({
+                id: 1,
+                headline: '超级财报周开启',
+                hook: '超级财报周开启',
+                context: `未来7日内${grouped}等权重/FCN常见底层将发财报，市场焦点从宏观headline切回盈利验证和AI capex回报。`,
+                why_now: `未来7日内${grouped}等权重/FCN常见底层将发财报，市场焦点从宏观headline切回盈利验证和AI capex回报。`,
+                talking_point: '这周真正要看的不是指数涨跌，而是权重股财报能否证明AI和科技仓位的盈利兑现，您组合里的科技敞口要不要先做一次情景讨论？',
+                pitch_line: '这周真正要看的不是指数涨跌，而是权重股财报能否证明AI和科技仓位的盈利兑现，您组合里的科技敞口要不要先做一次情景讨论？',
+                client_type: '美股科技或FCN客户',
+                watchpoints: ['权重股财报', 'AI capex指引', '科技底层波动率'],
+                related_assets: ['US Equities', 'Mag7', 'FCN'],
+                asset_tags: ['US Equities', 'Mag7', 'FCN'],
+                materiality_trigger: '3B: major earnings within 5 trading days',
+                risk_flag: false,
+                time_sensitivity: 'this_week',
+                source_summary: '来自系统财报日历中的未来7日权重/FCN常见底层待发财报。'
+            });
+        }
+    } catch {
+        // Keep deterministic fallback resilient when earnings DB is temporarily unavailable.
+    }
+
+    const sox = byCode.get('SOX');
+    if (
+        sox
+        && (
+            (sox.streak_direction === 'up' && typeof sox.streak_days === 'number' && sox.streak_days >= 10)
+            || (typeof sox.change_5d_pct === 'number' && sox.change_5d_pct >= 5)
+            || (typeof sox.change_ytd_pct === 'number' && sox.change_ytd_pct >= 30)
+        )
+    ) {
+        const streak = sox.streak_direction && sox.streak_days
+            ? `连续${sox.streak_days}${sox.streak_direction === 'up' ? '日上涨' : '日下跌'}`
+            : '出现极端动量';
+        const context = `费城半导体${formatPitchCandidateChange(sox)}，${streak}，AI/半导体高Beta仓位进入更拥挤的盈利兑现窗口。`;
+        triggers.push({
+            id: triggers.length + 1,
+            headline: 'SOX连涨进入极值',
+            hook: 'SOX连涨进入极值',
+            context,
+            why_now: context,
+            talking_point: '半导体这轮不是普通反弹，SOX已经走出连续动量，领涨逻辑会开始从追Beta切到财报兑现和仓位拥挤，您AI仓位要不要看一下保护结构？',
+            pitch_line: '半导体这轮不是普通反弹，SOX已经走出连续动量，领涨逻辑会开始从追Beta切到财报兑现和仓位拥挤，您AI仓位要不要看一下保护结构？',
+            client_type: 'AI或半导体仓位客户',
+            watchpoints: ['SOX连涨是否中断', '半导体财报', '科技FCN波动率'],
+            related_assets: ['SOX', 'Semiconductors', 'AI Theme', 'FCN'],
+            asset_tags: ['SOX', 'Semiconductors', 'AI Theme', 'FCN'],
+            materiality_trigger: '3A: consecutive streak > 10 sessions',
+            risk_flag: true,
+            time_sensitivity: 'immediate',
+            source_summary: '来自市场快照中的SOX涨幅、5日表现、YTD表现和连续涨跌统计。'
+        });
+    }
+
+    const oil = byCode.get('BRENT') ?? byCode.get('OIL');
+    if (
+        oil
+        && (
+            (typeof oil.change_pct === 'number' && Math.abs(oil.change_pct) >= 3)
+            || (typeof oil.change_5d_pct === 'number' && Math.abs(oil.change_5d_pct) >= 5)
+        )
+    ) {
+        const context = `${formatPitchCandidateChange(oil)}，能源风险溢价仍在重定价，传导链落在通胀预期、降息路径、黄金和AT1信用利差。`;
+        triggers.push({
+            id: triggers.length + 1,
+            headline: '油价牵动通胀路径',
+            hook: '油价牵动通胀路径',
+            context,
+            why_now: context,
+            talking_point: '油价这次更重要的是传导链，不只是能源股本身；如果通胀风险溢价重新抬头，久期、黄金和AT1利差都会被客户问到，我们可以先把情景拆清楚。',
+            pitch_line: '油价这次更重要的是传导链，不只是能源股本身；如果通胀风险溢价重新抬头，久期、黄金和AT1利差都会被客户问到，我们可以先把情景拆清楚。',
+            client_type: '能源黄金或AT1客户',
+            watchpoints: ['油价能否回吐', '通胀预期', 'AT1利差'],
+            related_assets: ['Crude Oil', 'Inflation', 'Gold', 'AT1'],
+            asset_tags: ['Crude Oil', 'Inflation', 'Gold', 'AT1'],
+            materiality_trigger: '3D: geopolitical commodity risk',
+            risk_flag: true,
+            time_sensitivity: 'immediate',
+            source_summary: '来自市场快照中的Brent/WTI单日和5日变化。'
+        });
+    }
+
+    const tnx = byCode.get('TNX');
+    if (
+        tnx
+        && triggers.length < 3
+        && (
+            (typeof tnx.change_pct === 'number' && Math.abs(tnx.change_pct) >= 5)
+            || (typeof tnx.change_5d_pct === 'number' && Math.abs(tnx.change_5d_pct) >= 6)
+        )
+    ) {
+        const context = `${formatPitchCandidateChange(tnx)}，长端利率仍在区间内重新定价，核心影响是久期产品、IG债券基金和AT1信用利差。`;
+        triggers.push({
+            id: triggers.length + 1,
+            headline: '10Y牵动久期仓位',
+            hook: '10Y牵动久期仓位',
+            context,
+            why_now: context,
+            talking_point: '10Y这几天的变化虽然不是单日巨震，但对长久期债券和AT1客户很直接；我们可以先看这是term premium，还是降息路径被重新定价。',
+            pitch_line: '10Y这几天的变化虽然不是单日巨震，但对长久期债券和AT1客户很直接；我们可以先看这是term premium，还是降息路径被重新定价。',
+            client_type: '长久期债券或AT1客户',
+            watchpoints: ['10Y区间', 'term premium', 'AT1信用利差'],
+            related_assets: ['US Treasuries', 'Duration', 'AT1'],
+            asset_tags: ['US Treasuries', 'Duration', 'AT1'],
+            materiality_trigger: '3E: PB duration and AT1 exposure',
+            risk_flag: false,
+            time_sensitivity: 'watch',
+            source_summary: '来自市场快照中的10Y收益率单日、5日和YTD变化。'
+        });
+    }
+
+    const hsi = byCode.get('HSI');
+    const hstech = byCode.get('HSTECH');
+    if (
+        hsi
+        && hstech
+        && triggers.length < 3
+        && (
+            Math.abs((hstech.change_pct ?? 0) - (hsi.change_pct ?? 0)) >= 0.8
+            || Math.abs(hsi.change_pct ?? 0) >= 0.8
+            || Math.abs(hstech.change_pct ?? 0) >= 1.2
+        )
+    ) {
+        const context = `${formatPitchCandidateChange(hsi)}；${formatPitchCandidateChange(hstech)}，港股需要区分指数方向、恒科弹性与南向流动性。`;
+        triggers.push({
+            id: triggers.length + 1,
+            headline: '港股结构分化升温',
+            hook: '港股结构分化升温',
+            context,
+            why_now: context,
+            talking_point: '港股今天不能只看恒指方向，恒科和资金流可能给出不同信号；如果客户低配中国资产，这更适合聊结构分化而不是简单追指数。',
+            pitch_line: '港股今天不能只看恒指方向，恒科和资金流可能给出不同信号；如果客户低配中国资产，这更适合聊结构分化而不是简单追指数。',
+            client_type: '港股低配客户',
+            watchpoints: ['恒指与恒科差异', '南向资金', '成交能否扩散'],
+            related_assets: ['Hong Kong Equities', 'HSI', 'HSTECH'],
+            asset_tags: ['Hong Kong Equities', 'HSI', 'HSTECH'],
+            materiality_trigger: '3C: leadership dispersion',
+            risk_flag: false,
+            time_sensitivity: 'immediate',
+            source_summary: '来自市场快照中的恒指与恒生科技指数表现。'
+        });
+    }
+
+    return triggers.slice(0, 3).map((item, index) => ({ ...item, id: index + 1 }));
+}
+
 const DAILY_NARRATIVE_BUCKETS = ['美股', '港股', '黄金', '美债', '汇率'] as const;
 
 function isValidDailyNarrativeBucket(
@@ -4206,9 +4385,12 @@ ${narrativeHistorySection}
             ? parsed.default_expanded_bucket
             : asset_buckets[0]?.bucket ?? '美股';
         const daily_pitch_triggers = normalizeDailyPitchTriggers((parsed as any).daily_pitch_triggers);
+        const deterministicPitchTriggers = await buildDeterministicDailyPitchTriggers(marketSnapshot);
         const resolvedPitchTriggers = daily_pitch_triggers.length > 0
             ? daily_pitch_triggers
-            : buildPitchTriggersFromBuckets(asset_buckets);
+            : deterministicPitchTriggers.length > 0
+                ? deterministicPitchTriggers
+                : buildPitchTriggersFromBuckets(asset_buckets);
         if (resolvedPitchTriggers.length < 1) {
             throw new Error('Missing daily pitch triggers');
         }
