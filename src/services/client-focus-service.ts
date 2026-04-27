@@ -4425,6 +4425,32 @@ ${narrativeHistorySection}
             generated_at: new Date().toISOString(),
         };
     } catch (error) {
+        const deterministicPitchTriggers = await buildDeterministicDailyPitchTriggers(marketSnapshot);
+        if (deterministicPitchTriggers.length > 0) {
+            const fallbackPrimarySlug =
+                fallbackNarrative?.primary_slug && FOCUS_TOPICS.some((topic) => topic.slug === fallbackNarrative.primary_slug)
+                    ? fallbackNarrative.primary_slug
+                    : cachedTopics[0]?.slug ?? 'middle-east-tensions';
+            const ranked_slugs =
+                fallbackNarrative?.ranked_slugs?.length
+                    ? fallbackNarrative.ranked_slugs
+                    : cachedTopics
+                        .map((topic) => topic.slug)
+                        .filter((slug): slug is string => typeof slug === 'string' && slug.length > 0);
+
+            return {
+                primary_slug: fallbackPrimarySlug,
+                regime_label: fallbackNarrative?.regime_label ?? '今日',
+                narrative: marketSnapshot?.summary ?? fallbackNarrative?.narrative ?? '今日市场出现可主动沟通的跨资产信号。',
+                ranked_slugs,
+                rank_changes: {},
+                momentum_days: 1,
+                daily_pitch_triggers: deterministicPitchTriggers,
+                asset_buckets: [],
+                default_expanded_bucket: '美股',
+                generated_at: new Date().toISOString(),
+            };
+        }
         return fallbackNarrative;
     }
 }
