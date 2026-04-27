@@ -7151,29 +7151,29 @@ function buildGoldDrivers(newsItems: NewsItem[]): ClientFocusDriverItem[] {
         /yield rise|yield climbs|yields higher|hawkish|rate hike|higher for longer|yields surge/.test(titles)
             ? '压制'
             : /yield fall|yield drop|yields lower|dovish|rate cut|yields decline/.test(titles)
-                ? '中性'
-                : '压制';
+                ? '支撑'
+                : '待确认';
 
     const inflationStatus =
         /inflation|cpi|pce|oil price|energy price|inflation expectation|inflation expectations/.test(titles)
             ? '抬升'
             : /inflation cool|disinflation|deflation|inflation fall/.test(titles)
                 ? '中性'
-                : '中性';
+                : '待确认';
 
     const dollarStatus =
         /dollar strength|dollar rise|dollar climbs|dxy rise|stronger dollar|dollar index rise/.test(titles)
             ? '偏强'
             : /dollar weak|dollar fall|dollar drop|dxy fall|dollar decline|weaker dollar/.test(titles)
                 ? '偏弱'
-                : '偏强';
+                : '待确认';
 
     const centralBankStatus =
         /central bank|official buying|央行购金|gold purchase|sovereign buying/.test(titles)
             ? /slows|放缓|moderate|cool|pause|减少/.test(titles)
                 ? '支撑放缓'
                 : '支撑'
-            : '支撑';
+            : '数据低频';
 
     const havenStatus =
         /iran|israel|war|conflict|geopolitical|hormuz|middle east/.test(titles)
@@ -7187,7 +7187,7 @@ function buildGoldDrivers(newsItems: NewsItem[]): ClientFocusDriverItem[] {
             ? '流出'
             : /etf inflow|gold etf inflow|fund inflow|gold buying/.test(titles)
                 ? '流入'
-                : '分化';
+                : '待确认';
 
     return [
         { label: '实际利率', status: realYieldStatus },
