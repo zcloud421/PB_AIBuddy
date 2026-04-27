@@ -142,6 +142,17 @@ const BLOCKED_WEEKLY_SOURCE_PATTERNS = [
     'medium'
 ] as const;
 
+const MIDDLE_EAST_ZH_NEWS_QUERIES = [
+    '伊朗 通过中间人 向美国 传达 三阶段 谈判方案 霍尔木兹',
+    '伊朗 三阶段 谈判方案 美国 霍尔木兹',
+    '伊朗外长 阿曼 霍尔木兹 通航',
+    '伊朗外長 阿曼 霍爾木茲 通航',
+    '伊朗外长 折返 伊斯兰堡 阿曼 霍尔木兹',
+    '伊朗外長 折返 伊斯蘭堡 阿曼 霍爾木茲',
+    '特朗普 伊朗 战争 很快结束 美国 将取胜',
+    '特朗普 伊朗 戰爭 很快結束 美國 將取勝'
+] as const;
+
 const FOCUS_TOPICS: FocusTopicConfig[] = [
     {
         slug: 'middle-east-tensions',
@@ -533,8 +544,21 @@ async function fetchPolymarketMarket(
 
 async function fetchFocusNewsItems(topic: FocusTopicConfig): Promise<NewsItem[]> {
     const queries = topic.newsQueries?.length ? topic.newsQueries : [topic.query];
+    const googleFetches = [
+        ...queries.map((query) => fetchNewsItemsByQuery(query, { excludeEtfAndFunds: false })),
+        ...(topic.slug === 'middle-east-tensions'
+            ? MIDDLE_EAST_ZH_NEWS_QUERIES.map((query) =>
+                  fetchNewsItemsByQuery(query, {
+                      excludeEtfAndFunds: false,
+                      hl: 'zh-HK',
+                      gl: 'HK',
+                      ceid: 'HK:zh-Hant'
+                  })
+              )
+            : [])
+    ];
     const googleResultsPromise = Promise.all(
-        queries.map((query) => fetchNewsItemsByQuery(query, { excludeEtfAndFunds: false }))
+        googleFetches
     );
     const newsDataResultsPromise = topic.slug === 'middle-east-tensions'
         ? Promise.all(
@@ -626,7 +650,14 @@ function isUsefulMiddleEastNewsTitle(title: string): boolean {
         'analysis:',
         'opinion:',
         'newsletter:',
-        'podcast:'
+        'podcast:',
+        '替代霍尔木兹',
+        '替代霍爾木茲',
+        '替代路线',
+        '替代路線',
+        '路线汇总',
+        '路線匯總',
+        '所有替代'
     ];
 
     if (blockedPatterns.some((pattern) => normalized.includes(pattern))) {
@@ -680,7 +711,38 @@ function isUsefulMiddleEastNewsTitle(title: string): boolean {
         'turkey'
     ];
 
-    return usefulSignals.some((signal) => normalized.includes(signal));
+    const usefulZhSignals = [
+        '伊朗',
+        '以色列',
+        '美伊',
+        '美国',
+        '美國',
+        '特朗普',
+        '川普',
+        '霍尔木兹',
+        '霍爾木茲',
+        '阿曼',
+        '伊斯兰堡',
+        '伊斯蘭堡',
+        '巴基斯坦',
+        '中间人',
+        '中間人',
+        '三阶段',
+        '三階段',
+        '谈判',
+        '談判',
+        '通航',
+        '停火',
+        '外长',
+        '外長',
+        '战争',
+        '戰爭',
+        '油价',
+        '油價'
+    ];
+
+    return usefulSignals.some((signal) => normalized.includes(signal))
+        || usefulZhSignals.some((signal) => title.includes(signal));
 }
 
 function getPreviewQuestions(topic: FocusTopicConfig): Array<Pick<ClientFocusQuestion, 'question'>> {
@@ -1337,21 +1399,120 @@ function buildMiddleEastLatestUpdates(newsItems: NewsItem[]): ClientFocusUpdate[
 
     for (const item of filtered) {
         if (result.length >= 5) break;
-        const normalized = item.title.trim().toLowerCase();
+        const title = buildMiddleEastDisplayHeadline(item);
+        const normalized = title.toLowerCase().replace(/\s+/g, ' ').trim();
         if (!normalized || seen.has(normalized)) continue;
-        const actor = classifyMiddleEastActor(item.title);
+        const actor = classifyMiddleEastActor(title);
         if (actorCount[actor] >= MAX_PER_ACTOR) continue;
         seen.add(normalized);
         actorCount[actor]++;
         result.push({
             time: formatClockTime(item.published_at),
             date: formatDateOnly(item.published_at),
-            title: item.title.trim(),
-            impact: classifyMiddleEastImpact(item.title)
+            title,
+            impact: classifyMiddleEastImpact(title)
         });
     }
 
     return result.filter((item) => Boolean(item.title)) as ClientFocusUpdate[];
+}
+
+function buildMiddleEastDisplayHeadline(item: NewsItem): string {
+    const normalized = item.title.toLowerCase().replace(/\s+/g, ' ').trim();
+    const raw = stripNewsSourceSuffix(item.title.trim());
+    const compact = raw.replace(/\s+/g, '');
+
+    if (/三[阶階]段/.test(compact) && /伊朗/.test(compact)) {
+        return /(美国|美國|美方|us|u\.s\.)/i.test(compact)
+            ? '伊朗经中间人向美国传达三阶段谈判方案'
+            : '伊朗提出三阶段谈判方案，涉及霍尔木兹通航';
+    }
+
+    if (
+        /伊朗|伊方/.test(compact)
+        && /海[峡峽]通行[费費]/.test(compact)
+        && /伊朗[货貨][币幣]|伊朗[幣币]/.test(compact)
+    ) {
+        return '伊朗要求霍尔木兹通行费以伊朗货币结算';
+    }
+
+    if (
+        /伊朗外[长長]/.test(compact)
+        && /阿曼/.test(compact)
+        && /(霍尔木兹|霍爾木茲|通航)/.test(compact)
+    ) {
+        return /折返|改[变變]行程|伊斯[兰蘭]堡/.test(compact)
+            ? '伊朗外长折返伊斯兰堡，推进霍尔木兹通航提议'
+            : '伊朗外长访问阿曼，讨论霍尔木兹通航';
+    }
+
+    if (
+        /(特朗普|川普)/.test(compact)
+        && /伊朗/.test(compact)
+        && /(战争|戰爭)/.test(compact)
+        && /(很快结束|很快結束|将取胜|將取勝|will win|soon be over)/i.test(compact)
+    ) {
+        return '特朗普称伊朗战争很快结束，美国将取胜';
+    }
+
+    if (
+        normalized.includes('trump')
+        && (
+            normalized.includes('cancel')
+            || normalized.includes('called off')
+            || normalized.includes('scrap')
+            || normalized.includes('postpone')
+        )
+        && (
+            normalized.includes('vance')
+            || normalized.includes('witkoff')
+            || normalized.includes('kushner')
+            || normalized.includes('pakistan')
+            || normalized.includes('envoy')
+        )
+    ) {
+        return '特朗普取消美国代表团赴巴基斯坦谈判行程';
+    }
+
+    if (
+        (normalized.includes('iran') || /伊朗/.test(raw))
+        && (
+            normalized.includes('reopen')
+            || /重开|重開|重啟|重新开放|重新開放|通航/.test(raw)
+        )
+        && (normalized.includes('hormuz') || /霍尔木兹|霍爾木茲|霍峡|霍峽/.test(raw))
+    ) {
+        return '伊朗提议重开霍尔木兹通航，谈判仍待落地';
+    }
+
+    if (normalized.includes('iran warns us') && normalized.includes('formula') && normalized.includes('hormuz')) {
+        return '伊朗提出霍尔木兹危机谈判公式，警告美国';
+    }
+
+    if (
+        normalized.includes('trump')
+        && normalized.includes('reject')
+        && normalized.includes('envoy')
+        && (normalized.includes('pakistan') || normalized.includes('iran talks'))
+    ) {
+        return '特朗普拒绝派特使赴巴基斯坦，改提电话谈判';
+    }
+
+    return raw;
+}
+
+function isDirectMiddleEastHardNewsHeadline(rawTitle: string, displayTitle: string) {
+    const combined = `${rawTitle} ${displayTitle}`;
+    const compact = combined.replace(/\s+/g, '');
+    const lower = combined.toLowerCase();
+
+    return /三[阶階]段/.test(compact)
+        || /中间人|中間人/.test(compact)
+        || (/伊朗外[长長]/.test(compact) && /(阿曼|伊斯[兰蘭]堡|霍尔木兹|霍爾木茲|通航)/.test(compact))
+        || (/伊朗|伊方/.test(compact) && /海[峡峽]通行[费費]/.test(compact))
+        || (/特朗普|川普/.test(compact) && /伊朗/.test(compact) && /(战争|戰爭|很快结束|很快結束|将取胜|將取勝)/.test(compact))
+        || (lower.includes('trump') && /vance|witkoff|kushner|pakistan|envoy/.test(lower) && /cancel|called off|postpone|scrap/.test(lower))
+        || ((/霍尔木兹|霍爾木茲|霍峡|霍峽|hormuz/i).test(combined) && /重开|重開|重啟|重新开放|重新開放|通航|reopen/i.test(combined));
 }
 
 function dedupeRecentNews(newsItems: NewsItem[]): NewsItem[] {
@@ -1450,6 +1611,7 @@ function truncateWeeklySummary(title: string): string {
 
 function isMiddleEastHardNews(item: NewsItem): boolean {
     const normalized = item.title.toLowerCase();
+    const title = item.title;
     const source = (item.source ?? '').toLowerCase();
 
     const eventKeywords = [
@@ -1514,6 +1676,42 @@ function isMiddleEastHardNews(item: NewsItem): boolean {
         'bombed',
         'bomb'
     ];
+    const chineseEventKeywords = [
+        '伊朗',
+        '美伊',
+        '美国',
+        '美國',
+        '特朗普',
+        '川普',
+        '以色列',
+        '霍尔木兹',
+        '霍爾木茲',
+        '阿曼',
+        '伊斯兰堡',
+        '伊斯蘭堡',
+        '巴基斯坦',
+        '三阶段',
+        '三階段',
+        '谈判',
+        '談判',
+        '中间人',
+        '中間人',
+        '通航',
+        '停火',
+        '外长',
+        '外長',
+        '战争',
+        '戰爭',
+        '扣押',
+        '船只',
+        '油轮',
+        '油輪',
+        '导弹',
+        '導彈',
+        '空袭',
+        '空襲',
+        '制裁'
+    ];
     const analysisKeywords = [
         'analysis',
         'where things stand',
@@ -1542,16 +1740,37 @@ function isMiddleEastHardNews(item: NewsItem): boolean {
         'delivers high oil prices',
         'means for china'
     ];
+    const chineseAnalysisKeywords = [
+        '替代路线',
+        '替代路線',
+        '路线汇总',
+        '路線匯總',
+        '所有替代',
+        '一文看懂',
+        '背景',
+        '影响几何',
+        '影响多大',
+        '解读',
+        '分析',
+        '评论',
+        '盘点',
+        '梳理',
+        '汇总',
+        '懒人包'
+    ];
     const lowSignalPatterns = [
         'reveals iran',
+        'lawmaker questions',
         '\'present\' to us',
         '"present" to us',
         'present to us'
     ];
     const blockedSources = ['bruegel', 'pbs', 'council on foreign relations', 'financial times opinion'];
 
-    return eventKeywords.some((keyword) => normalized.includes(keyword))
+    return (eventKeywords.some((keyword) => normalized.includes(keyword))
+            || chineseEventKeywords.some((keyword) => title.includes(keyword)))
         && !analysisKeywords.some((keyword) => normalized.includes(keyword))
+        && !chineseAnalysisKeywords.some((keyword) => title.includes(keyword))
         && !lowSignalPatterns.some((keyword) => normalized.includes(keyword))
         && !blockedSources.some((blocked) => source.includes(blocked));
 }
@@ -1688,6 +1907,11 @@ async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<Wha
 
     if (candidates.length === 0) {
         return [];
+    }
+
+    const directGroups = buildDirectMiddleEastWhatChangedGroups(candidates);
+    if (directGroups.some((group) => group.items.length > 0)) {
+        return directGroups;
     }
 
     const apiKey = process.env.DEEPSEEK_API_KEY;
@@ -4934,8 +5158,137 @@ function buildFallbackWhatChangedGroups(newsItems: NewsItem[]): WhatChangedGroup
     }));
 }
 
+function buildDirectMiddleEastWhatChangedGroups(newsItems: NewsItem[]): WhatChangedGroup[] {
+    const fixedGroups = [
+        { group_label: '霍尔木兹海峡', group_icon: '🛢️' },
+        { group_label: '军事动态', group_icon: '🔴' },
+        { group_label: '外交进展', group_icon: '🕊️' }
+    ] as const;
+    const buckets: Record<(typeof fixedGroups)[number]['group_label'], Array<{ time: string; headline: string }>> = {
+        霍尔木兹海峡: [],
+        军事动态: [],
+        外交进展: []
+    };
+    const seen = new Set<string>();
+
+    const hardNews = newsItems
+        .filter((item) => isMiddleEastHardNews(item))
+        .sort((left, right) => {
+            const leftTs = left.published_at ? new Date(left.published_at).getTime() : 0;
+            const rightTs = right.published_at ? new Date(right.published_at).getTime() : 0;
+            return rightTs - leftTs;
+        });
+
+    for (const item of hardNews) {
+        const displayTitle = buildMiddleEastDisplayHeadline(item);
+        if (!isDirectMiddleEastHardNewsHeadline(item.title, displayTitle)) {
+            continue;
+        }
+        const groupLabel = classifyDirectMiddleEastWhatChangedGroup(displayTitle, item.title);
+        if (!groupLabel || buckets[groupLabel].length >= 3) {
+            continue;
+        }
+
+        const headline = sanitizeGeneratedMiddleEastHeadline(
+            withMiddleEastActorTag(displayTitle, groupLabel),
+            groupLabel
+        );
+        const semanticKey = getWhatChangedSemanticKey(headline);
+        const normalized = headline.replace(/\s+/g, '').toLowerCase();
+        if (!headline || seen.has(normalized) || (semanticKey && seen.has(semanticKey))) {
+            continue;
+        }
+
+        seen.add(normalized);
+        if (semanticKey) {
+            seen.add(semanticKey);
+        }
+        buckets[groupLabel].push({
+            time: formatClockTime(item.published_at),
+            headline
+        });
+    }
+
+    return fixedGroups.map((group) => ({
+        group_label: group.group_label,
+        group_icon: group.group_icon,
+        items: buckets[group.group_label]
+    }));
+}
+
+function classifyDirectMiddleEastWhatChangedGroup(
+    displayTitle: string,
+    rawTitle: string
+): '霍尔木兹海峡' | '军事动态' | '外交进展' | null {
+    const combined = `${displayTitle} ${rawTitle}`;
+    const lower = combined.toLowerCase();
+
+    if (/三[阶階]段|中间人|中間人|外[长長]|阿曼|伊斯[兰蘭]堡|巴基斯坦|谈判|談判|会谈|會談/.test(combined)
+        || lower.includes('talk')
+        || lower.includes('negotiat')
+        || lower.includes('envoy')
+        || lower.includes('proposal')) {
+        return '外交进展';
+    }
+
+    if (/战争|戰爭|空袭|空襲|导弹|導彈|袭击|襲擊|军|軍|基地|美军|美軍|以军|以軍/.test(combined)
+        || lower.includes('strike')
+        || lower.includes('attack')
+        || lower.includes('missile')
+        || lower.includes('military')
+        || lower.includes('war')) {
+        return '军事动态';
+    }
+
+    if (/霍尔木兹|霍爾木茲|通航|油价|油價|油轮|油輪|船只|航运|航運/.test(combined)
+        || lower.includes('hormuz')
+        || lower.includes('shipping')
+        || lower.includes('tanker')
+        || lower.includes('oil')) {
+        return '霍尔木兹海峡';
+    }
+
+    return null;
+}
+
+function withMiddleEastActorTag(
+    displayTitle: string,
+    groupLabel: '霍尔木兹海峡' | '军事动态' | '外交进展'
+) {
+    if (/^【[^】]+】/.test(displayTitle)) {
+        return displayTitle;
+    }
+
+    if (/伊朗外长|伊朗外長/.test(displayTitle)) {
+        return `【伊朗外长】${displayTitle.replace(/^伊朗外[长長]/, '')}`;
+    }
+    if (/^伊朗/.test(displayTitle)) {
+        return `【伊朗】${displayTitle.replace(/^伊朗/, '')}`;
+    }
+    if (/^特朗普/.test(displayTitle)) {
+        return `【特朗普】${displayTitle.replace(/^特朗普/, '')}`;
+    }
+    if (/^美国|^美國|^美方/.test(displayTitle)) {
+        return `【美国】${displayTitle.replace(/^(美国|美國|美方)/, '')}`;
+    }
+    if (/霍尔木兹|霍爾木茲|通航|航运|航運|油轮|油輪/.test(displayTitle)) {
+        return `【霍尔木兹】${displayTitle}`;
+    }
+    if (/油价|油價|布油|WTI|Brent/i.test(displayTitle)) {
+        return `【油价】${displayTitle}`;
+    }
+
+    return groupLabel === '外交进展'
+        ? `【外交】${displayTitle}`
+        : groupLabel === '军事动态'
+            ? `【军事】${displayTitle}`
+            : `【霍尔木兹】${displayTitle}`;
+}
+
 function stripNewsSourceSuffix(text: string) {
     return text
+        .replace(/\s*[｜|]\s*(最新|即時|即时|國際|国际|財經|财经).*$/u, '')
+        .replace(/\s+[-–—]\s+(香港01|信報網站|信報|香港文匯網|文匯網|文汇网|財聯社|财联社|央视新闻|央視新聞|证券时报|證券時報|新浪财经|新浪財經|鉅亨網|华尔街见闻|華爾街見聞|i-cable\.com|有線新聞).*$/u, '')
         .replace(/\s+[-–—]\s+(Axios|gCaptain|Reuters|Bloomberg|CNBC|WSJ|Financial Times|FT|Al Jazeera|AP|Associated Press|CNN|BBC|The Guardian|The Jerusalem Post|Los Angeles Times|France 24|TRT World).*$/i, '')
         .replace(/\s+[-–—]\s+[A-Za-z0-9][A-Za-z0-9\s.&'’()]+(?:\.[a-z]{2,})?$/i, '')
         .trim();
@@ -5129,6 +5482,9 @@ function isConcreteTrumpMiddleEastAction(
     }
 
     const content = headline.replace(/^【特朗普】/, '');
+    if (/称.*伊朗.*战争.*(很快结束|将取胜)|伊朗.*战争.*(很快结束|将取胜)/.test(content)) {
+        return true;
+    }
     const concreteActionPattern = /取消|叫停|下令|命令|批准|签署|制裁|部署|派遣|会见|出访|派出|撤回|召回|代表团|特使|延长停火/;
     const statementOnlyPattern = /称|表示|认为|预计|声称|警告|喊话|呼吁/;
     const vaguePattern = /局势|危机|风险|担忧|市场|航运危机|历史性|加深|深化|影响|重定价/;

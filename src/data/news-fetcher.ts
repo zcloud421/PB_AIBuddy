@@ -465,13 +465,13 @@ export async function fetchStockNews(symbol: string, companyName?: string): Prom
 
 export async function fetchNewsItemsByQuery(
     query: string,
-    options: { excludeEtfAndFunds?: boolean } = {}
+    options: { excludeEtfAndFunds?: boolean; hl?: string; gl?: string; ceid?: string } = {}
 ): Promise<NewsItem[]> {
     const url = new URL(GOOGLE_NEWS_RSS_BASE_URL);
     url.searchParams.set('q', query);
-    url.searchParams.set('hl', 'en-US');
-    url.searchParams.set('gl', 'US');
-    url.searchParams.set('ceid', 'US:en');
+    url.searchParams.set('hl', options.hl ?? 'en-US');
+    url.searchParams.set('gl', options.gl ?? 'US');
+    url.searchParams.set('ceid', options.ceid ?? 'US:en');
 
     let response: Response;
     try {
