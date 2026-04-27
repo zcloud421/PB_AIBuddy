@@ -3057,11 +3057,69 @@ function buildDailyNarrativeMarketSignalsSection(
                 parts.push(`YTD ${ytdChange >= 0 ? '+' : ''}${ytdChange.toFixed(2)}%`);
             }
         }
+        if (
+            item.streak_direction
+            && typeof item.streak_days === 'number'
+            && item.streak_days >= 3
+        ) {
+            parts.push(`连续${item.streak_days}${item.streak_direction === 'up' ? '日上涨' : '日下跌'}`);
+        }
 
         return parts.join('  ');
     });
 
     return `今日跨资产变动（今日=当日变动；5日=近5交易日累计，用于判断是否处于极端位置；YTD=年初至今累计，用于判断是否已走出中期趋势；仅供叙事归因，不代表方向建议）：\n${lines.join('\n')}`;
+}
+
+function computeLatestDirectionalStreak(
+    history: ClientFocusPriceHistoryPoint[] | null
+): { days: number; direction: 'up' | 'down' } | null {
+    if (!history || history.length < 2) {
+        return null;
+    }
+
+    let direction: 'up' | 'down' | null = null;
+    let days = 0;
+
+    for (let index = history.length - 1; index > 0; index -= 1) {
+        const current = history[index]?.close;
+        const previous = history[index - 1]?.close;
+        if (!Number.isFinite(current) || !Number.isFinite(previous) || current === previous) {
+            break;
+        }
+
+        const stepDirection = current > previous ? 'up' : 'down';
+        if (!direction) {
+            direction = stepDirection;
+        }
+        if (stepDirection !== direction) {
+            break;
+        }
+        days += 1;
+    }
+
+    return direction && days > 0 ? { days, direction } : null;
+}
+
+function formatPitchCandidateChange(item: ClientFocusMarketStateResponse['indices'][number]): string {
+    const latest =
+        item.latest !== null && item.latest !== undefined
+            ? `${item.latest.toFixed(item.code === 'TNX' ? 2 : ['USDCNH', 'USDJPY', 'USDCHF', 'DXY'].includes(item.code) ? 4 : 2)}`
+            : 'NA';
+    const oneDay =
+        item.change_pct !== null && item.change_pct !== undefined && !Number.isNaN(item.change_pct)
+            ? `${item.change_pct >= 0 ? '+' : ''}${item.change_pct.toFixed(item.code === 'TNX' ? 1 : 2)}${item.code === 'TNX' ? 'bps' : '%'}`
+            : 'NA';
+    const fiveDay =
+        item.change_5d_pct !== null && item.change_5d_pct !== undefined && !Number.isNaN(item.change_5d_pct)
+            ? `${item.change_5d_pct >= 0 ? '+' : ''}${item.change_5d_pct.toFixed(item.code === 'TNX' ? 1 : 2)}${item.code === 'TNX' ? 'bps' : '%'}`
+            : 'NA';
+    const ytd =
+        item.change_ytd_pct !== null && item.change_ytd_pct !== undefined && !Number.isNaN(item.change_ytd_pct)
+            ? `${item.change_ytd_pct >= 0 ? '+' : ''}${item.change_ytd_pct.toFixed(item.code === 'TNX' ? 1 : 2)}${item.code === 'TNX' ? 'bps' : '%'}`
+            : 'NA';
+
+    return `${item.name} ${latest}，1日${oneDay}，5日${fiveDay}，YTD${ytd}`;
 }
 
 async function buildEarningsCalendarSection(): Promise<string> {
@@ -3095,6 +3153,196 @@ async function buildEarningsCalendarSection(): Promise<string> {
     } catch {
         return '';
     }
+}
+
+async function buildDailyPitchCandidateSection(
+    marketSnapshot: ClientFocusMarketStateResponse | null
+): Promise<string> {
+    const candidates: string[] = [];
+    const indices = marketSnapshot?.indices ?? [];
+    const byCode = new Map(indices.map((item) => [item.code, item]));
+    const megaCapOrCommonFcnUnderlyings = new Set([
+        'AAPL',
+        'MSFT',
+        'NVDA',
+        'AMZN',
+        'GOOG',
+        'GOOGL',
+        'META',
+        'TSLA',
+        'AVGO',
+        'TSM',
+        'BABA',
+        'AMD',
+        'NFLX',
+        'ORCL',
+        'INTC',
+        'UNH'
+    ]);
+
+    try {
+        const earningsRows = (await getUpcomingEarningsNextNDays(7))
+            .filter((row) => row.days_until >= 1 && megaCapOrCommonFcnUnderlyings.has(row.symbol))
+            .slice(0, 12);
+        if (earningsRows.length >= 2) {
+            const grouped = earningsRows
+                .map((row) => `${row.symbol}${row.days_until === 1 ? '(明日)' : `(${row.days_until}日后)`}`)
+                .join('、');
+            candidates.push([
+                '[HIGH][3B] 超级财报周开启',
+                `数据锚点：未来7日内待发财报的权重/FCN常见底层包括 ${grouped}。`,
+                '为什么可聊：市场从宏观headline切回盈利验证，AI capex、云业务、广告或电动车利润率会直接影响美股科技仓位与相关FCN底层波动率。',
+                '建议标题：超级财报周开启',
+                '适合客户：美股科技仓位客户、FCN底层含Mag7/半导体客户'
+            ].join('\n'));
+        }
+    } catch {
+        // Earnings are additive pitch context. Keep narrative generation resilient.
+    }
+
+    const sox = byCode.get('SOX');
+    const hasSoxPitchSignal = Boolean(
+        sox
+        && (
+            (sox.streak_direction === 'up' && typeof sox.streak_days === 'number' && sox.streak_days >= 10)
+            || (typeof sox.change_5d_pct === 'number' && sox.change_5d_pct >= 5)
+            || (typeof sox.change_ytd_pct === 'number' && sox.change_ytd_pct >= 30)
+        )
+    );
+    if (
+        sox
+        && hasSoxPitchSignal
+    ) {
+        const streakText =
+            sox.streak_direction && sox.streak_days
+                ? `，连续${sox.streak_days}${sox.streak_direction === 'up' ? '日上涨' : '日下跌'}`
+                : '';
+        candidates.push([
+            '[HIGH][3A] 半导体指数进入极端区间',
+            `数据锚点：${formatPitchCandidateChange(sox)}${streakText}。`,
+            '为什么可聊：半导体是AI仓位、科技FCN和高Beta美股风险偏好的共同锚；连续上涨或高位偏离更适合聊仓位拥挤、保护和财报兑现，而不是泛泛说科技反弹。',
+            '建议标题：SOX连涨进入极值',
+            '适合客户：AI/半导体仓位客户、科技FCN客户'
+        ].join('\n'));
+    }
+
+    const spx = byCode.get('SPX');
+    const ndx = byCode.get('NDX');
+    if (
+        !hasSoxPitchSignal
+        && (
+            (typeof ndx?.change_5d_pct === 'number' && ndx.change_5d_pct >= 3)
+            || (typeof spx?.change_5d_pct === 'number' && spx.change_5d_pct >= 2.5)
+        )
+    ) {
+        const anchor = ndx && typeof ndx.change_5d_pct === 'number' && ndx.change_5d_pct >= 3 ? ndx : spx;
+        if (anchor) {
+            candidates.push([
+                '[MEDIUM][3A/3B] 美股反弹进入财报验证窗口',
+                `数据锚点：${formatPitchCandidateChange(anchor)}。`,
+                '为什么可聊：指数已先反弹，接下来客户真正关心的是反弹由盈利支撑、空头回补还是流动性推动；若同时临近财报，话题应落在盈利兑现而不是指数方向。',
+                '建议标题：反弹进入财报考场',
+                '适合客户：美股高配客户、科技股FCN客户'
+            ].join('\n'));
+        }
+    }
+
+    const oil = byCode.get('BRENT') ?? byCode.get('OIL');
+    if (
+        oil
+        && (
+            (typeof oil.change_pct === 'number' && Math.abs(oil.change_pct) >= 3)
+            || (typeof oil.change_5d_pct === 'number' && Math.abs(oil.change_5d_pct) >= 5)
+        )
+    ) {
+        candidates.push([
+            '[HIGH][3D] 能源风险溢价重新定价',
+            `数据锚点：${formatPitchCandidateChange(oil)}。`,
+            '为什么可聊：油价大幅波动会沿着通胀预期、降息路径、航空/能源股、黄金和AT1信用利差传导，是PB客户跨资产组合最容易追问的地缘变量。',
+            '建议标题：油价牵动通胀路径',
+            '适合客户：能源敞口客户、黄金或AT1客户'
+        ].join('\n'));
+    }
+
+    const tnx = byCode.get('TNX');
+    if (
+        tnx
+        && (
+            (typeof tnx.change_pct === 'number' && Math.abs(tnx.change_pct) >= 8)
+            || (typeof tnx.change_5d_pct === 'number' && Math.abs(tnx.change_5d_pct) >= 15)
+        )
+    ) {
+        candidates.push([
+            '[MEDIUM][3C/3E] 长端利率重新定价',
+            `数据锚点：${formatPitchCandidateChange(tnx)}。`,
+            '为什么可聊：10Y变化直接影响长久期债券、IG债券基金、国债ETF与AT1利差定价；这类话题要围绕久期、term premium、降息定价和信用利差，不要混入个股财报。',
+            '建议标题：10Y牵动久期仓位',
+            '适合客户：持有长久期债券或AT1客户'
+        ].join('\n'));
+    }
+
+    const gold = byCode.get('GOLD');
+    if (
+        gold
+        && (
+            (typeof gold.change_pct === 'number' && Math.abs(gold.change_pct) >= 1.5)
+            || (typeof gold.change_5d_pct === 'number' && Math.abs(gold.change_5d_pct) >= 3)
+            || (typeof gold.change_ytd_pct === 'number' && Math.abs(gold.change_ytd_pct) >= 15)
+        )
+    ) {
+        candidates.push([
+            '[MEDIUM][3A/3D] 黄金避险溢价再校准',
+            `数据锚点：${formatPitchCandidateChange(gold)}。`,
+            '为什么可聊：黄金同时受实际利率、美元、央行购金与地缘风险溢价驱动；适合把客户对避险资产的关注从“涨跌”引导到“短期溢价 vs 长期配置逻辑”。',
+            '建议标题：黄金溢价重新校准',
+            '适合客户：黄金票据或避险配置客户'
+        ].join('\n'));
+    }
+
+    const hsi = byCode.get('HSI');
+    const hstech = byCode.get('HSTECH');
+    if (
+        hsi
+        && hstech
+        && (
+            Math.abs((hstech.change_pct ?? 0) - (hsi.change_pct ?? 0)) >= 1
+            || Math.abs(hsi.change_pct ?? 0) >= 1
+            || Math.abs(hstech.change_pct ?? 0) >= 1.5
+        )
+    ) {
+        candidates.push([
+            '[MEDIUM][3C] 港股指数与结构分化',
+            `数据锚点：${formatPitchCandidateChange(hsi)}；${formatPitchCandidateChange(hstech)}。`,
+            '为什么可聊：港股需要区分恒指方向、恒生科技、南向流动性与内部主题轮动；若指数承压但局部主题强，话题应落在结构分化，而不是笼统说港股科技承压。',
+            '建议标题：港股结构分化升温',
+            '适合客户：港股低配或中资资产客户'
+        ].join('\n'));
+    }
+
+    const dxy = byCode.get('DXY');
+    const usdcnh = byCode.get('USDCNH');
+    if (
+        (dxy && typeof dxy.change_5d_pct === 'number' && Math.abs(dxy.change_5d_pct) >= 1)
+        || (usdcnh && typeof usdcnh.change_pct === 'number' && Math.abs(usdcnh.change_pct) >= 0.3)
+        || (usdcnh && typeof usdcnh.change_5d_pct === 'number' && Math.abs(usdcnh.change_5d_pct) >= 0.8)
+    ) {
+        candidates.push([
+            '[LOW][3C] 美元与CNH传导待确认',
+            `数据锚点：${[dxy, usdcnh].filter(Boolean).map((item) => formatPitchCandidateChange(item!)).join('；')}。`,
+            '为什么可聊：FX话题必须只讲一条传导链。若美元强但USDCNH稳定，应说美元强势尚未传导为人民币压力；只有CNH明显走弱时，才讨论中资资产资金面压力。',
+            '建议标题：美元强势传导待确认',
+            '适合客户：FX carry或非美资产客户'
+        ].join('\n'));
+    }
+
+    if (candidates.length === 0) {
+        return '';
+    }
+
+    return [
+        '今日可聊候选信号（模型必须优先从这里选择3条；HIGH 优先于 MEDIUM，LOW 只有在缺少更强候选时使用）：',
+        ...candidates.slice(0, 8).map((candidate, index) => `${index + 1}. ${candidate}`)
+    ].join('\n\n');
 }
 
 const DAILY_NARRATIVE_BUCKETS = ['美股', '港股', '黄金', '美债', '汇率'] as const;
@@ -3561,6 +3809,7 @@ ${latestUpdatesSection}${transmissionChainSection}
         .join('\n\n');
     const marketSignalsSection = buildDailyNarrativeMarketSignalsSection(marketSnapshot);
     const earningsSection = await buildEarningsCalendarSection();
+    const pitchCandidateSection = await buildDailyPitchCandidateSection(marketSnapshot);
     const narrativeHistorySection =
         narrativeHistory.map((record) => `${record.date}: ${record.primary_slug}`).join('\n') || '暂无历史';
 
@@ -3592,6 +3841,8 @@ ${topicSection}
 
 ${marketSignalsSection}
 
+${pitchCandidateSection}
+
 叙事连续主导天数参考（用于判断结构性 vs 噪音）：
 ${narrativeHistorySection}
 
@@ -3609,6 +3860,8 @@ ${narrativeHistorySection}
 3. 生成 3 条 RM 今日可聊触发器（daily_pitch_triggers）
    - 这是唯一主输出，目标不是替代 CIO office，而是 bridge last mile：告诉RM今天最值得主动和客户聊什么
    - 你不能联网搜索；只能使用上方已注入的新闻摘要、市场数据、财报日历、主题详情和监测信号。没有数据锚点就不要编造
+   - 必须优先从【今日可聊候选信号】选择；若候选中存在 HIGH 级别信号（例如超级财报周、SOX连续涨跌>10日、油价/10Y显著异动），不得用“财报验证反弹质量”“港股资金与结构分化”“10Y收益率重新定价”这类泛标题替代
+   - headline 必须写出具体事件或统计极值，例如“超级财报周开启”“SOX连涨进入极值”“油价牵动通胀路径”，禁止只写抽象判断
    - 从以下 surveillance universe 中筛选候选：股票市场结构、AI/半导体/港股/能源等主题、宏观央行/FX/Rates、地缘尾部风险、固收/信用/AT1、结构性产品/波动率、黄金/另类资产
    - 每条必须满足至少一个 materiality trigger：
      3A 统计极值：主要指数/ETF单日>|3%|、连续涨跌>10日、偏离200日均线>20%、YTD>|30%|、相关性/利差/比率创多年极值
@@ -3746,8 +3999,10 @@ ${narrativeHistorySection}
 3. 生成 3 条 RM 今日可聊触发器（daily_pitch_triggers）
    - daily_pitch_triggers 是唯一前端主展示；asset_buckets 是旧版兼容字段，默认返回 []
    - 不要假设你能联网；只能使用用户消息提供的市场信号、新闻摘要、财报日历和监测数据
+   - 如果用户消息里有“今日可聊候选信号”，必须优先从该候选池选题；HIGH级候选不能被泛化标题覆盖
    - 每条必须是 RM 今天能主动联系客户的开口话题，不是市场复述
    - 每条必须满足 materiality trigger：统计极值、事件临近、regime change、地缘二元事件、或私行特异性之一
+   - headline 必须包含具体事件/统计极值/催化窗口，禁止输出“财报验证反弹质量”“港股资金与结构分化”“10Y收益率重新定价”这类可复用模板标题
    - 三条至少覆盖2个资产类别；纯宏观/央行不超过1条；单一股票不超过1条，除非有明确跨资产传导
    - headline ≤20个中文字符；context 80-120字且必须有数字/事件/传导机制；talking_point 60-100字，像资深IC对客户开口
    - 必须填 materiality_trigger、risk_flag、time_sensitivity、source_summary、asset_tags
@@ -3912,7 +4167,7 @@ ${narrativeHistorySection}
 - 禁止输出任何教科书式风险管理语言` },
                     { role: 'user', content: userPrompt }
                 ],
-                max_tokens: 1200,
+                max_tokens: 1800,
                 temperature: 0.3
             })
         });
@@ -6173,12 +6428,14 @@ async function fetchHongKongSpotIndices() {
 }
 
 async function fetchUsMarketStateIndices() {
-    const [spxMassive, ndxMassive, spxYahoo, ndxYahoo] = await Promise.all([
+    const [spxMassive, ndxMassive, spxYahoo, ndxYahoo, soxYahoo] = await Promise.all([
         fetchMassiveIndexSnapshot('I:SPX', { code: 'SPX', name: '标普500' }),
         fetchMassiveIndexSnapshot('I:NDX', { code: 'NDX', name: '纳斯达克' }),
         fetchYahooChartSeries('^GSPC', { code: 'SPX', name: '标普500' }),
         fetchYahooChartSeries('^IXIC', { code: 'NDX', name: '纳斯达克' }),
+        fetchYahooChartSeries('^SOX', { code: 'SOX', name: '费城半导体' }),
     ]);
+    const soxStreak = computeLatestDirectionalStreak(soxYahoo.history);
 
     const rows = [
         spxMassive
@@ -6199,6 +6456,18 @@ async function fetchUsMarketStateIndices() {
                 change_pct: ndxMassive.change_pct,
                 change_5d_pct: computeTrailingChange(ndxYahoo.history, 5),
                 change_ytd_pct: computeCalendarYtdChange(ndxYahoo.history)
+            }
+            : null,
+        soxYahoo.snapshot
+            ? {
+                code: soxYahoo.snapshot.code,
+                name: soxYahoo.snapshot.name,
+                latest: soxYahoo.snapshot.latest,
+                change_pct: soxYahoo.snapshot.change_pct,
+                change_5d_pct: computeTrailingChange(soxYahoo.history, 5),
+                change_ytd_pct: computeCalendarYtdChange(soxYahoo.history),
+                streak_days: soxStreak?.days ?? null,
+                streak_direction: soxStreak?.direction ?? null
             }
             : null
     ];

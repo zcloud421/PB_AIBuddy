@@ -295,6 +295,8 @@ export interface ClientFocusMarketSnapshotItem {
     change_pct: number | null;
     change_5d_pct?: number | null;
     change_ytd_pct?: number | null;
+    streak_days?: number | null;
+    streak_direction?: 'up' | 'down' | null;
 }
 
 export interface ClientFocusMarketSnapshot {
