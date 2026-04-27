@@ -147,12 +147,13 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
         slug: 'middle-east-tensions',
         title: '中东冲突',
         accent: '#C9A45C',
-        query: 'Iran Israel Pentagon ground operations retaliation infrastructure JD Vance Trump White House strike military latest war',
+        query: 'Iran Israel Hormuz Strait oil shipping ceasefire talks diplomacy military strike latest',
         newsQueries: [
             'Iran Israel war military strike',
             'Iran Hormuz oil shipping',
             'Iran ceasefire talks diplomacy',
-            'Trump Iran deal war'
+            'Strait of Hormuz shipping oil disruption',
+            'Iran US talks Pakistan envoy canceled'
         ],
         fallbackStatus: '持续发酵',
         clientQuestions: [
@@ -1708,13 +1709,20 @@ async function generateMiddleEastWhatChanged(newsItems: NewsItem[]): Promise<Wha
 2. 军事动态（icon: 🔴）：空袭、导弹、地面行动、核设施、无人机
 3. 外交进展（icon: 🕊️）：停火提议、外交斡旋、谈判、国际调停
 
-每组最多4条，每条：
+每组最多3条，每条：
 - time: 从新闻时间取 HH:MM（转换为香港时间 UTC+8）
-- headline: 不超过35字。格式：用【名称】标注具体主语（例如【特朗普】【以军】【伊朗】【IRGC】【IAEA】【沙特】），后接具体行动或数据。
+- headline: 不超过35字。格式：用【名称】标注具体主语（例如【以军】【伊朗】【IRGC】【IAEA】【沙特】【霍尔木兹】【航运】【油价】），后接具体行动或数据。
+  注意：【名称】必须是自然主语，不是为了高亮而硬塞标签。例如不要写"【航运】通过霍尔木兹..."，应写"【霍尔木兹】航运量下降"。
   示例：【以军】对伊朗布什尔核设施发动第5轮空袭，投弹120枚
-  示例：【特朗普】在内阁会议宣称伊朗已放行10艘油轮作为"礼物"
+  示例：【霍尔木兹】航运量因持续紧张大幅下降
   示例：【IRGC】发动第86波导弹和无人机攻势，目标为以军南部基地
   禁止：
+  - 为凑满3条而输出影响链、常识性传导或无新信息的句子；宁可 items 少于3条
+  - "推升保险成本""风险仍在""危机深化"这类没有新数字、没有新动作、没有新时间点的常识判断
+  - 【特朗普】只能用于明确、可验证的总统决策（例如取消/批准谈判行程、下令军事部署、宣布制裁）；不能用于评论、市场解读或霍尔木兹航运/油价标题
+  - 若新闻只是美国政府立场或官员表态，主语写【美国】或【美方】，不要强行写【特朗普】
+  - 把评论、专栏、观点类标题改写成事实进展
+  - 保留新闻源后缀，例如 "- Axios"、"- gCaptain"、"- Reuters"
   - 【媒体】【市场】【消息】【报道】【投资者】【各方】【双方】这类伪主语；必须写具体国家、机构、人物或资产变量
   - "媒体油价上涨""市场担忧升温""消息称局势变化"这类不通顺句子
   - "伊朗-US"这类中英混排；必须写"美伊"
@@ -1788,7 +1796,7 @@ ${newsList}
                       .filter((item) => typeof item?.time === 'string' && typeof item?.headline === 'string')
                       .map((item) => ({
                           time: item.time?.trim() ?? '',
-                          headline: sanitizeGeneratedMiddleEastHeadline(item.headline?.trim() ?? '')
+                          headline: sanitizeGeneratedMiddleEastHeadline(item.headline?.trim() ?? '', expectedGroup.group_label)
                       }))
                       .filter((item) => item.headline)
                       .slice(0, 4)
@@ -4926,21 +4934,46 @@ function buildFallbackWhatChangedGroups(newsItems: NewsItem[]): WhatChangedGroup
     }));
 }
 
-function sanitizeGeneratedMiddleEastHeadline(headline: string) {
-    const trimmed = headline
+function stripNewsSourceSuffix(text: string) {
+    return text
+        .replace(/\s+[-–—]\s+(Axios|gCaptain|Reuters|Bloomberg|CNBC|WSJ|Financial Times|FT|Al Jazeera|AP|Associated Press|CNN|BBC|The Guardian|The Jerusalem Post|Los Angeles Times|France 24|TRT World).*$/i, '')
+        .replace(/\s+[-–—]\s+[A-Za-z0-9][A-Za-z0-9\s.&'’()]+(?:\.[a-z]{2,})?$/i, '')
+        .trim();
+}
+
+function sanitizeGeneratedMiddleEastHeadline(
+    headline: string,
+    groupLabel?: '霍尔木兹海峡' | '军事动态' | '外交进展'
+) {
+    const trimmed = normalizeMiddleEastHeadlineStyle(headline)
         .replace(/\s+/g, ' ')
         .replace(/^[。；;,.，、\s]+/, '')
         .replace(/伊朗\s*[-/]\s*(US|U\.S\.|美国)/gi, '美伊')
         .replace(/Iran\s*[-/]\s*(US|U\.S\.|United States)/gi, '美伊')
         .trim();
-    if (!trimmed || isBadMiddleEastHeadline(trimmed)) {
+    const withoutSource = stripNewsSourceSuffix(trimmed);
+    if (!withoutSource || isBadMiddleEastHeadline(withoutSource, groupLabel)) {
         return '';
     }
 
-    return trimmed;
+    return withoutSource;
 }
 
-function isBadMiddleEastHeadline(headline: string) {
+function normalizeMiddleEastHeadlineStyle(headline: string) {
+    return headline
+        .replace(/^【航运】通过霍尔木兹海峡的航运量/, '【霍尔木兹】航运量')
+        .replace(/^【航运】通过霍尔木兹的航运量/, '【霍尔木兹】航运量')
+        .replace(/^【航运】通过霍尔木兹海峡的运量/, '【霍尔木兹】航运量')
+        .replace(/^【航运】通过霍尔木兹的运量/, '【霍尔木兹】航运量')
+        .replace(/^【航运】霍尔木兹海峡/, '【霍尔木兹】')
+        .replace(/^【航运】霍尔木兹/, '【霍尔木兹】')
+        .replace(/^【油价】因(.+)，油价/, '【油价】因$1');
+}
+
+function isBadMiddleEastHeadline(
+    headline: string,
+    groupLabel?: '霍尔木兹海峡' | '军事动态' | '外交进展'
+) {
     const normalized = headline.replace(/\s+/g, ' ').trim();
     if (!normalized) {
         return true;
@@ -4971,7 +5004,8 @@ function isBadMiddleEastHeadline(headline: string) {
         'ticks up',
         'market update',
         'live updates',
-        'breaking news'
+        'breaking news',
+        'gcaptain'
     ];
     const blockedChinesePatterns = [
         /^媒体/,
@@ -4984,6 +5018,29 @@ function isBadMiddleEastHeadline(headline: string) {
         /^双方/,
         /媒体油价/,
         /市场油价/,
+        /特朗普.*霍尔木兹/,
+        /战争更新/,
+        /和平谈判破裂[？?]/,
+        /替代路线/,
+        /绕过霍尔木兹/,
+        /探明绕过/,
+        /释放外交接触信号/,
+        /条件仍未明朗/,
+        /谈判安排仍未形成/,
+        /表示.*退出谈判/,
+        /表示.*谈判/,
+        /退出.*谈判/,
+        /发出警告/,
+        /向.*警告/,
+        /警告/,
+        /通行风险推升保险成本/,
+        /推升保险成本/,
+        /推升.*保费/,
+        /推升.*运费/,
+        /封锁风险继续/,
+        /历史性航运危机/,
+        /加深.*危机/,
+        /深化.*危机/,
         /伊朗\s*[-/]\s*(US|U\.S\.|美国)/i,
         /Iran\s*[-/]\s*(US|U\.S\.|United States)/i
     ];
@@ -4997,6 +5054,22 @@ function isBadMiddleEastHeadline(headline: string) {
     }
 
     if (blockedChinesePatterns.some((pattern) => pattern.test(normalized))) {
+        return true;
+    }
+
+    if (actor === '特朗普' && !isConcreteTrumpMiddleEastAction(normalized, groupLabel)) {
+        return true;
+    }
+
+    if (isActorIncompatibleWithWhatChangedGroup(actor, groupLabel)) {
+        return true;
+    }
+
+    if (groupLabel === '军事动态' && /谈判|停火|会谈/.test(contentAfterActor) && !/交火|袭击|空袭|打击|导弹|无人机|基地|损失|伤亡/.test(contentAfterActor)) {
+        return true;
+    }
+
+    if (groupLabel === '霍尔木兹海峡' && isGenericHormuzTransmission(contentAfterActor)) {
         return true;
     }
 
@@ -5015,6 +5088,54 @@ function isBadMiddleEastHeadline(headline: string) {
     return false;
 }
 
+function isActorIncompatibleWithWhatChangedGroup(
+    actor: string,
+    groupLabel?: '霍尔木兹海峡' | '军事动态' | '外交进展'
+) {
+    if (!actor || !groupLabel) {
+        return false;
+    }
+
+    if (groupLabel === '军事动态') {
+        return ['油价', '航运', '霍尔木兹'].includes(actor);
+    }
+
+    if (groupLabel === '外交进展') {
+        return ['油价', '航运', '霍尔木兹'].includes(actor);
+    }
+
+    return false;
+}
+
+function isGenericHormuzTransmission(content: string) {
+    const lower = content.toLowerCase();
+    const genericTransmission = /保险成本|保费|运费|供应风险|风险溢价|通行风险|金融溢价|成本上升/;
+    const hasFreshDataOrAction = /[0-9０-９]|%|％|桶|艘|船|下降|骤降|大幅下降|中断|恢复|重开|封锁|扣押|袭击|取消|谈判停滞/.test(content)
+        || lower.includes('plunge')
+        || lower.includes('halt')
+        || lower.includes('seize')
+        || lower.includes('reopen')
+        || lower.includes('cancel');
+
+    return genericTransmission.test(content) && !hasFreshDataOrAction;
+}
+
+function isConcreteTrumpMiddleEastAction(
+    headline: string,
+    groupLabel?: '霍尔木兹海峡' | '军事动态' | '外交进展'
+) {
+    if (groupLabel === '霍尔木兹海峡') {
+        return false;
+    }
+
+    const content = headline.replace(/^【特朗普】/, '');
+    const concreteActionPattern = /取消|叫停|下令|命令|批准|签署|制裁|部署|派遣|会见|出访|派出|撤回|召回|代表团|特使|延长停火/;
+    const statementOnlyPattern = /称|表示|认为|预计|声称|警告|喊话|呼吁/;
+    const vaguePattern = /局势|危机|风险|担忧|市场|航运危机|历史性|加深|深化|影响|重定价/;
+
+    return concreteActionPattern.test(content) && !statementOnlyPattern.test(content) && !vaguePattern.test(content);
+}
+
 function buildFallbackWhatChangedItems(
     newsItems: NewsItem[],
     groupLabel: '霍尔木兹海峡' | '军事动态' | '外交进展'
@@ -5023,7 +5144,7 @@ function buildFallbackWhatChangedItems(
         .filter((item) => classifyWhatChangedGroup(item.title) === groupLabel)
         .map((item) => ({
             time: formatClockTime(item.published_at),
-            headline: buildFallbackWhatChangedHeadline(item.title)
+            headline: buildFallbackWhatChangedHeadline(item.title, groupLabel)
         }))
         .filter((item) => item.headline)
         .slice(0, 4);
@@ -5038,17 +5159,52 @@ function mergeWhatChangedItems(
 
     for (const item of [...parsedItems, ...fallbackItems]) {
         const normalized = item.headline.replace(/\s+/g, '').toLowerCase();
-        if (!normalized || seen.has(normalized)) {
+        const semanticKey = getWhatChangedSemanticKey(item.headline);
+        if (!normalized || seen.has(normalized) || (semanticKey && seen.has(semanticKey))) {
             continue;
         }
         seen.add(normalized);
+        if (semanticKey) {
+            seen.add(semanticKey);
+        }
         merged.push(item);
-        if (merged.length >= 4) {
+        if (merged.length >= 3) {
             break;
         }
     }
 
     return merged;
+}
+
+function getWhatChangedSemanticKey(headline: string) {
+    const normalized = headline.replace(/\s+/g, '').toLowerCase();
+    if (!normalized) {
+        return '';
+    }
+
+    if (/霍尔木兹/.test(normalized) && /航运量|船运量|货运量|通航量|运量/.test(normalized) && /下降|骤降|减少|下滑|plunge|drop|decline/.test(normalized)) {
+        return 'hormuz_shipping_volume_drop';
+    }
+    if (/霍尔木兹/.test(normalized) && /重开|开放|恢复|提议|提出|寻求|proposal|reopen/.test(normalized)) {
+        return 'hormuz_reopen_proposal';
+    }
+    if (/油价|原油|布油|wti|brent/.test(normalized) && /上涨|上行|跳涨|反弹|rise|jump|surge/.test(normalized)) {
+        return 'oil_price_rise_hormuz';
+    }
+    if (/特朗普/.test(normalized) && /取消|拒绝|叫停|特使|代表团|巴基斯坦/.test(normalized)) {
+        return 'trump_envoy_trip_cancelled';
+    }
+    if (/以色列|以军/.test(normalized) && /真主党|黎巴嫩/.test(normalized) && /交火|袭击|空袭|打击/.test(normalized)) {
+        return 'israel_hezbollah_clash';
+    }
+    if (/美军|美国/.test(normalized) && /损失|维修|基地/.test(normalized)) {
+        return 'us_base_damage_cost';
+    }
+
+    return normalized
+        .replace(/^【[^】]+】/, '')
+        .replace(/加深|深化|历史性|持续|仍|继续|导致|影响|风险|危机|紧张局势|持续紧张|大幅/g, '')
+        .slice(0, 18);
 }
 
 function classifyWhatChangedGroup(title: string): '霍尔木兹海峡' | '军事动态' | '外交进展' | null {
@@ -5141,15 +5297,23 @@ function classifyWhatChangedGroup(title: string): '霍尔木兹海峡' | '军事
     return null;
 }
 
-function buildFallbackWhatChangedHeadline(title: string) {
+function buildFallbackWhatChangedHeadline(
+    title: string,
+    groupLabel?: '霍尔木兹海峡' | '军事动态' | '外交进展'
+) {
     const actor = extractMiddleEastActor(title);
     const cleanedTitle = title
-        .replace(/\s+-\s+[^-]+$/, '')
+        .replace(/\s+[-–—]\s+[^-–—]+$/, '')
         .replace(/^['"]|['"]$/g, '')
         .trim();
 
     if (!cleanedTitle) {
         return '';
+    }
+
+    const curated = buildCuratedMiddleEastFallbackHeadline(cleanedTitle, groupLabel);
+    if (curated) {
+        return isBadMiddleEastHeadline(curated, groupLabel) ? '' : curated;
     }
 
     const candidate = actor
@@ -5162,7 +5326,99 @@ function buildFallbackWhatChangedHeadline(title: string) {
         })()
         : cleanedTitle.slice(0, 35);
 
-    return isBadMiddleEastHeadline(candidate) ? '' : candidate;
+    return isBadMiddleEastHeadline(candidate, groupLabel) ? '' : candidate;
+}
+
+function buildCuratedMiddleEastFallbackHeadline(
+    title: string,
+    groupLabel?: '霍尔木兹海峡' | '军事动态' | '外交进展'
+) {
+    const normalized = title.toLowerCase();
+
+    if (groupLabel === '霍尔木兹海峡') {
+        if (
+            normalized.includes('reopen')
+            || normalized.includes('open the strait')
+            || normalized.includes('re-opening')
+            || normalized.includes('proposal')
+        ) {
+            return '【伊朗】提议重开霍尔木兹通航但谈判仍未落地';
+        }
+        if (
+            normalized.includes('blockade')
+            || normalized.includes('closure')
+            || normalized.includes('closed')
+            || normalized.includes('closing')
+            || normalized.includes('lockdown')
+        ) {
+            return '';
+        }
+        if (
+            normalized.includes('shipping')
+            || normalized.includes('tanker')
+            || normalized.includes('freight')
+            || normalized.includes('insurance')
+        ) {
+            if (
+                normalized.includes('plunge')
+                || normalized.includes('drop')
+                || normalized.includes('fall')
+                || normalized.includes('decline')
+                || normalized.includes('halt')
+                || normalized.includes('suspend')
+                || normalized.includes('interrupt')
+                || normalized.includes('disruption')
+            ) {
+                return '【霍尔木兹】航运量因持续紧张大幅下降';
+            }
+            return '';
+        }
+        if (normalized.includes('brent') || normalized.includes('wti') || normalized.includes('oil')) {
+            if (
+                normalized.includes('rise')
+                || normalized.includes('rises')
+                || normalized.includes('rose')
+                || normalized.includes('jump')
+                || normalized.includes('surge')
+                || normalized.includes('above')
+                || normalized.includes('100')
+            ) {
+                return '【油价】因霍尔木兹扰动重新计入供应溢价';
+            }
+            return '';
+        }
+    }
+
+    if (groupLabel === '外交进展') {
+        if (normalized.includes('talk') || normalized.includes('negotiation') || normalized.includes('deal')) {
+            if (
+                normalized.includes('trump')
+                && (
+                    normalized.includes('cancel')
+                    || normalized.includes('called off')
+                    || normalized.includes('scrap')
+                    || normalized.includes('postpone')
+                )
+                && (
+                    normalized.includes('vance')
+                    || normalized.includes('witkoff')
+                    || normalized.includes('kushner')
+                    || normalized.includes('pakistan')
+                    || normalized.includes('envoy')
+                )
+            ) {
+                return '【特朗普】取消美国代表团赴巴基斯坦谈判行程';
+            }
+            if (normalized.includes('iran') && (normalized.includes('u.s.') || normalized.includes('united states') || normalized.includes('us '))) {
+                return '';
+            }
+            if (normalized.includes('iran')) {
+                return '';
+            }
+        }
+    }
+
+    return '';
 }
 
 function summarizeMiddleEastHeadline(title: string, source?: string): string {
