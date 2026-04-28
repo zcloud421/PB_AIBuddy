@@ -53,6 +53,15 @@ const BATCH_COOLDOWN_MS = 15000;
 const BATCH_SIZE = 5;
 const FAILURE_COOLDOWN_MS = 60000;
 
+function todayInHongKongIsoDate(): string {
+    return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Hong_Kong',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).format(new Date());
+}
+
 function resolveFocusRefreshBaseUrl() {
     return (
         process.env.FOCUS_API_REFRESH_BASE_URL?.trim() ??
@@ -91,6 +100,7 @@ async function refreshApiDailyNarrativeCache(): Promise<void> {
 async function main(): Promise<void> {
     const client = await pool.connect();
     let runId: string | null = null;
+    const runDate = todayInHongKongIsoDate();
 
     try {
         const symbolResult = await client.query<ActiveUnderlyingRow>(
@@ -128,8 +138,9 @@ async function main(): Promise<void> {
             FROM idea_candidates ic
             JOIN idea_runs ir ON ir.run_id = ic.run_id
             WHERE ir.status = 'completed'
-              AND ir.run_date = (CURRENT_DATE - INTERVAL '1 day')::date
-            `
+              AND ir.run_date = ($1::date - INTERVAL '1 day')::date
+            `,
+            [runDate]
         );
         const previousGrades = previousGradesResult.rows;
 
@@ -142,7 +153,7 @@ async function main(): Promise<void> {
             console.warn(`[screener] Earnings calendar refresh failed (${message})`);
         }
 
-        runId = await createIdeaRun('DAILY_SCREEN', 'scheduled');
+        runId = await createIdeaRun('DAILY_SCREEN', 'scheduled', runDate);
 
         const fetcher = new MassiveDataFetcher();
         const results: ScoringResult[] = [];
@@ -229,10 +240,10 @@ async function main(): Promise<void> {
                         expiryDate: result.recommended_expiry_date,
                         moneynessPct: result.moneyness_pct,
                         entryPrice: result.current_price,
-                        recommendationDate: new Date().toISOString().slice(0, 10)
+                        recommendationDate: runDate
                     });
                 } else {
-                    await deleteRecommendationTrackerForDate(result.symbol, new Date().toISOString().slice(0, 10));
+                    await deleteRecommendationTrackerForDate(result.symbol, runDate);
                 }
 
                 console.log(
@@ -321,7 +332,7 @@ async function main(): Promise<void> {
             if (middleEastVerdict) {
                 await upsertClientFocusDailyVerdict(
                     'middle-east-tensions',
-                    new Date().toISOString().slice(0, 10),
+                    runDate,
                     middleEastVerdict
                 );
                 console.log('[focus-daily] middle-east-tensions saved');

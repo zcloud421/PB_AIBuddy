@@ -1480,7 +1480,8 @@ export async function getRecommendationTrackerHistoryRows(): Promise<Recommendat
 
 export async function createIdeaRun(
     _symbol: string,
-    trigger: 'scheduled' | 'manual'
+    trigger: 'scheduled' | 'manual',
+    runDate?: string
 ): Promise<string> {
     const result = await pool.query<{ run_id: string }>(
         `
@@ -1492,7 +1493,7 @@ export async function createIdeaRun(
             total_screened,
             total_recommended
         ) VALUES (
-            CURRENT_DATE,
+            COALESCE($2::date, CURRENT_DATE),
             $1::trigger_source,
             NOW(),
             'running'::run_status,
@@ -1501,7 +1502,7 @@ export async function createIdeaRun(
         )
         RETURNING run_id
         `,
-        [trigger]
+        [trigger, runDate ?? null]
     );
 
     return result.rows[0].run_id;
