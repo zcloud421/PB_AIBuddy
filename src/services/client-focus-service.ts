@@ -3858,9 +3858,9 @@ async function buildDailyPitchCandidateSection(
         candidates.push([
             '[MEDIUM][3C/3E] 长端利率重新定价',
             `数据锚点：${formatPitchCandidateChange(tnx)}。`,
-            '为什么可聊：10Y变化直接影响长久期债券、IG债券基金、国债ETF与AT1利差定价；这类话题要围绕久期、term premium、降息定价和信用利差，不要混入个股财报。',
-            '建议标题：美债收益率上行，久期承压',
-            '适合客户：持有长久期债券或AT1客户'
+            '为什么可聊：10Y上行会压低长久期债券价格和IG债券基金净值，并可能推高AT1信用利差；这类话题要围绕收益率、债券价格、term premium、降息定价和信用利差，不要混入个股财报。',
+            '建议标题：长端利率上行，债基净值受压',
+            '适合客户：持有长久期债券、IG债基或AT1客户'
         ].join('\n'));
     }
 
@@ -4094,17 +4094,17 @@ async function buildDeterministicDailyPitchTriggers(
             || (typeof tnx.change_5d_pct === 'number' && Math.abs(tnx.change_5d_pct) >= 6)
         )
     ) {
-        const context = `${formatPitchCandidateChange(tnx)}，长端利率仍在区间内重新定价，核心影响是久期产品、IG债券基金和AT1信用利差。`;
+        const context = `${formatPitchCandidateChange(tnx)}，长端利率仍在区间内重新定价，长久期债券价格和IG债券基金净值承压，AT1信用利差走阔风险上升。`;
         triggers.push({
             id: triggers.length + 1,
-            headline: '美债收益率上行，久期承压',
-            hook: '美债收益率上行，久期承压',
+            headline: '长端利率上行，债基净值受压',
+            hook: '长端利率上行，债基净值受压',
             context,
             why_now: context,
-            talking_point: '10Y这几天的变化虽然不是单日巨震，但对长久期债券和AT1客户很直接；我们可以先看这是term premium，还是降息路径被重新定价。',
-            pitch_line: '10Y这几天的变化虽然不是单日巨震，但对长久期债券和AT1客户很直接；我们可以先看这是term premium，还是降息路径被重新定价。',
-            client_type: '长久期债券或AT1客户',
-            watchpoints: ['10Y区间', 'term premium', 'AT1信用利差'],
+            talking_point: '长端利率还没停，持有长久期敞口的客户账面会先受压；IG债基、AT1和资本保护票据的久期部分，都要先看这是term premium回升，还是降息路径被重新定价。',
+            pitch_line: '长端利率还没停，持有长久期敞口的客户账面会先受压；IG债基、AT1和资本保护票据的久期部分，都要先看这是term premium回升，还是降息路径被重新定价。',
+            client_type: '长久期债券、IG债基或AT1客户',
+            watchpoints: ['10Y能否守住4.5%以下', 'term premium走势', 'AT1信用利差'],
             related_assets: ['US Treasuries', 'Duration', 'AT1'],
             asset_tags: ['US Treasuries', 'Duration', 'AT1'],
             materiality_trigger: '3E: PB duration and AT1 exposure',
@@ -4632,7 +4632,7 @@ function buildTreasuryBucket(
     const todaySignal = formatMonitoringContext(tnx) ?? '美债收益率路径出现变化，利率预期重新定价。';
 
     let thesisCheck = '美债当前更多反映利率与避险再定价，关键是区分通胀缓和、联储路径还是长端供给主导。';
-    let portfolioImplication = '继续看收益率变化背后是通胀回落、避险买盘还是term premium回升，判断久期压力是缓解还是重来。';
+    let portfolioImplication = '继续看收益率变化背后是通胀回落、避险买盘还是term premium回升，判断长久期债券价格和债基净值压力是缓解还是重来。';
 
     const oilDown = typeof oil?.change_pct === 'number' && oil.change_pct <= -3;
     const oilUp = typeof oil?.change_pct === 'number' && oil.change_pct >= 3;
@@ -5166,8 +5166,10 @@ ${narrativeHistorySection}
    - 禁止："结合美元走势评估相对吸引力"这类模糊判断
 
    美债：
-   - 必须说清楚 TNX 变动对不同久期产品的含义（收益率下行 = 债券价格上涨 = 久期敞口受益）
-   - 点出受益的具体资产类型：IG债券、债券基金、长期国债ETF
+   - 必须说清楚 TNX 变动对长久期敞口的价格/净值含义（收益率下行 = 债券价格上涨 = 持有长久期敞口的客户受益；收益率上行 = 长久期债券价格和债基净值受压）
+   - 禁止写“久期承压”“久期产品受影响”这类主语错位表述；承压的是债券价格、基金净值、资本保护票据中的债券/久期部分
+   - 点出受影响或受益的具体资产类型：IG债券、IG债券基金、长期国债ETF、AT1、资本保护票据中的久期部分
+   - 留意变量要写成具体关口或传导链，例如“10Y能否守住4.5%以下 / term premium走势 / AT1信用利差”，不要只写“10Y区间”
    - 框架：是否符合机构 house view 的久期配置方向
    - 禁止把油价高位或单日小幅波动机械写成“加息预期升温”；当前默认表述应是“降息预期被推迟/通胀风险溢价抬升/term premium回升”
    - 只有当输入明确显示Fed hike probability显著上升，或油价出现持续多日大幅突破并有明确市场定价依据时，才可写“加息讨论升温”；且必须表述为尾部风险，不可写成华尔街共识
