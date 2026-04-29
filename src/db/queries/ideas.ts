@@ -96,7 +96,7 @@ function manualRecentEarnings(symbol: string): RecentEarningsCalendarRow | null 
     }
 
     const daysSince = daysBetweenIsoDates(reportDate, currentIsoDate());
-    if (daysSince < 0 || daysSince > 14) {
+    if (daysSince <= 0 || daysSince > 14) {
         return null;
     }
 
@@ -373,7 +373,8 @@ export async function getRecentEarningsBySymbol(symbol: string): Promise<RecentE
             (CURRENT_DATE - report_date)::int AS days_since
         FROM earnings_calendar
         WHERE symbol = ANY($1::text[])
-          AND report_date BETWEEN (CURRENT_DATE - INTERVAL '14 days') AND CURRENT_DATE
+          AND report_date >= (CURRENT_DATE - INTERVAL '14 days')
+          AND report_date < CURRENT_DATE
         ORDER BY report_date DESC
         LIMIT 1
         `,
