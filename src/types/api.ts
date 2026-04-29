@@ -1,7 +1,7 @@
 export type Grade = 'GO' | 'CAUTION' | 'AVOID';
 export type SignalColor = 'green' | 'amber' | 'red' | 'gray';
 export type FlagSeverity = 'INFO' | 'WARN' | 'BLOCK';
-export type WaitReason = 'WAIT_EARNINGS_RISK' | 'WAIT_SETUP_RESET';
+export type WaitReason = 'WAIT_EARNINGS_RISK' | 'WAIT_POST_EARNINGS_SHOCK' | 'WAIT_SETUP_RESET';
 export type AssignmentQualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
 export type FlagType =
     | 'ACTIONABLE_CAUTION'
@@ -9,6 +9,7 @@ export type FlagType =
     | 'BROKEN_TREND'
     | 'COMMODITY_BETA_CAUTION'
     | 'EARNINGS_PROXIMITY'
+    | 'POST_EARNINGS_SHOCK'
     | 'FRAGILE_NARRATIVE'
     | 'HIGH_BETA_THEME_CAUTION'
     | 'HIGH_VOL_LOW_STRIKE'
@@ -404,6 +405,10 @@ export interface PriceContext {
     data_date: string | null;
     earnings_date: string | null;
     days_to_earnings: number | null;
+    days_since_earnings?: number | null;
+    earnings_phase?: 'PRE_EARNINGS' | 'POST_EARNINGS' | 'NONE';
+    extended_price?: number | null;
+    extended_move_pct?: number | null;
 }
 
 export interface PriceHistoryPoint {

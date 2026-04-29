@@ -1,6 +1,6 @@
 import type { ChainData, DataFetcherInterface, StrikeData, SymbolData } from '../scoring-engine';
 import { MassiveClient } from './massive-client';
-import { getUpcomingEarningsBySymbol } from '../db/queries/ideas';
+import { getRecentEarningsBySymbol, getUpcomingEarningsBySymbol } from '../db/queries/ideas';
 
 interface MassiveOptionChainResponse {
     next_url?: string;
@@ -18,6 +18,10 @@ interface MassiveAggregatesResponse {
 
 interface MassivePreviousCloseResponse {
     results?: Array<Record<string, unknown>>;
+}
+
+interface MassiveLastTradeResponse {
+    results?: Record<string, unknown>;
 }
 
 interface MassiveTickerReferenceResponse {
@@ -82,12 +86,24 @@ export class MassiveDataFetcher implements DataFetcherInterface {
         const macd = computeMacd(closes);
         const rsi14 = computeRsi(closes, 14);
 
-        const upcomingEarnings = await getUpcomingEarningsBySymbol(symbol);
+        const [upcomingEarnings, recentEarnings] = await Promise.all([
+            getUpcomingEarningsBySymbol(symbol),
+            getRecentEarningsBySymbol(symbol)
+        ]);
 
         // Use the last bar from the range aggregate instead of /prev, because /prev can return
         // the prior session's data when called shortly after close (Polygon processing lag).
         const currentPrice = closes[closes.length - 1];
         const high52w = Math.max(...highs);
+
+        const shouldFetchExtendedTrade =
+            recentEarnings?.days_since !== null &&
+            recentEarnings?.days_since !== undefined &&
+            recentEarnings.days_since >= 0 &&
+            recentEarnings.days_since <= 3;
+        const extendedTrade = shouldFetchExtendedTrade
+            ? await this.fetchLatestTradeSnapshot(symbol, currentPrice).catch(() => null)
+            : null;
 
         return {
             price_history: historyWindow,
@@ -106,7 +122,26 @@ export class MassiveDataFetcher implements DataFetcherInterface {
             rsi_14: rsi14,
             // Earnings are maintained manually via house_overrides or internal workflows.
             earnings_date: upcomingEarnings?.report_date ?? null,
-            days_to_earnings: upcomingEarnings?.days_until ?? null
+            days_to_earnings: upcomingEarnings?.days_until ?? null,
+            days_since_earnings: recentEarnings?.days_since ?? null,
+            extended_price: extendedTrade?.price ?? null,
+            extended_move_pct: extendedTrade?.movePct ?? null
+        };
+    }
+
+    async fetchLatestTradeSnapshot(
+        symbol: string,
+        regularClosePrice: number
+    ): Promise<{ price: number; movePct: number } | null> {
+        const response = await this.client.get<MassiveLastTradeResponse>(`/v2/last/trade/${symbol}`);
+        const price = getNumber(response.results ?? {}, 'p') ?? getNumber(response.results ?? {}, 'price');
+        if (price === null || regularClosePrice <= 0) {
+            return null;
+        }
+
+        return {
+            price,
+            movePct: Number((((price - regularClosePrice) / regularClosePrice) * 100).toFixed(2))
         };
     }
 

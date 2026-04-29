@@ -3,7 +3,7 @@ import { fetchStockNewsContext, getCompanyName } from './data/news-fetcher';
 export type HouseOverrideType = 'FORCE_AVOID' | 'FORCE_CAUTION' | 'WHITELIST_ONLY';
 
 export type OverallGrade = 'GO' | 'CAUTION' | 'AVOID';
-export type WaitReason = 'WAIT_EARNINGS_RISK' | 'WAIT_SETUP_RESET';
+export type WaitReason = 'WAIT_EARNINGS_RISK' | 'WAIT_POST_EARNINGS_SHOCK' | 'WAIT_SETUP_RESET';
 export type AssignmentQualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
 
 export type FlagSeverity = 'INFO' | 'WARN' | 'BLOCK';
@@ -14,6 +14,7 @@ export type FlagType =
     | 'BROKEN_TREND'
     | 'COMMODITY_BETA_CAUTION'
     | 'EARNINGS_PROXIMITY'
+    | 'POST_EARNINGS_SHOCK'
     | 'FRAGILE_NARRATIVE'
     | 'HIGH_BETA_THEME_CAUTION'
     | 'HIGH_VOL_LOW_STRIKE'
@@ -74,6 +75,9 @@ export interface SymbolData {
     // Earnings are maintained manually via house_overrides or internal workflows.
     earnings_date: string | null;
     days_to_earnings?: number | null;
+    days_since_earnings?: number | null;
+    extended_price?: number | null;
+    extended_move_pct?: number | null;
     house_override?: HouseOverrideType;
 }
 
@@ -120,6 +124,41 @@ export interface ScoringResult {
 export interface DataFetcherInterface {
     fetchSymbolData(symbol: string): Promise<SymbolData>;
     fetchChainData(symbol: string, currentPrice: number): Promise<ChainData>;
+}
+
+export function buildPostEarningsShockFlag(input: {
+    hasRecentEarnings?: boolean;
+    daysSinceEarnings?: number | null;
+    sentimentProxy?: number | null;
+    extendedMovePct?: number | null;
+}): Flag | null {
+    const daysSinceEarnings = input.daysSinceEarnings ?? null;
+    if (!input.hasRecentEarnings) {
+        return null;
+    }
+
+    const extendedMovePct = input.extendedMovePct ?? null;
+    const hasSharpPostPrintDrop = extendedMovePct !== null && extendedMovePct <= -5;
+    if (daysSinceEarnings !== null && (daysSinceEarnings < 0 || daysSinceEarnings > 3)) {
+        return null;
+    }
+    if (daysSinceEarnings === null && !hasSharpPostPrintDrop) {
+        return null;
+    }
+
+    const hasNegativeEarningsRead = (input.sentimentProxy ?? 1) < 0.35;
+    if (!hasSharpPostPrintDrop && !hasNegativeEarningsRead) {
+        return null;
+    }
+
+    return {
+        type: 'POST_EARNINGS_SHOCK',
+        severity: 'WARN',
+        message:
+            extendedMovePct !== null
+                ? `Earnings just reported; extended-hours move ${extendedMovePct.toFixed(1)}% indicates post-print repricing`
+                : 'Earnings just reported; negative post-print news flow indicates repricing risk'
+    };
 }
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
@@ -784,6 +823,7 @@ export function scoreAndGrade(candidate: {
     tenorData: TenorWindow;
     strikeData: StrikeData;
     hasRecentEarnings?: boolean;
+    daysSinceEarnings?: number | null;
     sentimentProxy?: number | null;
     hasMaterialNegativeNews?: boolean;
 }): ScoringResult {
@@ -943,6 +983,18 @@ export function scoreAndGrade(candidate: {
         const eventRiskDelta = eventRiskScore - adjustedEventRiskScore;
         eventRiskScore = adjustedEventRiskScore;
         compositeScore = clamp(compositeScore - (eventRiskDelta * 0.25), 0, 1);
+    }
+
+    const postEarningsShockFlag = buildPostEarningsShockFlag({
+        hasRecentEarnings: candidate.hasRecentEarnings,
+        daysSinceEarnings: candidate.daysSinceEarnings ?? symbolData.days_since_earnings ?? null,
+        sentimentProxy: candidate.sentimentProxy,
+        extendedMovePct: symbolData.extended_move_pct ?? null
+    });
+    if (postEarningsShockFlag) {
+        flags.push(postEarningsShockFlag);
+        eventRiskScore = Math.min(eventRiskScore, 0.1);
+        compositeScore = clamp(compositeScore - 0.12, 0, 1);
     }
 
     const hardAvoidTriggered = shouldAvoidResult({
@@ -1172,6 +1224,10 @@ function shouldAvoidResult(input: {
 
 function deriveWaitReason(grade: OverallGrade, flags: Flag[]): WaitReason | null {
     if (grade === 'AVOID') {
+        if (flags.some((flag) => flag.type === 'POST_EARNINGS_SHOCK')) {
+            return 'WAIT_POST_EARNINGS_SHOCK';
+        }
+
         if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
             return 'WAIT_EARNINGS_RISK';
         }
@@ -1194,6 +1250,10 @@ function deriveWaitReason(grade: OverallGrade, flags: Flag[]): WaitReason | null
     }
 
     if (grade === 'CAUTION') {
+        if (flags.some((flag) => flag.type === 'POST_EARNINGS_SHOCK')) {
+            return 'WAIT_POST_EARNINGS_SHOCK';
+        }
+
         if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
             return 'WAIT_EARNINGS_RISK';
         }
@@ -1304,8 +1364,15 @@ export async function runDailyScreener(
 
         if (approvedTenors.length === 0) {
             const daysToEarnings = symbolData.days_to_earnings ?? null;
+            const postEarningsShockFlag = buildPostEarningsShockFlag({
+                hasRecentEarnings: newsContext.hasRecentEarnings,
+                daysSinceEarnings: newsContext.daysSinceEarnings,
+                sentimentProxy: newsContext.sentimentProxy,
+                extendedMovePct: symbolData.extended_move_pct ?? null
+            });
             const flags = [
                 ...eligibility.flags,
+                ...(postEarningsShockFlag ? [postEarningsShockFlag] : []),
                 ...(daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 14
                     ? [
                           {
@@ -1448,6 +1515,7 @@ export async function runDailyScreener(
                     tenorData,
                     strikeData,
                     hasRecentEarnings: newsContext.hasRecentEarnings,
+                    daysSinceEarnings: newsContext.daysSinceEarnings,
                     sentimentProxy: newsContext.sentimentProxy,
                     hasMaterialNegativeNews: newsContext.hasMaterialNegativeNews
                 });

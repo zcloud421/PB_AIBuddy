@@ -4,6 +4,7 @@ import {
     calculateHistoricalVolatility,
     approveStrikes,
     approveTenors,
+    buildPostEarningsShockFlag,
     checkEligibility,
     getStrikeSelectionConfig,
     shouldPreferTenorCandidate,
@@ -4324,6 +4325,42 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
         const latestExpectedMarketDate = latestUsTradingDate();
         const effectiveDataAsOfDate =
             (shouldUseDbPriceContext ? priceContext?.data_date ?? latestExpectedMarketDate : latestExpectedMarketDate);
+        const effectiveDaysToEarnings = priceContext?.days_to_earnings ?? cachedRow.days_to_earnings ?? null;
+        const effectiveDaysSinceEarnings = priceContext?.days_since_earnings ?? null;
+        const cachedHasStalePreEarningsFlag =
+            cachedFlags.some((flag) => flag.type === 'EARNINGS_PROXIMITY') &&
+            (effectiveDaysToEarnings === null || effectiveDaysToEarnings < 0);
+        const underlying = await withSoftTimeout(
+            getUnderlyingBySymbol(normalizedSymbol).catch(() => null),
+            null,
+            300
+        );
+        const cachedNewsContext = cachedHasStalePreEarningsFlag
+            ? await withSoftTimeout(
+                  fetchStockNewsContext(
+                      normalizedSymbol,
+                      underlying?.company_name ?? cachedRow.company_name ?? getCompanyName(normalizedSymbol)
+                  ).catch(() => null),
+                  null,
+                  3500
+              )
+            : null;
+        const inferredDaysSinceEarnings = effectiveDaysSinceEarnings ?? cachedNewsContext?.daysSinceEarnings ?? null;
+        const extendedTradeContext =
+            (inferredDaysSinceEarnings !== null && inferredDaysSinceEarnings >= 0 && inferredDaysSinceEarnings <= 3) ||
+            cachedHasStalePreEarningsFlag
+                ? await loadExtendedTradeContext(normalizedSymbol, effectiveCurrentPrice)
+                : null;
+        const postEarningsShockFlag = buildPostEarningsShockFlag({
+            hasRecentEarnings:
+                (inferredDaysSinceEarnings !== null &&
+                    inferredDaysSinceEarnings >= 0 &&
+                    inferredDaysSinceEarnings <= 3) ||
+                (cachedNewsContext?.hasRecentEarnings ?? false),
+            daysSinceEarnings: inferredDaysSinceEarnings,
+            sentimentProxy: cachedNewsContext?.sentimentProxy ?? toNullableNumber(cachedRow.sentiment_score),
+            extendedMovePct: extendedTradeContext?.movePct ?? null
+        });
 
         if (
             shouldRefreshCommodityBetaCache({
@@ -4339,15 +4376,14 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             return await scoreSingleSymbol(normalizedSymbol);
         }
 
-        const underlying = await withSoftTimeout(
-            getUnderlyingBySymbol(normalizedSymbol).catch(() => null),
-            null,
-            300
-        );
         const activeFocusStatuses = await getActiveMacroFocusStatuses();
         const macroSensitivityFlag = buildMacroSensitivityFlag(underlying, activeFocusStatuses);
-        const effectiveFlags = macroSensitivityFlag
-            ? mergeUniqueFlags(cachedFlags, [macroSensitivityFlag])
+        const additiveFlags = [
+            ...(macroSensitivityFlag ? [macroSensitivityFlag] : []),
+            ...(postEarningsShockFlag ? [postEarningsShockFlag] : [])
+        ];
+        const effectiveFlags = additiveFlags.length > 0
+            ? mergeUniqueFlags(cachedFlags, additiveFlags)
             : cachedFlags;
 
         let narrative =
@@ -4409,7 +4445,10 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
                 pct_from_52w_high: effectivePctFrom52wHigh,
                 selected_implied_volatility: effectiveIv,
                 earnings_date: priceContext?.earnings_date ?? cachedRow.earnings_date,
-                days_to_earnings: priceContext?.days_to_earnings ?? cachedRow.days_to_earnings
+                days_to_earnings: effectiveDaysToEarnings,
+                days_since_earnings: inferredDaysSinceEarnings,
+                extended_move_pct: extendedTradeContext?.movePct ?? null,
+                has_post_earnings_shock: effectiveFlags.some((flag) => flag.type === 'POST_EARNINGS_SHOCK')
             }),
             price_context: {
                 current_price: effectiveCurrentPrice,
@@ -4420,7 +4459,11 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
                 implied_volatility: effectiveIv,
                 data_date: effectiveDataAsOfDate,
                 earnings_date: priceContext?.earnings_date ?? cachedRow.earnings_date ?? null,
-                days_to_earnings: priceContext?.days_to_earnings ?? cachedRow.days_to_earnings ?? null
+                days_to_earnings: effectiveDaysToEarnings,
+                days_since_earnings: inferredDaysSinceEarnings,
+                earnings_phase: deriveEarningsPhase(effectiveDaysToEarnings, inferredDaysSinceEarnings),
+                extended_price: extendedTradeContext?.price ?? null,
+                extended_move_pct: extendedTradeContext?.movePct ?? null
             }
         };
     }
@@ -4721,7 +4764,11 @@ function buildUnavailableIdeaResponse(symbol: string): SymbolIdeaResponse {
             implied_volatility: null,
             data_date: null,
             earnings_date: null,
-            days_to_earnings: null
+            days_to_earnings: null,
+            days_since_earnings: null,
+            earnings_phase: 'NONE',
+            extended_price: null,
+            extended_move_pct: null
         }
     };
 }
@@ -4776,8 +4823,15 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
     const approvedTenors = approveTenors(symbolData, chainData);
     if (approvedTenors.length === 0) {
         const daysToEarnings = symbolData.days_to_earnings ?? null;
+        const postEarningsShockFlag = buildPostEarningsShockFlag({
+            hasRecentEarnings: newsContext.hasRecentEarnings,
+            daysSinceEarnings: newsContext.daysSinceEarnings,
+            sentimentProxy: newsContext.sentimentProxy,
+            extendedMovePct: symbolData.extended_move_pct ?? null
+        });
         const flags: Flag[] = [
             ...eligibility.flags,
+            ...(postEarningsShockFlag ? [postEarningsShockFlag] : []),
             ...(daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 14
                 ? [
                     {
@@ -4805,13 +4859,22 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
             symbolData,
             scoring: {
                 symbol,
-                overall_grade: daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3 ? 'AVOID' : 'CAUTION',
-                composite_score: daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3 ? 0.2 : 0.35,
+                overall_grade:
+                    postEarningsShockFlag || (daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3)
+                        ? 'AVOID'
+                        : 'CAUTION',
+                composite_score:
+                    postEarningsShockFlag || (daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3)
+                        ? 0.2
+                        : 0.35,
                 risk_reward_score: null,
                 iv_rank_score: 0,
                 trend_score: 0,
                 skew_score: 0,
-                event_risk_score: daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3 ? 0.1 : 0.4,
+                event_risk_score:
+                    postEarningsShockFlag || (daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3)
+                        ? 0.1
+                        : 0.4,
                 premium_score: null,
                 selected_implied_volatility: null,
                 recommended_strike: null,
@@ -4879,6 +4942,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 tenorData,
                 strikeData,
                 hasRecentEarnings: newsContext.hasRecentEarnings,
+                daysSinceEarnings: newsContext.daysSinceEarnings,
                 sentimentProxy: newsContext.sentimentProxy,
                 hasMaterialNegativeNews: newsContext.hasMaterialNegativeNews
             });
@@ -5078,7 +5142,11 @@ function mapScoringResultToSymbolIdea(
             implied_volatility: scoring.selected_implied_volatility,
             data_date: symbolData.price_history[symbolData.price_history.length - 1]?.date ?? todayIsoDate(),
             earnings_date: symbolData.earnings_date ?? null,
-            days_to_earnings: symbolData.days_to_earnings ?? null
+            days_to_earnings: symbolData.days_to_earnings ?? null,
+            days_since_earnings: symbolData.days_since_earnings ?? null,
+            earnings_phase: deriveEarningsPhase(symbolData.days_to_earnings ?? null, symbolData.days_since_earnings ?? null),
+            extended_price: symbolData.extended_price ?? null,
+            extended_move_pct: symbolData.extended_move_pct ?? null
         }
     };
 }
@@ -5092,6 +5160,8 @@ function buildSignals(symbolData: SymbolData, scoring: ScoringResult): SignalRow
         scoring.skew_score >= 0.7 ? 'green' : scoring.skew_score >= 0.45 ? 'amber' : 'red';
     const ivSignal = buildImpliedVolatilitySignal(scoring.selected_implied_volatility);
     const daysToEarnings = symbolData.days_to_earnings ?? null;
+    const daysSinceEarnings = symbolData.days_since_earnings ?? null;
+    const hasPostEarningsShock = scoring.flags.some((flag) => flag.type === 'POST_EARNINGS_SHOCK');
 
     const signals: SignalRow[] = [
         {
@@ -5126,20 +5196,32 @@ function buildSignals(symbolData: SymbolData, scoring: ScoringResult): SignalRow
         {
             name: 'Earnings risk',
             value:
-                daysToEarnings !== null && daysToEarnings <= 3
+                daysSinceEarnings !== null && daysSinceEarnings <= 3
+                    ? `财报已发布${formatExtendedMoveSuffix(symbolData.extended_move_pct ?? null)}`
+                    : daysSinceEarnings !== null && daysSinceEarnings <= 14
+                      ? `${daysSinceEarnings}天前发财报`
+                      : daysToEarnings !== null && daysToEarnings <= 3
                     ? `${daysToEarnings}天内财报`
                     : daysToEarnings !== null && daysToEarnings <= 14
                       ? `${daysToEarnings}天内财报`
                       : '近14天无财报发布',
             color:
-                daysToEarnings !== null && daysToEarnings <= 3
+                daysSinceEarnings !== null && daysSinceEarnings <= 3
+                    ? (hasPostEarningsShock || (symbolData.extended_move_pct ?? 0) <= -5 ? 'red' : 'amber')
+                    : daysSinceEarnings !== null && daysSinceEarnings <= 14
+                      ? 'amber'
+                      : daysToEarnings !== null && daysToEarnings <= 3
                     ? 'red'
                     : daysToEarnings !== null && daysToEarnings <= 14
                       ? 'amber'
                       : 'gray',
             priority:
-                daysToEarnings !== null && daysToEarnings <= 3
+                daysSinceEarnings !== null && daysSinceEarnings <= 3
+                    ? 96
+                    : daysToEarnings !== null && daysToEarnings <= 3
                     ? 95
+                    : daysSinceEarnings !== null && daysSinceEarnings <= 14
+                      ? 76
                     : daysToEarnings !== null && daysToEarnings <= 14
                       ? 75
                       : 10
@@ -5158,6 +5240,9 @@ function buildSignalsFromCachedRow(cachedRow: {
     selected_implied_volatility: number | null;
     earnings_date: string | null;
     days_to_earnings: number | null;
+    days_since_earnings?: number | null;
+    extended_move_pct?: number | null;
+    has_post_earnings_shock?: boolean;
 }): SignalRow[] {
     const trendColor: SignalColor =
         (cachedRow.current_price ?? 0) > (cachedRow.ma200 ?? Number.POSITIVE_INFINITY) ? 'green' : 'red';
@@ -5197,27 +5282,84 @@ function buildSignalsFromCachedRow(cachedRow: {
         {
             name: 'Earnings risk',
             value:
-                cachedRow.days_to_earnings !== null && cachedRow.days_to_earnings <= 3
-                    ? `${cachedRow.days_to_earnings}天内财报`
-                    : cachedRow.days_to_earnings !== null && cachedRow.days_to_earnings <= 14
-                      ? `${cachedRow.days_to_earnings}天内财报`
-                      : '近14天无财报发布',
+                cachedRow.days_since_earnings !== null &&
+                cachedRow.days_since_earnings !== undefined &&
+                cachedRow.days_since_earnings <= 3
+                    ? `财报已发布${formatExtendedMoveSuffix(cachedRow.extended_move_pct ?? null)}`
+                    : cachedRow.days_since_earnings !== null &&
+                        cachedRow.days_since_earnings !== undefined &&
+                        cachedRow.days_since_earnings <= 14
+                      ? `${cachedRow.days_since_earnings}天前发财报`
+                      : cachedRow.days_to_earnings !== null && cachedRow.days_to_earnings <= 3
+                        ? `${cachedRow.days_to_earnings}天内财报`
+                        : cachedRow.days_to_earnings !== null && cachedRow.days_to_earnings <= 14
+                          ? `${cachedRow.days_to_earnings}天内财报`
+                          : '近14天无财报发布',
             color:
-                cachedRow.days_to_earnings !== null && cachedRow.days_to_earnings <= 3
-                    ? 'red'
-                    : cachedRow.days_to_earnings !== null && cachedRow.days_to_earnings <= 14
+                cachedRow.days_since_earnings !== null &&
+                cachedRow.days_since_earnings !== undefined &&
+                cachedRow.days_since_earnings <= 3
+                    ? (cachedRow.has_post_earnings_shock || (cachedRow.extended_move_pct ?? 0) <= -5 ? 'red' : 'amber')
+                    : cachedRow.days_since_earnings !== null &&
+                        cachedRow.days_since_earnings !== undefined &&
+                        cachedRow.days_since_earnings <= 14
                       ? 'amber'
-                      : 'gray',
+                      : cachedRow.days_to_earnings !== null && cachedRow.days_to_earnings <= 3
+                        ? 'red'
+                        : cachedRow.days_to_earnings !== null && cachedRow.days_to_earnings <= 14
+                          ? 'amber'
+                          : 'gray',
             priority:
-                cachedRow.days_to_earnings !== null && cachedRow.days_to_earnings <= 3
-                    ? 95
-                    : cachedRow.days_to_earnings !== null && cachedRow.days_to_earnings <= 14
-                      ? 75
-                      : 10
+                cachedRow.days_since_earnings !== null &&
+                cachedRow.days_since_earnings !== undefined &&
+                cachedRow.days_since_earnings <= 3
+                    ? 96
+                    : cachedRow.days_to_earnings !== null && cachedRow.days_to_earnings <= 3
+                      ? 95
+                      : cachedRow.days_since_earnings !== null &&
+                          cachedRow.days_since_earnings !== undefined &&
+                          cachedRow.days_since_earnings <= 14
+                        ? 76
+                        : cachedRow.days_to_earnings !== null && cachedRow.days_to_earnings <= 14
+                          ? 75
+                          : 10
         }
     ];
 
     return signals;
+}
+
+function formatExtendedMoveSuffix(movePct: number | null): string {
+    if (movePct === null || !Number.isFinite(movePct)) {
+        return '';
+    }
+
+    return `，盘后${movePct >= 0 ? '+' : ''}${movePct.toFixed(1)}%`;
+}
+
+function deriveEarningsPhase(daysToEarnings: number | null, daysSinceEarnings?: number | null): 'PRE_EARNINGS' | 'POST_EARNINGS' | 'NONE' {
+    if (daysSinceEarnings !== null && daysSinceEarnings !== undefined && daysSinceEarnings >= 0 && daysSinceEarnings <= 14) {
+        return 'POST_EARNINGS';
+    }
+    if (daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 14) {
+        return 'PRE_EARNINGS';
+    }
+    return 'NONE';
+}
+
+async function loadExtendedTradeContext(
+    symbol: string,
+    regularClosePrice: number | null
+): Promise<{ price: number; movePct: number } | null> {
+    if (regularClosePrice === null || regularClosePrice <= 0) {
+        return null;
+    }
+
+    return withSoftTimeout(
+        new MassiveDataFetcher().fetchLatestTradeSnapshot(symbol, regularClosePrice).catch(() => null),
+        null,
+        1200
+    );
 }
 
 function buildImpliedVolatilitySignal(iv: number | null): SignalRow {
@@ -5577,8 +5719,13 @@ function gradeToHeadline(grade: 'GO' | 'CAUTION' | 'AVOID'): string {
 
 function generateVerdictSub(grade: 'GO' | 'CAUTION' | 'AVOID', flags: Flag[]): string {
     const hasEarningsProximity = flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY');
+    const hasPostEarningsShock = flags.some((flag) => flag.type === 'POST_EARNINGS_SHOCK');
     if (flags.some((flag) => flag.severity === 'BLOCK')) {
         return 'Blocked by current risk controls.';
+    }
+
+    if (grade === 'AVOID' && hasPostEarningsShock) {
+        return 'Earnings have just landed and the stock is repricing; wait for regular-session and option-chain reset.';
     }
 
     if (grade === 'AVOID' && hasEarningsProximity) {
@@ -5597,8 +5744,12 @@ function generateVerdictSub(grade: 'GO' | 'CAUTION' | 'AVOID', flags: Flag[]): s
 function deriveWaitReason(
     grade: 'GO' | 'CAUTION' | 'AVOID',
     flags: Flag[]
-): 'WAIT_EARNINGS_RISK' | 'WAIT_SETUP_RESET' | null {
+): 'WAIT_EARNINGS_RISK' | 'WAIT_POST_EARNINGS_SHOCK' | 'WAIT_SETUP_RESET' | null {
     if (grade === 'AVOID') {
+        if (flags.some((flag) => flag.type === 'POST_EARNINGS_SHOCK')) {
+            return 'WAIT_POST_EARNINGS_SHOCK';
+        }
+
         if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
             return 'WAIT_EARNINGS_RISK';
         }
@@ -5621,6 +5772,10 @@ function deriveWaitReason(
     }
 
     if (grade === 'CAUTION') {
+        if (flags.some((flag) => flag.type === 'POST_EARNINGS_SHOCK')) {
+            return 'WAIT_POST_EARNINGS_SHOCK';
+        }
+
         if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
             return 'WAIT_EARNINGS_RISK';
         }

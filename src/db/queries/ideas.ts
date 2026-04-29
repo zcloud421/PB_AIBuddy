@@ -22,6 +22,12 @@ export interface EarningsCalendarRow {
     days_until: number | null;
 }
 
+export interface RecentEarningsCalendarRow {
+    symbol: string;
+    report_date: string;
+    days_since: number | null;
+}
+
 export interface PriceContextRow {
     current_price: number | null;
     ma20: number | null;
@@ -32,6 +38,7 @@ export interface PriceContextRow {
     data_date: string | null;
     earnings_date: string | null;
     days_to_earnings: number | null;
+    days_since_earnings: number | null;
 }
 
 export interface PriceHistoryPointRow {
@@ -281,6 +288,25 @@ export async function getUpcomingEarningsBySymbol(symbol: string): Promise<Earni
     return result.rows[0] ?? null;
 }
 
+export async function getRecentEarningsBySymbol(symbol: string): Promise<RecentEarningsCalendarRow | null> {
+    const result = await pool.query<RecentEarningsCalendarRow>(
+        `
+        SELECT
+            symbol,
+            report_date::text AS report_date,
+            (CURRENT_DATE - report_date)::int AS days_since
+        FROM earnings_calendar
+        WHERE symbol = $1
+          AND report_date BETWEEN (CURRENT_DATE - INTERVAL '14 days') AND CURRENT_DATE
+        ORDER BY report_date DESC
+        LIMIT 1
+        `,
+        [symbol]
+    );
+
+    return result.rows[0] ?? null;
+}
+
 export interface UpcomingEarningsRow {
     symbol: string;
     report_date: string;
@@ -438,11 +464,15 @@ export async function getIdeaBySymbolAndDate(symbol: string, date: string): Prom
             ic.ma200,
             ic.pct_from_52w_high,
             ic.selected_implied_volatility,
-            ec.report_date::text AS earnings_date,
+            COALESCE(ec.report_date, recent_ec.report_date)::text AS earnings_date,
             CASE
                 WHEN ec.report_date IS NOT NULL THEN (ec.report_date - CURRENT_DATE)
                 ELSE NULL
-            END AS days_to_earnings
+            END AS days_to_earnings,
+            CASE
+                WHEN recent_ec.report_date IS NOT NULL THEN (CURRENT_DATE - recent_ec.report_date)
+                ELSE NULL
+            END AS days_since_earnings
         FROM idea_candidates ic
         JOIN idea_runs ir
             ON ir.run_id = ic.run_id
@@ -591,6 +621,14 @@ export async function getPriceContextBySymbol(symbol: string): Promise<PriceCont
             ORDER BY report_date ASC
             LIMIT 1
         ) ec ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT report_date
+            FROM earnings_calendar
+            WHERE symbol = u.symbol
+              AND report_date BETWEEN (CURRENT_DATE - INTERVAL '14 days') AND CURRENT_DATE
+            ORDER BY report_date DESC
+            LIMIT 1
+        ) recent_ec ON TRUE
         WHERE u.symbol = $1
         LIMIT 1
         `,
@@ -979,6 +1017,7 @@ export async function saveRiskFlags(runId: string, symbol: string, flags: Flag[]
 export async function ensureRiskFlagEnumValues(): Promise<void> {
     const values: Flag['type'][] = [
         'EARNINGS_PROXIMITY',
+        'POST_EARNINGS_SHOCK',
         'BROKEN_TREND',
         'COMMODITY_BETA_CAUTION',
         'HIGH_VOL_LOW_STRIKE',
@@ -1530,8 +1569,12 @@ export async function updateIdeaRunStatus(
 function deriveWaitReason(
     grade: 'GO' | 'CAUTION' | 'AVOID',
     flags: Flag[]
-): 'WAIT_EARNINGS_RISK' | 'WAIT_SETUP_RESET' | null {
+): 'WAIT_EARNINGS_RISK' | 'WAIT_POST_EARNINGS_SHOCK' | 'WAIT_SETUP_RESET' | null {
     if (grade === 'AVOID') {
+        if (flags.some((flag) => flag.type === 'POST_EARNINGS_SHOCK')) {
+            return 'WAIT_POST_EARNINGS_SHOCK';
+        }
+
         if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
             return 'WAIT_EARNINGS_RISK';
         }
@@ -1554,6 +1597,10 @@ function deriveWaitReason(
     }
 
     if (grade === 'CAUTION') {
+        if (flags.some((flag) => flag.type === 'POST_EARNINGS_SHOCK')) {
+            return 'WAIT_POST_EARNINGS_SHOCK';
+        }
+
         if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
             return 'WAIT_EARNINGS_RISK';
         }

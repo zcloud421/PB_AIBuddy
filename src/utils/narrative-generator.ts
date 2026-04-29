@@ -731,6 +731,10 @@ function summarizeAvoidReasons(flags: Flag[], pctFrom52wHigh: number | null): st
         reasons.push('财报窗口过近，短期事件风险过高。');
     }
 
+    if (flags.some((flag) => flag.type === 'POST_EARNINGS_SHOCK')) {
+        reasons.push('财报刚落地且价格正在重估，需等待正股和期权链重新定价。');
+    }
+
     if (flags.some((flag) => flag.type === 'BEARISH_STRUCTURE')) {
         reasons.push('股价位于长期均线下方，技术结构仍偏弱。');
     }

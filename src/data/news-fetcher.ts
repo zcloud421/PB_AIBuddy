@@ -107,7 +107,8 @@ const SPECIAL_QUERIES: Record<string, string> = {
 
 const RECENT_EARNINGS_QUERIES: Record<string, string> = {
     MU: 'Micron earnings results beat revenue 2026',
-    NVDA: 'Nvidia earnings results beat revenue 2026'
+    NVDA: 'Nvidia earnings results beat revenue 2026',
+    HOOD: 'Robinhood earnings results revenue EPS crypto trading 2026'
 };
 
 export function getCompanyName(symbol: string): string {
@@ -702,7 +703,19 @@ function normalizeNewsMatchText(value: string): string {
 
 function filterStaleEarningsHeadlines(items: NewsItem[], hasRecentEarnings: boolean): NewsItem[] {
     if (hasRecentEarnings) {
-        return items;
+        return items.filter((item) => {
+            if (!isEarningsHeadline(item.title)) {
+                return true;
+            }
+
+            const publishedAt = Date.parse(item.published_at);
+            if (Number.isNaN(publishedAt)) {
+                return false;
+            }
+
+            const ageInDays = (Date.now() - publishedAt) / (24 * 60 * 60 * 1000);
+            return ageInDays <= 14;
+        });
     }
 
     return items.filter((item) => {
@@ -745,10 +758,12 @@ function scoreNewsPriority(title: string): number {
     const negativePhrases = [
         'earnings miss',
         'revenue miss',
+        'revenue misses',
         'profit drop',
         'profit falls',
         'profit down',
         'below estimates',
+        'falls short',
         'disappoints',
         'warns',
         'guidance cut',
@@ -779,6 +794,8 @@ function isEarningsHeadline(title: string): boolean {
         'profit down',
         'profit falls',
         'revenue miss',
+        'revenue misses',
+        'falls short',
         'below estimates',
         'shares drop',
         'stock falls',
@@ -796,9 +813,11 @@ function scoreRecentEarningsHeadlines(items: NewsItem[]): number {
     const negativePhrases = [
         'earnings miss',
         'revenue miss',
+        'revenue misses',
         'profit drop',
         'profit falls',
         'below estimates',
+        'falls short',
         'disappoints',
         'warns',
         'guidance cut'
