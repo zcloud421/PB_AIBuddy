@@ -3648,7 +3648,7 @@ function ensureMandatoryHeadlineTriggers(
 ): NonNullable<DailyMarketNarrative['daily_pitch_triggers']> {
     const next = [...selected];
     const mandatoryHeadlines = [
-        ...(headlineSignals.openAiTargetMissTitles.length > 0 ? ['AI财报迎来证伪点'] : []),
+        ...(headlineSignals.openAiTargetMissTitles.length > 0 ? ['今晚财报验证AI叙事'] : []),
         ...(headlineSignals.uaeOpecExitTitles.length > 0 ? ['阿联酋退出OPEC，油市动荡加剧'] : []),
         ...(headlineSignals.centralBankShockTitles.length > 0 ? ['央行政策超预期'] : []),
         ...(headlineSignals.majorGeopoliticalTitles.length > 0 ? ['地缘风险结构升级'] : []),
@@ -3736,7 +3736,7 @@ async function buildDailyPitchCandidateSection(
             '[CRITICAL][3C/3E] AI capex叙事进入证伪窗口',
             `新闻锚点：${headlineSignals.openAiTargetMissTitles[0]}。`,
             '为什么可聊：OpenAI用户/收入目标争议直接冲击ORCL、CoreWeave、NVDA等AI算力链，今晚Mag7财报的焦点应从“增长多少”升级为“能否证实AI capex回报”。',
-            '建议标题：AI财报迎来证伪点',
+            '建议标题：今晚财报验证AI叙事',
             '适合客户：美股科技仓位客户、AI/半导体FCN客户'
         ].join('\n'));
     }
@@ -3760,8 +3760,8 @@ async function buildDailyPitchCandidateSection(
                 : '';
         const soxHeadline =
             sox.streak_direction === 'up' && typeof sox.streak_days === 'number' && sox.streak_days >= 3
-                ? 'SOX连涨进入极值'
-                : 'SOX高位进入验证';
+                ? '半导体连涨，高位风险上升'
+                : '半导体高位遇财报考验';
         candidates.push([
             '[HIGH][3A] 半导体指数进入极端区间',
             `数据锚点：${formatPitchCandidateChange(sox)}${streakText}。`,
@@ -3786,7 +3786,7 @@ async function buildDailyPitchCandidateSection(
                 '[MEDIUM][3A/3B] 美股反弹进入财报验证窗口',
                 `数据锚点：${formatPitchCandidateChange(anchor)}。`,
                 '为什么可聊：指数已先反弹，接下来客户真正关心的是反弹由盈利支撑、空头回补还是流动性推动；若同时临近财报，话题应落在盈利兑现而不是指数方向。',
-                '建议标题：反弹进入财报考场',
+                '建议标题：美股反弹迎财报检验',
                 '适合客户：美股高配客户、科技股FCN客户'
             ].join('\n'));
         }
@@ -3842,7 +3842,7 @@ async function buildDailyPitchCandidateSection(
             '[HIGH][3D] 能源风险溢价重新定价',
             `数据锚点：${formatPitchCandidateChange(oil)}。`,
             '为什么可聊：油价大幅波动会沿着通胀预期、降息路径、航空/能源股、黄金和AT1信用利差传导，是PB客户跨资产组合最容易追问的地缘变量。',
-            '建议标题：油价牵动通胀路径',
+            '建议标题：油价震荡，通胀预期升温',
             '适合客户：能源敞口客户、黄金或AT1客户'
         ].join('\n'));
     }
@@ -3859,7 +3859,7 @@ async function buildDailyPitchCandidateSection(
             '[MEDIUM][3C/3E] 长端利率重新定价',
             `数据锚点：${formatPitchCandidateChange(tnx)}。`,
             '为什么可聊：10Y变化直接影响长久期债券、IG债券基金、国债ETF与AT1利差定价；这类话题要围绕久期、term premium、降息定价和信用利差，不要混入个股财报。',
-            '建议标题：10Y牵动久期仓位',
+            '建议标题：美债收益率上行，久期承压',
             '适合客户：持有长久期债券或AT1客户'
         ].join('\n'));
     }
@@ -3877,7 +3877,7 @@ async function buildDailyPitchCandidateSection(
             '[MEDIUM][3A/3D] 黄金避险溢价再校准',
             `数据锚点：${formatPitchCandidateChange(gold)}。`,
             '为什么可聊：黄金同时受实际利率、美元、央行购金与地缘风险溢价驱动；适合把客户对避险资产的关注从“涨跌”引导到“短期溢价 vs 长期配置逻辑”。',
-            '建议标题：黄金溢价重新校准',
+            '建议标题：黄金避险溢价或回落',
             '适合客户：黄金票据或避险配置客户'
         ].join('\n'));
     }
@@ -3913,7 +3913,7 @@ async function buildDailyPitchCandidateSection(
             '[LOW][3C] 美元与CNH传导待确认',
             `数据锚点：${[dxy, usdcnh].filter(Boolean).map((item) => formatPitchCandidateChange(item!)).join('；')}。`,
             '为什么可聊：FX话题必须只讲一条传导链。若美元强但USDCNH稳定，应说美元强势尚未传导为人民币压力；只有CNH明显走弱时，才讨论中资资产资金面压力。',
-            '建议标题：美元强势传导待确认',
+            '建议标题：美元走强，人民币汇率承压',
             '适合客户：FX carry或非美资产客户'
         ].join('\n'));
     }
@@ -3963,7 +3963,7 @@ async function buildDeterministicDailyPitchTriggers(
                 .map((row) => `${row.symbol}${row.days_until === 1 ? '今晚盘后' : row.days_until === 2 ? '明晚盘后' : `${row.days_until}日后`}`)
                 .join('、');
             const hasOpenAiStress = headlineSignals.openAiTargetMissTitles.length > 0;
-            const headline = hasOpenAiStress ? 'AI财报迎来证伪点' : '超级财报周开启';
+            const headline = hasOpenAiStress ? '今晚财报验证AI叙事' : '超级财报周开启';
             const context = hasOpenAiStress
                 ? `OpenAI用户/收入目标争议已压到AI算力链，未来7日内${grouped}等权重/FCN常见底层将发财报，市场要验证AI capex回报能否支撑估值。`
                 : `未来7日内${grouped}等权重/FCN常见底层将发财报，市场焦点从宏观headline切回盈利验证和AI capex回报。`;
@@ -4013,7 +4013,7 @@ async function buildDeterministicDailyPitchTriggers(
         )
     ) {
         const isSoxUpStreak = sox.streak_direction === 'up' && typeof sox.streak_days === 'number' && sox.streak_days >= 3;
-        const headline = isSoxUpStreak ? 'SOX连涨进入极值' : 'SOX高位进入验证';
+        const headline = isSoxUpStreak ? '半导体连涨，高位风险上升' : '半导体高位遇财报考验';
         const streak = sox.streak_direction && sox.streak_days
             ? `连续${sox.streak_days}${sox.streak_direction === 'up' ? '日上涨' : '日下跌'}`
             : '出现极端动量';
@@ -4069,8 +4069,8 @@ async function buildDeterministicDailyPitchTriggers(
         const context = `${formatPitchCandidateChange(oil)}，能源风险溢价仍在重定价，传导链落在通胀预期、降息路径、黄金和AT1信用利差。`;
         triggers.push({
             id: triggers.length + 1,
-            headline: '油价牵动通胀路径',
-            hook: '油价牵动通胀路径',
+            headline: '油价震荡，通胀预期升温',
+            hook: '油价震荡，通胀预期升温',
             context,
             why_now: context,
             talking_point: '油价这次更重要的是传导链，不只是能源股本身；如果通胀风险溢价重新抬头，久期、黄金和AT1利差都会被客户问到，我们可以先把情景拆清楚。',
@@ -4097,8 +4097,8 @@ async function buildDeterministicDailyPitchTriggers(
         const context = `${formatPitchCandidateChange(tnx)}，长端利率仍在区间内重新定价，核心影响是久期产品、IG债券基金和AT1信用利差。`;
         triggers.push({
             id: triggers.length + 1,
-            headline: '10Y牵动久期仓位',
-            hook: '10Y牵动久期仓位',
+            headline: '美债收益率上行，久期承压',
+            hook: '美债收益率上行，久期承压',
             context,
             why_now: context,
             talking_point: '10Y这几天的变化虽然不是单日巨震，但对长久期债券和AT1客户很直接；我们可以先看这是term premium，还是降息路径被重新定价。',
@@ -4157,8 +4157,8 @@ async function buildDeterministicDailyPitchTriggers(
         const context = `${formatPitchCandidateChange(gold)}，黄金话题应聚焦实际利率、美元与地缘风险溢价，而不是单日涨跌本身。`;
         triggers.push({
             id: triggers.length + 1,
-            headline: '黄金溢价重新校准',
-            hook: '黄金溢价重新校准',
+            headline: '黄金避险溢价或回落',
+            hook: '黄金避险溢价或回落',
             context,
             why_now: context,
             talking_point: '黄金这几天的变化不只是价格波动，关键是避险溢价和实际利率谁在主导；您黄金票据或配置仓位要不要先拆一下驱动？',
@@ -4915,7 +4915,7 @@ ${narrativeHistorySection}
    - 这是唯一主输出，目标不是替代 CIO office，而是 bridge last mile：告诉RM今天最值得主动和客户聊什么
    - 你不能联网搜索；只能使用上方已注入的新闻摘要、市场数据、财报日历、主题详情和监测信号。没有数据锚点就不要编造
    - 必须优先从【今日可聊候选信号】选择；若候选中存在 CRITICAL/HIGH 级别信号（例如OpenAI目标争议、OPEC结构事件、超级财报周、SOX连续涨跌>10日、油价/10Y显著异动），不得用“财报验证反弹质量”“港股资金与结构分化”“10Y收益率重新定价”这类泛标题替代
-   - headline 必须写出具体事件或统计极值，例如“超级财报周开启”“SOX连涨进入极值”“油价牵动通胀路径”，禁止只写抽象判断
+   - headline 必须写出具体事件或统计极值，例如“超级财报周开启”“半导体连涨，高位风险上升”“油价震荡，通胀预期升温”，禁止只写抽象判断
    - 从以下 surveillance universe 中筛选候选：股票市场结构、AI/半导体/港股/能源等主题、宏观央行/FX/Rates、地缘尾部风险、固收/信用/AT1、结构性产品/波动率、黄金/另类资产
    - 每条必须满足至少一个 materiality trigger：
      3A 统计极值：主要指数/ETF单日>|3%|、连续涨跌>10日、偏离200日均线>20%、YTD>|30%|、相关性/利差/比率创多年极值
@@ -4926,7 +4926,7 @@ ${narrativeHistorySection}
    - 三条必须满足多样性约束：至少覆盖2个资产类别；纯宏观/央行不超过1条；单一股票不超过1条，除非它有明确跨资产传导；同等重要时优先最近12小时与更清晰的PB客户组合含义
    - 每条必须包含：
      - id：1、2、3
-     - headline：≤20个中文字符，像 Bloomberg alert / internal note，不像零售新闻标题
+     - headline：≤20个中文字符，写法参考香港财经晨报或Wind中文摘要；要通顺自然的中文，不要英文直译语序；禁止使用"进入验证/牵动/重新校准/证伪点/传导待确认"这类翻译腔词汇；好的示例："今晚财报验证AI叙事"、"阿联酋退出OPEC，油市震荡加剧"、"美债收益率重新定价"
      - context：80-120个中文字符，写给RM理解为什么重要；必须包含具体数字/事件、传导机制和组合含义方向
      - talking_point：60-100个中文字符，写成RM对高净值客户开口的话；专业、自然、可开启对话，不给直接买卖建议
      - client_type：≤20字，最适合主动触达的客户类型，必须落到敞口
