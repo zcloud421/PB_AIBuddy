@@ -129,7 +129,7 @@ const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
 const DRAWDOWN_PREWARM_COOLDOWN_MS = 30 * 60 * 1000;
 const DRAWDOWN_PREWARM_FRESHNESS_MS = 2 * 60 * 1000;
-const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 26;
+const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 28;
 const DRAWDOWN_TAIL_RISK_HISTORY_LIMIT = 1500;
 const DRAWDOWN_TAIL_RISK_LOOKBACK_DAYS = 365 * 5;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
@@ -2314,6 +2314,22 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['反垄断罚款', 'Ant整改', '平台经济强监管']
     },
     {
+        id: 'china-search-ai-platform-crackdown-2021',
+        start: '2021-04-16',
+        end: '2021-08-31',
+        reason_zh: 'Didi数据审查扩散至平台股，中概科技估值折价扩大',
+        family: 'china-regulation',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['BIDU'],
+        archetypes: ['china-search-ai-platform'],
+        subsectors: ['china-search-ai-platform'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['didi', 'cybersecurity review', 'data security', 'platform economy', 'regulation', 'chinese tech stocks'],
+        event_signal_tags: ['ant-rectification-overhang'],
+        markers: ['Didi数据审查', '数据安全', '平台监管', '中概折价']
+    },
+    {
         id: 'china-platform-rectification-2021',
         start: '2021-04-01',
         end: '2022-03-31',
@@ -2357,7 +2373,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         family: 'china-delisting',
         driver_type: 'policy',
         applies_to: 'symbols_only',
-        symbols: ['BABA', 'JD', 'PDD', 'BIDU', 'NTES', 'TME', 'BILI', 'TCEHY', 'BEKE'],
+        symbols: ['BABA', 'JD', 'PDD', 'BIDU', 'NTES', 'TME', 'BILI', 'IQ', 'VIPS', 'TCEHY', 'BEKE'],
         cycle_families: ['china-platform-cycle'],
         keywords: [
             'delisting',
@@ -2436,7 +2452,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         id: 'china-search-ai-erniebot-sentiment-2023',
         start: '2023-01-01',
         end: '2023-06-30',
-        reason_zh: 'Ernie Bot演示争议引发AI预期落差，SVB后风险偏好下降放大回撤',
+        reason_zh: 'Ernie Bot预期冲高后演示未兑现，AI估值溢价回吐',
         family: 'china-platform-sentiment',
         driver_type: 'company',
         applies_to: 'symbols_only',
@@ -2449,10 +2465,10 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['Ernie Bot', 'ChatGPT', 'AI演示', '产品验证', 'SVB', '风险偏好', '高Beta']
     },
     {
-        id: 'china-search-ai-fundamental-decline-2023',
+        id: 'china-search-ai-reopening-fade-2023',
         start: '2023-07-01',
-        end: '2026-12-31',
-        reason_zh: '广告主业承压叠加AI云增速未弥补缺口，EPS预期下修',
+        end: '2024-08-31',
+        reason_zh: '地产消费复苏偏弱压广告，AI云兑现不足以托住估值',
         family: 'china-platform-fundamental',
         driver_type: 'company',
         applies_to: 'symbols_only',
@@ -2460,17 +2476,65 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         archetypes: ['china-search-ai-platform'],
         subsectors: ['china-search-ai-platform'],
         cycle_families: ['china-platform-cycle'],
-        keywords: ['search', 'advertising revenue', 'online marketing', 'cloud', 'ai cloud', 'eps', 'revenue expectations'],
+        keywords: ['search', 'advertising revenue', 'online marketing', 'consumer', 'property', 'ai cloud', 'revenue expectations'],
         event_signal_tags: ['china-ad-spending-reset', 'cloud-spending-reset'],
-        markers: ['广告收入', '搜索变现', 'AI云', '营收预期', 'EPS', '估值倍数']
+        markers: ['广告收入', '消费复苏', '地产压力', 'AI云', '估值回吐']
     },
     {
-        id: 'china-gaming-platform-reset-2022',
-        start: '2021-07-01',
-        end: '2026-12-31',
-        reason_zh: '版号节奏与内容供给波动，游戏平台收入预期承压',
+        id: 'china-search-ai-q3-ad-weakness-2024',
+        start: '2024-09-01',
+        end: '2025-01-31',
+        reason_zh: 'Q3广告业务疲弱抵消AI云增长，搜索估值继续回吐',
         family: 'china-platform-fundamental',
-        driver_type: 'sector',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['BIDU'],
+        archetypes: ['china-search-ai-platform'],
+        subsectors: ['china-search-ai-platform'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['q3', 'online marketing revenue', 'advertising revenue', 'ai cloud', 'ernie', 'managed page'],
+        event_signal_tags: ['china-ad-spending-reset', 'cloud-spending-reset'],
+        markers: ['Q3广告', 'AI云', '搜索估值', 'Managed Page']
+    },
+    {
+        id: 'china-search-ai-q4-ad-slump-2025',
+        start: '2025-02-01',
+        end: '2025-04-30',
+        reason_zh: 'Q4广告收入下滑且MAU低预期，AI转型信心受挫',
+        family: 'china-platform-fundamental',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['BIDU'],
+        archetypes: ['china-search-ai-platform'],
+        subsectors: ['china-search-ai-platform'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['q4', 'online marketing revenue', 'monthly active users', 'mau', 'ai cloud', 'ai-first'],
+        event_signal_tags: ['china-ad-spending-reset', 'cloud-spending-reset'],
+        markers: ['Q4广告', 'MAU', 'AI转型', 'AI云']
+    },
+    {
+        id: 'china-search-ai-search-transition-2025',
+        start: '2025-05-01',
+        end: '2026-12-31',
+        reason_zh: 'AI搜索改版压低传统广告变现，营收弹性等待验证',
+        family: 'china-platform-fundamental',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['BIDU'],
+        archetypes: ['china-search-ai-platform'],
+        subsectors: ['china-search-ai-platform'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['ai search', 'online marketing revenue', 'advertising revenue', 'legacy business', 'impairment', 'ai-native marketing'],
+        event_signal_tags: ['china-ad-spending-reset', 'cloud-spending-reset', 'search-disruption'],
+        markers: ['AI搜索', '传统广告', 'Legacy Business', '减值', '营收验证']
+    },
+    {
+        id: 'china-gaming-platform-policy-reset-2021',
+        start: '2021-07-01',
+        end: '2022-12-31',
+        reason_zh: '版号审批收紧叠加未成年限制，游戏收入溢价回落',
+        family: 'china-platform-fundamental',
+        driver_type: 'policy',
         applies_to: 'symbols_only',
         symbols: ['NTES', 'TCEHY'],
         archetypes: ['china-online-gaming'],
@@ -2481,12 +2545,44 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['游戏版号', '内容供给', '用户付费', '游戏平台']
     },
     {
-        id: 'china-content-platform-reset-2022',
-        start: '2021-07-01',
-        end: '2026-12-31',
-        reason_zh: '内容成本上升叠加广告偏弱，BILI/IQ收入预期下调',
+        id: 'china-gaming-platform-content-cycle-2023',
+        start: '2023-01-01',
+        end: '2024-12-31',
+        reason_zh: '版号恢复但爆款供给波动，游戏收入预期反复',
         family: 'china-platform-fundamental',
         driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['NTES', 'TCEHY'],
+        archetypes: ['china-online-gaming'],
+        subsectors: ['china-online-gaming'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['game approvals', 'new titles', 'game pipeline', 'game revenue', 'mobile games', 'hit title'],
+        event_signal_tags: ['gaming-approval-reset'],
+        markers: ['游戏版号', '爆款供给', '游戏流水', '内容周期']
+    },
+    {
+        id: 'china-gaming-platform-spending-reset-2025',
+        start: '2025-01-01',
+        end: '2026-12-31',
+        reason_zh: '新游流水与用户付费放缓，游戏平台估值回吐',
+        family: 'china-platform-fundamental',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['NTES', 'TCEHY'],
+        archetypes: ['china-online-gaming'],
+        subsectors: ['china-online-gaming'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['game revenue', 'mobile games', 'user spending', 'arpu', 'new title', 'game pipeline'],
+        event_signal_tags: ['gaming-approval-reset'],
+        markers: ['新游流水', '用户付费', '游戏平台', '估值回吐']
+    },
+    {
+        id: 'china-content-platform-regulation-reset-2021',
+        start: '2021-07-01',
+        end: '2022-12-31',
+        reason_zh: '内容监管叠加亏损扩张，视频平台估值回落',
+        family: 'china-platform-fundamental',
+        driver_type: 'policy',
         applies_to: 'symbols_only',
         symbols: ['BILI', 'IQ'],
         archetypes: ['china-content-platform'],
@@ -2497,10 +2593,58 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['内容平台', '会员增长', '内容成本', '广告变现']
     },
     {
-        id: 'china-music-platform-reset-2022',
-        start: '2021-07-01',
+        id: 'china-content-platform-reopening-fade-2023',
+        start: '2023-01-01',
+        end: '2024-12-31',
+        reason_zh: '会员与广告复苏弱于预期，内容平台增长降温',
+        family: 'china-platform-fundamental',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['BILI', 'IQ'],
+        archetypes: ['china-content-platform'],
+        subsectors: ['china-content-platform'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['membership revenue', 'subscriber growth', 'advertising revenue', 'arpu', 'content costs'],
+        event_signal_tags: ['content-monetization-reset'],
+        markers: ['会员增长', '广告复苏', '内容成本', '增长降温']
+    },
+    {
+        id: 'china-content-platform-short-video-pressure-2025',
+        start: '2025-01-01',
         end: '2026-12-31',
-        reason_zh: '订阅增长放缓叠加社交娱乐降温，TME收入预期承压',
+        reason_zh: '短视频分流叠加成本纪律，内容平台变现承压',
+        family: 'china-platform-fundamental',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['BILI', 'IQ'],
+        archetypes: ['china-content-platform'],
+        subsectors: ['china-content-platform'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['short video', 'douyin', 'tiktok competition', 'advertising budget', 'membership revenue', 'content costs'],
+        event_signal_tags: ['content-monetization-reset'],
+        markers: ['短视频分流', '内容成本', '会员增长', '广告变现']
+    },
+    {
+        id: 'china-music-platform-copyright-reset-2021',
+        start: '2021-07-01',
+        end: '2022-12-31',
+        reason_zh: '独家版权整改压缩溢价，音乐平台社交娱乐承压',
+        family: 'china-platform-fundamental',
+        driver_type: 'policy',
+        applies_to: 'symbols_only',
+        symbols: ['TME'],
+        archetypes: ['china-music-platform'],
+        subsectors: ['china-music-platform'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['online music', 'exclusive music rights', 'music licensing', 'social entertainment', 'music revenue'],
+        event_signal_tags: ['music-social-entertainment-reset'],
+        markers: ['腾讯音乐', '独家版权', '社交娱乐', '版权成本']
+    },
+    {
+        id: 'china-music-platform-social-entertainment-2023',
+        start: '2023-01-01',
+        end: '2024-12-31',
+        reason_zh: '社交娱乐收入下滑，订阅增长难抵估值压力',
         family: 'china-platform-fundamental',
         driver_type: 'sector',
         applies_to: 'symbols_only',
@@ -2513,10 +2657,26 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['腾讯音乐', '订阅增长', '社交娱乐', '版权成本']
     },
     {
-        id: 'china-property-platform-reset-2022',
-        start: '2022-04-01',
+        id: 'china-music-platform-arpu-reset-2025',
+        start: '2025-01-01',
         end: '2026-12-31',
-        reason_zh: '房屋成交与地产信心走弱，BEKE平台收入预期下调',
+        reason_zh: '订阅ARPU与社交娱乐放缓，收入弹性转弱',
+        family: 'china-platform-fundamental',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['TME'],
+        archetypes: ['china-music-platform'],
+        subsectors: ['china-music-platform'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['online music', 'music subscriptions', 'arpu', 'social entertainment', 'music revenue'],
+        event_signal_tags: ['music-social-entertainment-reset'],
+        markers: ['订阅ARPU', '社交娱乐', '音乐收入', '增长弹性']
+    },
+    {
+        id: 'china-property-platform-housing-downturn-2022',
+        start: '2022-04-01',
+        end: '2023-12-31',
+        reason_zh: '地产销售下行压低成交，贝壳平台收入预期下修',
         family: 'china-platform-fundamental',
         driver_type: 'sector',
         applies_to: 'symbols_only',
@@ -2529,10 +2689,26 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['贝壳', '房屋成交', '地产信心', '住房政策']
     },
     {
-        id: 'china-value-retail-reset-2022',
-        start: '2022-04-01',
+        id: 'china-property-platform-stimulus-fade-2024',
+        start: '2024-01-01',
         end: '2026-12-31',
-        reason_zh: '消费信心偏弱叠加品牌供给收缩，唯品会收入预期承压',
+        reason_zh: '地产刺激兑现反复，房屋成交复苏弹性受限',
+        family: 'china-platform-fundamental',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['BEKE'],
+        archetypes: ['china-property-platform'],
+        subsectors: ['china-property-platform'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['existing-home sales', 'property transactions', 'housing stimulus', 'secondary home sales', 'brokerage services'],
+        event_signal_tags: ['property-transaction-reset'],
+        markers: ['地产刺激', '房屋成交', '复苏弹性', '贝壳']
+    },
+    {
+        id: 'china-value-retail-consumption-reset-2022',
+        start: '2022-04-01',
+        end: '2024-12-31',
+        reason_zh: '消费信心偏弱拖累折扣零售，活跃用户增长放缓',
         family: 'china-platform-fundamental',
         driver_type: 'sector',
         applies_to: 'symbols_only',
@@ -2545,6 +2721,22 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['唯品会', '折扣零售', '活跃用户', '消费信心']
     },
     {
+        id: 'china-value-retail-supply-reset-2025',
+        start: '2025-01-01',
+        end: '2026-12-31',
+        reason_zh: '品牌供给与客单增长承压，唯品会收入弹性回落',
+        family: 'china-platform-fundamental',
+        driver_type: 'sector',
+        applies_to: 'symbols_only',
+        symbols: ['VIPS'],
+        archetypes: ['china-value-retail'],
+        subsectors: ['china-value-retail'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['discount retail', 'apparel demand', 'active customers', 'brand partners', 'average order value'],
+        event_signal_tags: ['value-retail-demand-reset'],
+        markers: ['品牌供给', '客单价', '折扣零售', '收入弹性']
+    },
+    {
         id: 'pdd-temu-competition-reset-2024',
         start: '2024-05-01',
         end: '2024-12-31',
@@ -2555,7 +2747,7 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         symbols: ['PDD'],
         archetypes: ['china-ecommerce-platform'],
         subsectors: ['china-ecommerce-platform'],
-        cycle_families: ['consumer-discretionary-cycle'],
+        cycle_families: ['china-platform-cycle'],
         keywords: ['temu', 'competition', 'global business', 'refunds', 'merchant', 'revenue miss', 'uncertain market', 'de minimis'],
         event_signal_tags: ['earnings-miss', 'pricing-pressure', 'regulatory-probe'],
         markers: ['拼多多', 'Temu', '竞争加剧', '商家政策', '全球业务前景']
@@ -6749,6 +6941,25 @@ function isCryptoExchangeBroadFrameworkRule(rule: AttributionMacroRule): boolean
     return rule.id === 'crypto-cycle-reset-2021' || rule.id === 'crypto-liquidity-bear-market-2022';
 }
 
+function isSupportedBackgroundAttributionCandidate(
+    candidate: RankedAttributionRule,
+    primaryScore: number,
+    eventSignals: Set<string>,
+    hasPeerSync: boolean,
+    onsetType: DrawdownEpisodeForAttribution['onset_type']
+): boolean {
+    if (candidate.score < primaryScore * ENTANGLEMENT_MIN_SCORE_RATIO) {
+        return false;
+    }
+
+    const hasSignalMatch = (candidate.rule.event_signal_tags ?? []).some((tag) => eventSignals.has(tag));
+    const hasPeerSyncSupport =
+        hasPeerSync && ['macro', 'policy', 'geopolitical'].includes(candidate.rule.driver_type);
+    const hasSharpMoveSupport = onsetType === 'sharp';
+
+    return hasSignalMatch || hasPeerSyncSupport || hasSharpMoveSupport;
+}
+
 function rankAttributionRules(
     symbol: string,
     companyName: string | null,
@@ -6956,6 +7167,7 @@ function inferDrawdownType(
 }
 
 function renderStructuredAttributionReason(reason: StructuredAttributionReason): string {
+    const MAX_DISPLAY_REASON_CHARS = 50;
     const normalizeNarrative = (text: string | null | undefined): string | null => {
         if (!text) {
             return null;
@@ -7006,11 +7218,13 @@ function renderStructuredAttributionReason(reason: StructuredAttributionReason):
     }
 
     if (secondaryDriver) {
-        return `${primaryDriver}，同时${secondaryDriver}`;
+        const combined = `${primaryDriver}，同时${secondaryDriver}`;
+        return combined.length <= MAX_DISPLAY_REASON_CHARS ? combined : primaryDriver;
     }
 
     if (backgroundRegime && backgroundRegime !== primaryDriver) {
-        return `${primaryDriver}，背景上${backgroundRegime}`;
+        const combined = `${primaryDriver}，背景上${backgroundRegime}`;
+        return combined.length <= MAX_DISPLAY_REASON_CHARS ? combined : primaryDriver;
     }
 
     return primaryDriver;
@@ -7035,8 +7249,10 @@ function chooseHeuristicAttributionReason(
         inferredCycleFamily
     );
     const eventSignals = eventSignalDetails.map((item) => item.tag);
+    const eventSignalSet = new Set(eventSignals);
     const candidates = rankAttributionRules(symbol, companyName, episode, newsItems, peerSync.hasPeerSync);
     const primary = candidates[0]?.rule;
+    const primaryScore = candidates[0]?.score ?? 0;
     if (!primary) {
         return buildStructuredFallbackAttribution(
             symbol,
@@ -7060,7 +7276,14 @@ function chooseHeuristicAttributionReason(
         candidates.find(
             (candidate) =>
                 candidate.rule.id !== primary.id &&
-                ['macro', 'policy', 'geopolitical'].includes(candidate.rule.driver_type)
+                ['macro', 'policy', 'geopolitical'].includes(candidate.rule.driver_type) &&
+                isSupportedBackgroundAttributionCandidate(
+                    candidate,
+                    primaryScore,
+                    eventSignalSet,
+                    peerSync.hasPeerSync,
+                    episode.onset_type
+                )
         )?.rule ??
         (isCryptoMacroEntangled ? fedHikeBackgroundRule : null);
     const suppressBackgroundNarrative =
