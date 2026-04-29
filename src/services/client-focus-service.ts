@@ -3649,7 +3649,7 @@ function ensureMandatoryHeadlineTriggers(
     const next = [...selected];
     const mandatoryHeadlines = [
         ...(headlineSignals.openAiTargetMissTitles.length > 0 ? ['AI财报迎来证伪点'] : []),
-        ...(headlineSignals.uaeOpecExitTitles.length > 0 ? ['OPEC裂缝重定油价'] : []),
+        ...(headlineSignals.uaeOpecExitTitles.length > 0 ? ['阿联酋退出OPEC，油市动荡加剧'] : []),
         ...(headlineSignals.centralBankShockTitles.length > 0 ? ['央行政策超预期'] : []),
         ...(headlineSignals.majorGeopoliticalTitles.length > 0 ? ['地缘风险结构升级'] : []),
         ...headlineSignals.breakingNewsCandidates
@@ -3798,7 +3798,7 @@ async function buildDailyPitchCandidateSection(
             '[CRITICAL][3D] OPEC供给框架出现裂缝',
             `新闻锚点：${headlineSignals.uaeOpecExitTitles[0]}。`,
             '为什么可聊：UAE退出OPEC/OPEC+会把油价逻辑从霍尔木兹封锁的单一地缘风险，升级为OPEC凝聚力、供给纪律和通胀路径的结构性再定价。',
-            '建议标题：OPEC裂缝重定油价',
+            '建议标题：阿联酋退出OPEC，油市动荡加剧',
             '适合客户：能源股、黄金、AT1或长久期债客户'
         ].join('\n'));
     }
@@ -4043,8 +4043,8 @@ async function buildDeterministicDailyPitchTriggers(
         const context = `${marketAnchor}UAE宣布退出OPEC/OPEC+，油价逻辑从霍尔木兹单一封锁升级为供给纪律和OPEC凝聚力再定价，影响通胀预期、黄金、AT1和长久期债。`;
         triggers.push({
             id: triggers.length + 1,
-            headline: 'OPEC裂缝重定油价',
-            hook: 'OPEC裂缝重定油价',
+            headline: '阿联酋退出OPEC，油市动荡加剧',
+            hook: '阿联酋退出OPEC，油市动荡加剧',
             context,
             why_now: context,
             talking_point: '油价今天不能只聊霍尔木兹，UAE退出OPEC让供给纪律也变成变量；您能源、黄金或AT1敞口要不要先按油价高位持续的情景看一遍？',
