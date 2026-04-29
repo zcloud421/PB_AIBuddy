@@ -24,12 +24,14 @@ import {
     getLatestCompletedRun,
     getLatestCompletedScheduledRun,
     getPriceContextBySymbol,
+    getRecentEarningsBySymbol,
     getRecentPriceHistoryBySymbol,
     getRecentDailyBest,
     getRecentDailyBestHistory,
     getRecentDailyRecommendationHistory,
     getRiskFlagsByRunAndSymbol,
     getRiskFlagsByRunId,
+    getUpcomingEarningsBySymbol,
     getUnderlyingBySymbol,
     mapTodayIdeasResponse,
     saveIdeaCandidate,
@@ -4300,6 +4302,10 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             cachedRow.company_name ?? getCompanyName(normalizedSymbol)
         );
         const priceContext = await withSoftTimeout(getPriceContextBySymbol(normalizedSymbol), null, 500);
+        const [upcomingEarnings, recentEarnings] = await Promise.all([
+            withSoftTimeout(getUpcomingEarningsBySymbol(normalizedSymbol).catch(() => null), null, 300),
+            withSoftTimeout(getRecentEarningsBySymbol(normalizedSymbol).catch(() => null), null, 300)
+        ]);
         const shouldUseDbPriceContext =
             priceContext?.data_date !== null &&
             priceContext?.data_date !== undefined &&
@@ -4325,8 +4331,11 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
         const latestExpectedMarketDate = latestUsTradingDate();
         const effectiveDataAsOfDate =
             (shouldUseDbPriceContext ? priceContext?.data_date ?? latestExpectedMarketDate : latestExpectedMarketDate);
-        const effectiveDaysToEarnings = priceContext?.days_to_earnings ?? cachedRow.days_to_earnings ?? null;
-        const effectiveDaysSinceEarnings = priceContext?.days_since_earnings ?? null;
+        const effectiveDaysToEarnings =
+            upcomingEarnings?.days_until ?? priceContext?.days_to_earnings ?? cachedRow.days_to_earnings ?? null;
+        const effectiveEarningsDate =
+            upcomingEarnings?.report_date ?? priceContext?.earnings_date ?? cachedRow.earnings_date ?? null;
+        const effectiveDaysSinceEarnings = recentEarnings?.days_since ?? priceContext?.days_since_earnings ?? null;
         const cachedHasStalePreEarningsFlag =
             cachedFlags.some((flag) => flag.type === 'EARNINGS_PROXIMITY') &&
             (effectiveDaysToEarnings === null || effectiveDaysToEarnings < 0);
@@ -4378,8 +4387,23 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
 
         const activeFocusStatuses = await getActiveMacroFocusStatuses();
         const macroSensitivityFlag = buildMacroSensitivityFlag(underlying, activeFocusStatuses);
+        const earningsProximityFlag =
+            effectiveDaysToEarnings !== null &&
+            effectiveDaysToEarnings >= 0 &&
+            effectiveDaysToEarnings <= 3 &&
+            !cachedFlags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')
+                ? {
+                      type: 'EARNINGS_PROXIMITY' as const,
+                      severity: 'WARN' as const,
+                      message:
+                          effectiveDaysToEarnings === 0
+                              ? 'Earnings are due today, near-term event risk blocks FCN setup'
+                              : `Earnings are due in ${effectiveDaysToEarnings} day(s), near-term event risk blocks FCN setup`
+                  }
+                : null;
         const additiveFlags = [
             ...(macroSensitivityFlag ? [macroSensitivityFlag] : []),
+            ...(earningsProximityFlag ? [earningsProximityFlag] : []),
             ...(postEarningsShockFlag ? [postEarningsShockFlag] : [])
         ];
         const effectiveFlags = additiveFlags.length > 0
@@ -4455,7 +4479,7 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
                 ma200: effectiveMa200,
                 pct_from_52w_high: effectivePctFrom52wHigh,
                 selected_implied_volatility: effectiveIv,
-                earnings_date: priceContext?.earnings_date ?? cachedRow.earnings_date,
+                earnings_date: effectiveEarningsDate,
                 days_to_earnings: effectiveDaysToEarnings,
                 days_since_earnings: inferredDaysSinceEarnings,
                 extended_move_pct: extendedTradeContext?.movePct ?? null,
@@ -4469,7 +4493,7 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
                 pct_from_52w_high: effectivePctFrom52wHigh,
                 implied_volatility: effectiveIv,
                 data_date: effectiveDataAsOfDate,
-                earnings_date: priceContext?.earnings_date ?? cachedRow.earnings_date ?? null,
+                earnings_date: effectiveEarningsDate,
                 days_to_earnings: effectiveDaysToEarnings,
                 days_since_earnings: inferredDaysSinceEarnings,
                 earnings_phase: deriveEarningsPhase(effectiveDaysToEarnings, inferredDaysSinceEarnings),
@@ -5756,15 +5780,15 @@ function deriveWaitReason(
     grade: 'GO' | 'CAUTION' | 'AVOID',
     flags: Flag[]
 ): 'WAIT_EARNINGS_RISK' | 'WAIT_POST_EARNINGS_SHOCK' | 'WAIT_SETUP_RESET' | null {
+    if (flags.some((flag) => flag.type === 'POST_EARNINGS_SHOCK')) {
+        return 'WAIT_POST_EARNINGS_SHOCK';
+    }
+
+    if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
+        return 'WAIT_EARNINGS_RISK';
+    }
+
     if (grade === 'AVOID') {
-        if (flags.some((flag) => flag.type === 'POST_EARNINGS_SHOCK')) {
-            return 'WAIT_POST_EARNINGS_SHOCK';
-        }
-
-        if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
-            return 'WAIT_EARNINGS_RISK';
-        }
-
         if (
             flags.some((flag) =>
                 flag.type === 'ASSIGNMENT_QUALITY_CAP' ||
@@ -5783,14 +5807,6 @@ function deriveWaitReason(
     }
 
     if (grade === 'CAUTION') {
-        if (flags.some((flag) => flag.type === 'POST_EARNINGS_SHOCK')) {
-            return 'WAIT_POST_EARNINGS_SHOCK';
-        }
-
-        if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
-            return 'WAIT_EARNINGS_RISK';
-        }
-
         if (flags.some((flag) => flag.type === 'OVEREXTENDED_UPTREND')) {
             return 'WAIT_SETUP_RESET';
         }

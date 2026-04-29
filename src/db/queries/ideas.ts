@@ -41,6 +41,72 @@ export interface PriceContextRow {
     days_since_earnings: number | null;
 }
 
+const EARNINGS_SYMBOL_ALIASES: Record<string, string[]> = {
+    GOOG: ['GOOG', 'GOOGL'],
+    GOOGL: ['GOOGL', 'GOOG']
+};
+
+const MANUAL_EARNINGS_DATE_OVERRIDES: Record<string, string> = {
+    AMZN: '2026-04-29',
+    GOOG: '2026-04-29',
+    GOOGL: '2026-04-29',
+    META: '2026-04-29',
+    MSFT: '2026-04-29'
+};
+
+function currentIsoDate(): string {
+    return new Date().toISOString().slice(0, 10);
+}
+
+function daysBetweenIsoDates(fromDate: string, toDate: string): number {
+    const from = Date.parse(`${fromDate}T00:00:00Z`);
+    const to = Date.parse(`${toDate}T00:00:00Z`);
+    return Math.round((to - from) / (24 * 60 * 60 * 1000));
+}
+
+function earningsLookupSymbols(symbol: string): string[] {
+    const normalized = symbol.toUpperCase();
+    return EARNINGS_SYMBOL_ALIASES[normalized] ?? [normalized];
+}
+
+function manualUpcomingEarnings(symbol: string): EarningsCalendarRow | null {
+    const normalized = symbol.toUpperCase();
+    const reportDate = MANUAL_EARNINGS_DATE_OVERRIDES[normalized];
+    if (!reportDate) {
+        return null;
+    }
+
+    const daysUntil = daysBetweenIsoDates(currentIsoDate(), reportDate);
+    if (daysUntil < 0) {
+        return null;
+    }
+
+    return {
+        symbol: normalized,
+        report_date: reportDate,
+        days_until: daysUntil
+    };
+}
+
+function manualRecentEarnings(symbol: string): RecentEarningsCalendarRow | null {
+    const normalized = symbol.toUpperCase();
+    const reportDate = MANUAL_EARNINGS_DATE_OVERRIDES[normalized];
+    if (!reportDate) {
+        return null;
+    }
+
+    const daysSince = daysBetweenIsoDates(reportDate, currentIsoDate());
+    if (daysSince < 0 || daysSince > 14) {
+        return null;
+    }
+
+    return {
+        symbol: normalized,
+        report_date: reportDate,
+        days_since: daysSince
+    };
+}
+
 export interface PriceHistoryPointRow {
     date: string;
     close: number;
@@ -275,17 +341,24 @@ export async function getUpcomingEarningsBySymbol(symbol: string): Promise<Earni
         SELECT
             symbol,
             report_date::text AS report_date,
-            days_until
+            (report_date - CURRENT_DATE)::int AS days_until
         FROM earnings_calendar
-        WHERE symbol = $1
+        WHERE symbol = ANY($1::text[])
           AND report_date >= CURRENT_DATE
         ORDER BY report_date ASC
         LIMIT 1
         `,
-        [symbol]
+        [earningsLookupSymbols(symbol)]
     );
 
-    return result.rows[0] ?? null;
+    const dbRow = result.rows[0] ?? null;
+    const manualRow = manualUpcomingEarnings(symbol);
+
+    if (manualRow && (!dbRow || manualRow.report_date <= dbRow.report_date)) {
+        return manualRow;
+    }
+
+    return dbRow;
 }
 
 export async function getRecentEarningsBySymbol(symbol: string): Promise<RecentEarningsCalendarRow | null> {
@@ -296,15 +369,22 @@ export async function getRecentEarningsBySymbol(symbol: string): Promise<RecentE
             report_date::text AS report_date,
             (CURRENT_DATE - report_date)::int AS days_since
         FROM earnings_calendar
-        WHERE symbol = $1
+        WHERE symbol = ANY($1::text[])
           AND report_date BETWEEN (CURRENT_DATE - INTERVAL '14 days') AND CURRENT_DATE
         ORDER BY report_date DESC
         LIMIT 1
         `,
-        [symbol]
+        [earningsLookupSymbols(symbol)]
     );
 
-    return result.rows[0] ?? null;
+    const dbRow = result.rows[0] ?? null;
+    const manualRow = manualRecentEarnings(symbol);
+
+    if (manualRow && (!dbRow || manualRow.report_date >= dbRow.report_date)) {
+        return manualRow;
+    }
+
+    return dbRow;
 }
 
 export interface UpcomingEarningsRow {
@@ -319,7 +399,7 @@ export async function getUpcomingEarningsNextNDays(days: number): Promise<Upcomi
         SELECT
             symbol,
             report_date::text AS report_date,
-            days_until
+            (report_date - CURRENT_DATE)::int AS days_until
         FROM earnings_calendar
         WHERE report_date >= CURRENT_DATE
           AND report_date <= CURRENT_DATE + $1::integer
@@ -328,7 +408,26 @@ export async function getUpcomingEarningsNextNDays(days: number): Promise<Upcomi
         [days]
     );
 
-    return result.rows;
+    const rowsBySymbol = new Map(result.rows.map((row) => [row.symbol, row]));
+    for (const symbol of Object.keys(MANUAL_EARNINGS_DATE_OVERRIDES)) {
+        const manualRow = manualUpcomingEarnings(symbol);
+        if (manualRow && manualRow.days_until !== null && manualRow.days_until <= days) {
+            const existing = rowsBySymbol.get(symbol);
+            if (!existing || manualRow.report_date <= existing.report_date) {
+                rowsBySymbol.set(symbol, {
+                    symbol: manualRow.symbol,
+                    report_date: manualRow.report_date,
+                    days_until: manualRow.days_until
+                });
+            }
+        }
+    }
+
+    return [...rowsBySymbol.values()].sort((a, b) =>
+        a.report_date === b.report_date
+            ? a.symbol.localeCompare(b.symbol)
+            : a.report_date.localeCompare(b.report_date)
+    );
 }
 
 export async function getIdeasByRunId(runId: string): Promise<TodayIdeaRow[]> {
@@ -1570,15 +1669,15 @@ function deriveWaitReason(
     grade: 'GO' | 'CAUTION' | 'AVOID',
     flags: Flag[]
 ): 'WAIT_EARNINGS_RISK' | 'WAIT_POST_EARNINGS_SHOCK' | 'WAIT_SETUP_RESET' | null {
+    if (flags.some((flag) => flag.type === 'POST_EARNINGS_SHOCK')) {
+        return 'WAIT_POST_EARNINGS_SHOCK';
+    }
+
+    if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
+        return 'WAIT_EARNINGS_RISK';
+    }
+
     if (grade === 'AVOID') {
-        if (flags.some((flag) => flag.type === 'POST_EARNINGS_SHOCK')) {
-            return 'WAIT_POST_EARNINGS_SHOCK';
-        }
-
-        if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
-            return 'WAIT_EARNINGS_RISK';
-        }
-
         if (
             flags.some((flag) =>
                 flag.type === 'ASSIGNMENT_QUALITY_CAP' ||
@@ -1597,14 +1696,6 @@ function deriveWaitReason(
     }
 
     if (grade === 'CAUTION') {
-        if (flags.some((flag) => flag.type === 'POST_EARNINGS_SHOCK')) {
-            return 'WAIT_POST_EARNINGS_SHOCK';
-        }
-
-        if (flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')) {
-            return 'WAIT_EARNINGS_RISK';
-        }
-
         if (flags.some((flag) => flag.type === 'OVEREXTENDED_UPTREND')) {
             return 'WAIT_SETUP_RESET';
         }
