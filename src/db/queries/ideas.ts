@@ -1656,12 +1656,12 @@ export function mapTodayIdeasResponse(
                 tier: idea.tier,
                 grade: 'GO',
                 composite_score: Number(idea.composite_score),
-                recommended_strike: parseNumeric(idea.recommended_strike) ?? 0,
-                recommended_tenor_days: parseNumeric(idea.recommended_tenor_days) ?? 0,
+                recommended_strike: parseNumeric(idea.recommended_strike),
+                recommended_tenor_days: parseNumeric(idea.recommended_tenor_days),
                 recommended_expiry_date: idea.expiry_date ?? null,
                 estimated_coupon_range: formatEstimatedCouponRange(idea.ref_coupon_pct),
                 coupon_note: '实际票息请向交易台询价',
-                moneyness_pct: parseNumeric(idea.moneyness_pct) ?? 0,
+                moneyness_pct: parseNumeric(idea.moneyness_pct),
                 reasoning_text: idea.reasoning_text,
                 narrative: idea.why_now
                     ? {
@@ -1698,12 +1698,12 @@ export function mapTodayIdeasResponse(
                 tier: idea.tier,
                 grade: 'CAUTION',
                 composite_score: Number(idea.composite_score),
-                recommended_strike: parseNumeric(idea.recommended_strike) ?? 0,
-                recommended_tenor_days: parseNumeric(idea.recommended_tenor_days) ?? 0,
+                recommended_strike: parseNumeric(idea.recommended_strike),
+                recommended_tenor_days: parseNumeric(idea.recommended_tenor_days),
                 recommended_expiry_date: idea.expiry_date ?? null,
                 estimated_coupon_range: formatEstimatedCouponRange(idea.ref_coupon_pct),
                 coupon_note: '实际票息请向交易台询价',
-                moneyness_pct: parseNumeric(idea.moneyness_pct) ?? 0,
+                moneyness_pct: parseNumeric(idea.moneyness_pct),
                 reasoning_text: idea.reasoning_text,
                 narrative: idea.why_now
                     ? {

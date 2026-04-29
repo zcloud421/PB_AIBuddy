@@ -57,12 +57,12 @@ export interface IdeaCard {
     tier: number;
     grade: Extract<Grade, 'GO' | 'CAUTION'>;
     composite_score: number;
-    recommended_strike: number;
-    recommended_tenor_days: number;
+    recommended_strike: number | null;
+    recommended_tenor_days: number | null;
     recommended_expiry_date: string | null;
     estimated_coupon_range: string | null;
     coupon_note: string;
-    moneyness_pct: number;
+    moneyness_pct: number | null;
     reasoning_text: string;
     narrative: NarrativeOutput | null;
     news_items: NewsItem[];

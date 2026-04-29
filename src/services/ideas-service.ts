@@ -4395,6 +4395,17 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
                       key_events: cachedRow.key_events ?? []
                   }, newsItems, normalizedSymbol, cachedRow.company_name ?? getCompanyName(normalizedSymbol))
                 : null;
+        narrative = normalizeEarningsWaitNarrative({
+            narrative,
+            symbol: normalizedSymbol,
+            companyName: cachedRow.company_name ?? getCompanyName(normalizedSymbol),
+            flags: effectiveFlags,
+            daysToEarnings: effectiveDaysToEarnings,
+            recommendedStrike: toNullableNumber(cachedRow.recommended_strike),
+            estimatedCouponRange: formatEstimatedCouponRange(cachedRow.ref_coupon_pct),
+            tenorDays: cachedRow.recommended_tenor_days,
+            sentimentScore: toNullableNumber(cachedRow.sentiment_score)
+        });
 
         if (
             narrative &&
@@ -5792,6 +5803,52 @@ function hasActionableCaution(flags: Flag[]): boolean {
     return flags.some((flag) => flag.type === 'ACTIONABLE_CAUTION' || flag.type === 'QUALITY_DIP_EXCEPTION');
 }
 
+function hasEarningsWaitContext(flags: Flag[], daysToEarnings: number | null): boolean {
+    return (
+        flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY') ||
+        (daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3)
+    );
+}
+
+function buildEarningsWaitNarrative(
+    symbol: string,
+    companyName: string | null | undefined,
+    sentimentScore: number | null,
+    existingNarrative: NarrativeOutput | null
+): NarrativeOutput {
+    const displayName = companyName || symbol;
+    return {
+        why_now: `${displayName} 即将发布财报，当前处于财报窗口期。系统暂不提供参考执行价和票息区间，等待财报落地、正股和期权链重新定价后再评估。`,
+        risk_note: '财报前后跳空风险和隐波重定价风险较高，当前不建议新建FCN仓位。',
+        sentiment_score: sentimentScore ?? existingNarrative?.sentiment_score ?? 0.4,
+        key_events: existingNarrative?.key_events ?? []
+    };
+}
+
+function normalizeEarningsWaitNarrative(input: {
+    narrative: NarrativeOutput | null;
+    symbol: string;
+    companyName?: string | null;
+    flags: Flag[];
+    daysToEarnings: number | null;
+    recommendedStrike: number | null;
+    estimatedCouponRange: string | null;
+    tenorDays: number | null;
+    sentimentScore: number | null;
+}): NarrativeOutput | null {
+    if (!hasEarningsWaitContext(input.flags, input.daysToEarnings)) {
+        return input.narrative;
+    }
+
+    // 财报窗口期不展示参考询价话术，避免旧缓存把执行价/票息写进 WAIT 场景。
+    return buildEarningsWaitNarrative(
+        input.symbol,
+        input.companyName,
+        input.sentimentScore,
+        input.narrative
+    );
+}
+
 function mergeUniqueFlags(...flagGroups: Flag[][]): Flag[] {
     const byType = new Map<Flag['type'], Flag>();
 
@@ -5914,9 +5971,15 @@ async function buildNarrative(input: {
 }): Promise<NarrativeOutput | null> {
     if (
         input.recommendedStrike === null ||
+        input.recommendedStrike <= 0 ||
         input.estimatedCouponRange === null ||
-        input.tenorDays === null
+        input.tenorDays === null ||
+        input.tenorDays <= 0
     ) {
+        if (hasEarningsWaitContext(input.flags, input.daysToEarnings)) {
+            return buildEarningsWaitNarrative(input.symbol, input.companyName, null, null);
+        }
+
         return null;
     }
 
