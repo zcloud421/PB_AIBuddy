@@ -141,6 +141,7 @@ export interface ThemeBasketItem {
     id: string;
     label: string;
     labelEn: string;
+    symbols: string[];
     war_perf: number;
     ceasefire_perf: number;
     ytd_perf: number;
@@ -301,6 +302,7 @@ export interface ClientFocusMarketSnapshotItem {
 
 export interface ClientFocusMarketSnapshot {
     summary: string;
+    updated_at: string;
     indices: ClientFocusMarketSnapshotItem[];
 }
 
