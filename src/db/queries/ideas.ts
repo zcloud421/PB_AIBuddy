@@ -336,6 +336,11 @@ export async function getUnderlyingBySymbol(symbol: string): Promise<UnderlyingR
 }
 
 export async function getUpcomingEarningsBySymbol(symbol: string): Promise<EarningsCalendarRow | null> {
+    const manualRow = manualUpcomingEarnings(symbol);
+    if (manualRow) {
+        return manualRow;
+    }
+
     const result = await pool.query<EarningsCalendarRow>(
         `
         SELECT
@@ -351,17 +356,15 @@ export async function getUpcomingEarningsBySymbol(symbol: string): Promise<Earni
         [earningsLookupSymbols(symbol)]
     );
 
-    const dbRow = result.rows[0] ?? null;
-    const manualRow = manualUpcomingEarnings(symbol);
-
-    if (manualRow && (!dbRow || manualRow.report_date <= dbRow.report_date)) {
-        return manualRow;
-    }
-
-    return dbRow;
+    return result.rows[0] ?? null;
 }
 
 export async function getRecentEarningsBySymbol(symbol: string): Promise<RecentEarningsCalendarRow | null> {
+    const manualRow = manualRecentEarnings(symbol);
+    if (manualRow) {
+        return manualRow;
+    }
+
     const result = await pool.query<RecentEarningsCalendarRow>(
         `
         SELECT
@@ -377,14 +380,7 @@ export async function getRecentEarningsBySymbol(symbol: string): Promise<RecentE
         [earningsLookupSymbols(symbol)]
     );
 
-    const dbRow = result.rows[0] ?? null;
-    const manualRow = manualRecentEarnings(symbol);
-
-    if (manualRow && (!dbRow || manualRow.report_date >= dbRow.report_date)) {
-        return manualRow;
-    }
-
-    return dbRow;
+    return result.rows[0] ?? null;
 }
 
 export interface UpcomingEarningsRow {
