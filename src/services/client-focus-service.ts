@@ -129,6 +129,13 @@ interface FocusTransmissionModelOutput {
     };
 }
 
+interface DailyPitchHeadlineSignals {
+    openAiTargetMissTitles: string[];
+    uaeOpecExitTitles: string[];
+    centralBankShockTitles: string[];
+    majorGeopoliticalTitles: string[];
+}
+
 const ALLOWED_FOCUS_STATUS = ['关注升温', '持续发酵', '压力上升', '风险溢价抬升', '供应扰动交易中', '风险溢价回吐中', '避险扩散确认中'] as const;
 const ALLOWED_UPDATE_IMPACTS = ['风险抬升', '信用事件', '政策变化', '持续发酵'] as const;
 const PREFERRED_WEEKLY_SOURCES = ['Bloomberg', 'Reuters', 'FT', 'CNBC', 'WSJ', 'Financial Times'] as const;
@@ -141,6 +148,13 @@ const BLOCKED_WEEKLY_SOURCE_PATTERNS = [
     'substack',
     'medium'
 ] as const;
+
+const EMPTY_DAILY_PITCH_HEADLINE_SIGNALS: DailyPitchHeadlineSignals = {
+    openAiTargetMissTitles: [],
+    uaeOpecExitTitles: [],
+    centralBankShockTitles: [],
+    majorGeopoliticalTitles: [],
+};
 
 const MIDDLE_EAST_ZH_NEWS_QUERIES = [
     '伊朗 通过中间人 向美国 传达 三阶段 谈判方案 霍尔木兹',
@@ -164,7 +178,8 @@ const FOCUS_TOPICS: FocusTopicConfig[] = [
             'Iran Hormuz oil shipping',
             'Iran ceasefire talks diplomacy',
             'Strait of Hormuz shipping oil disruption',
-            'Iran US talks Pakistan envoy canceled'
+            'Iran US talks Pakistan envoy canceled',
+            'UAE exit OPEC OPEC+ May 1 oil supply'
         ],
         fallbackStatus: '持续发酵',
         clientQuestions: [
@@ -328,6 +343,7 @@ const dailyNarrativeCache = {
 };
 let dailyNarrativeRefreshPromise: Promise<DailyMarketNarrative | null> | null = null;
 let previousRankedSlugs: string[] = [];
+let previousDailyPitchTriggers: DailyPitchTrigger[] = [];
 let narrativeHistory: Array<{ date: string; primary_slug: string }> = [];
 const DAILY_NARRATIVE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
@@ -574,6 +590,10 @@ async function fetchFocusNewsItems(topic: FocusTopicConfig): Promise<NewsItem[]>
                   {
                       query: 'Iran ceasefire negotiations deal diplomacy',
                       categories: ['politics', 'world']
+                  },
+                  {
+                      query: 'UAE exit OPEC OPEC+ May 1 oil supply',
+                      categories: ['business', 'world']
                   }
               ].map(({ query, categories }) =>
                   fetchNewsItemsFromNewsData(query, {
@@ -706,6 +726,11 @@ function isUsefulMiddleEastNewsTitle(title: string): boolean {
         'white house',
         'trump',
         'saudi',
+        'uae',
+        'united arab emirates',
+        'emirates',
+        'opec',
+        'opec+',
         'pakistan',
         'egypt',
         'turkey'
@@ -738,7 +763,12 @@ function isUsefulMiddleEastNewsTitle(title: string): boolean {
         '战争',
         '戰爭',
         '油价',
-        '油價'
+        '油價',
+        '阿联酋',
+        '阿聯酋',
+        '欧佩克',
+        '歐佩克',
+        'OPEC'
     ];
 
     return usefulSignals.some((signal) => normalized.includes(signal))
@@ -3338,20 +3368,19 @@ function formatPitchCandidateChange(item: ClientFocusMarketStateResponse['indice
         item.latest !== null && item.latest !== undefined
             ? `${item.latest.toFixed(item.code === 'TNX' ? 2 : ['USDCNH', 'USDJPY', 'USDCHF', 'DXY'].includes(item.code) ? 4 : 2)}`
             : 'NA';
-    const oneDay =
-        item.change_pct !== null && item.change_pct !== undefined && !Number.isNaN(item.change_pct)
-            ? `${item.change_pct >= 0 ? '+' : ''}${item.change_pct.toFixed(item.code === 'TNX' ? 1 : 2)}${item.code === 'TNX' ? 'bps' : '%'}`
-            : 'NA';
-    const fiveDay =
-        item.change_5d_pct !== null && item.change_5d_pct !== undefined && !Number.isNaN(item.change_5d_pct)
-            ? `${item.change_5d_pct >= 0 ? '+' : ''}${item.change_5d_pct.toFixed(item.code === 'TNX' ? 1 : 2)}${item.code === 'TNX' ? 'bps' : '%'}`
-            : 'NA';
-    const ytd =
-        item.change_ytd_pct !== null && item.change_ytd_pct !== undefined && !Number.isNaN(item.change_ytd_pct)
-            ? `${item.change_ytd_pct >= 0 ? '+' : ''}${item.change_ytd_pct.toFixed(item.code === 'TNX' ? 1 : 2)}${item.code === 'TNX' ? 'bps' : '%'}`
-            : 'NA';
+    const parts = [`${item.name} ${latest}`];
+    if (item.change_pct !== null && item.change_pct !== undefined && !Number.isNaN(item.change_pct)) {
+        parts.push(`1日${item.change_pct >= 0 ? '+' : ''}${item.change_pct.toFixed(item.code === 'TNX' ? 1 : 2)}${item.code === 'TNX' ? 'bps' : '%'}`);
+    }
+    if (item.change_5d_pct !== null && item.change_5d_pct !== undefined && !Number.isNaN(item.change_5d_pct)) {
+        parts.push(`5日${item.change_5d_pct >= 0 ? '+' : ''}${item.change_5d_pct.toFixed(item.code === 'TNX' ? 1 : 2)}${item.code === 'TNX' ? 'bps' : '%'}`);
+    }
+    const omitYtdForRollingFutures = ['OIL', 'BRENT', 'NATGAS'].includes(item.code);
+    if (!omitYtdForRollingFutures && item.change_ytd_pct !== null && item.change_ytd_pct !== undefined && !Number.isNaN(item.change_ytd_pct)) {
+        parts.push(`YTD${item.change_ytd_pct >= 0 ? '+' : ''}${item.change_ytd_pct.toFixed(item.code === 'TNX' ? 1 : 2)}${item.code === 'TNX' ? 'bps' : '%'}`);
+    }
 
-    return `${item.name} ${latest}，1日${oneDay}，5日${fiveDay}，YTD${ytd}`;
+    return parts.join('，');
 }
 
 async function buildEarningsCalendarSection(): Promise<string> {
@@ -3387,8 +3416,145 @@ async function buildEarningsCalendarSection(): Promise<string> {
     }
 }
 
+function isOpenAiTargetMissHeadline(title: string): boolean {
+    const normalized = title.toLowerCase();
+    return normalized.includes('openai')
+        && /(miss|missed|misses|target|revenue|sales|user|compute|oracle|coreweave)/i.test(normalized);
+}
+
+function isUaeOpecExitHeadline(title: string): boolean {
+    const normalized = title.toLowerCase();
+    return /(uae|united arab emirates|emirates|阿联酋|阿聯酋)/i.test(title)
+        && /(opec|opec\+|欧佩克|歐佩克)/i.test(title)
+        && /(exit|quit|leave|withdraw|withdraws|leaves|quits|退出|離開|离开)/i.test(normalized);
+}
+
+function isCentralBankShockHeadline(title: string): boolean {
+    const normalized = title.toLowerCase();
+    const hasCentralBank = /(boj|bank of japan|日銀|日银|fed |federal reserve|ecb|european central bank|pboc|中国人民银行|rba|bank of england|boe)/i.test(title);
+    const hasShock = /(unexpected|surprise|emergency|cut|hike|pause|halt|intervene|intervention|pivot|意外|緊急|紧急|降息|加息|暂停|干预|转向)/i.test(normalized);
+    return hasCentralBank && hasShock;
+}
+
+function isMajorGeopoliticalHeadline(title: string): boolean {
+    const normalized = title.toLowerCase();
+    const hasGeopolitical = /(taiwan|strait|blockade|invasion|escalat|sanction|tariff|trade war|chip ban|export control|臺灣|台湾|封鎖|封锁|制裁|关税|贸易战|出口管制|芯片)/i.test(title);
+    const hasImpact = /(market|stock|risk|surge|plunge|soar|crash|halt|suspend|跌|涨|暴跌|暴涨|停牌|风险|冲击)/i.test(normalized);
+    return hasGeopolitical && hasImpact;
+}
+
+function compactHeadlineList(items: NewsItem[], predicate: (title: string) => boolean): string[] {
+    const seen = new Set<string>();
+    return items
+        .filter((item) => predicate(item.title))
+        .map((item) => cleanDailyNarrativeSentence(item.title).slice(0, 110))
+        .filter((title) => {
+            const key = title.toLowerCase();
+            if (!key || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        })
+        .slice(0, 3);
+}
+
+async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSignals> {
+    const [openAiResults, uaeResults, centralBankResults, geopoliticalResults] = await Promise.allSettled([
+        fetchNewsItemsByQuery('OpenAI missed revenue user targets Oracle CoreWeave AI stocks WSJ', {
+            excludeEtfAndFunds: false
+        }),
+        fetchNewsItemsByQuery('UAE exit OPEC OPEC+ May 1 oil supply Brent', {
+            excludeEtfAndFunds: false
+        }),
+        fetchNewsItemsByQuery('central bank BOJ Fed ECB surprise rate cut hike emergency intervention pivot', {
+            excludeEtfAndFunds: false
+        }),
+        fetchNewsItemsByQuery('geopolitical Taiwan sanctions tariff trade war chip ban export control market impact', {
+            excludeEtfAndFunds: false
+        })
+    ]);
+
+    const openAiItems = openAiResults.status === 'fulfilled' ? openAiResults.value : [];
+    const uaeItems = uaeResults.status === 'fulfilled' ? uaeResults.value : [];
+    const centralBankItems = centralBankResults.status === 'fulfilled' ? centralBankResults.value : [];
+    const geopoliticalItems = geopoliticalResults.status === 'fulfilled' ? geopoliticalResults.value : [];
+
+    return {
+        openAiTargetMissTitles: compactHeadlineList(openAiItems, isOpenAiTargetMissHeadline),
+        uaeOpecExitTitles: compactHeadlineList(uaeItems, isUaeOpecExitHeadline),
+        centralBankShockTitles: compactHeadlineList(centralBankItems, isCentralBankShockHeadline),
+        majorGeopoliticalTitles: compactHeadlineList(geopoliticalItems, isMajorGeopoliticalHeadline),
+    };
+}
+
+function mergeDailyPitchHeadlineSignalsFromTopics(
+    headlineSignals: DailyPitchHeadlineSignals,
+    topics: NarrativeTopicPromptContext[]
+): DailyPitchHeadlineSignals {
+    const titles = topics.flatMap((topic) => topic.latest_updates.map((update) => update.title));
+    return {
+        openAiTargetMissTitles: [
+            ...headlineSignals.openAiTargetMissTitles,
+            ...titles.filter(isOpenAiTargetMissHeadline)
+        ].slice(0, 3),
+        uaeOpecExitTitles: [
+            ...headlineSignals.uaeOpecExitTitles,
+            ...titles.filter(isUaeOpecExitHeadline)
+        ].slice(0, 3),
+        centralBankShockTitles: [
+            ...headlineSignals.centralBankShockTitles,
+            ...titles.filter(isCentralBankShockHeadline)
+        ].slice(0, 3),
+        majorGeopoliticalTitles: [
+            ...headlineSignals.majorGeopoliticalTitles,
+            ...titles.filter(isMajorGeopoliticalHeadline)
+        ].slice(0, 3)
+    };
+}
+
+function ensureMandatoryHeadlineTriggers(
+    selected: NonNullable<DailyMarketNarrative['daily_pitch_triggers']>,
+    candidates: NonNullable<DailyMarketNarrative['daily_pitch_triggers']>,
+    headlineSignals: DailyPitchHeadlineSignals
+): NonNullable<DailyMarketNarrative['daily_pitch_triggers']> {
+    const next = [...selected];
+    const mandatoryHeadlines = [
+        ...(headlineSignals.openAiTargetMissTitles.length > 0 ? ['AI财报迎来证伪点'] : []),
+        ...(headlineSignals.uaeOpecExitTitles.length > 0 ? ['OPEC裂缝重定油价'] : []),
+        ...(headlineSignals.centralBankShockTitles.length > 0 ? ['央行政策超预期'] : []),
+        ...(headlineSignals.majorGeopoliticalTitles.length > 0 ? ['地缘风险结构升级'] : []),
+    ];
+
+    for (const headline of mandatoryHeadlines) {
+        if (next.some((item) => item.headline === headline || item.hook === headline)) {
+            continue;
+        }
+
+        const candidate = candidates.find((item) => item.headline === headline || item.hook === headline);
+        if (!candidate) {
+            continue;
+        }
+
+        if (next.length < 3) {
+            next.push(candidate);
+            continue;
+        }
+
+        let replaceIndex = 0;
+        for (let index = next.length - 1; index >= 0; index -= 1) {
+            if (!mandatoryHeadlines.includes(next[index].headline ?? next[index].hook ?? '')) {
+                replaceIndex = index;
+                break;
+            }
+        }
+        next[replaceIndex] = candidate;
+    }
+
+    return dedupePitchTriggers(next).slice(0, 3).map((item, index) => ({ ...item, id: index + 1 }));
+}
+
 async function buildDailyPitchCandidateSection(
-    marketSnapshot: ClientFocusMarketStateResponse | null
+    marketSnapshot: ClientFocusMarketStateResponse | null,
+    headlineSignals: DailyPitchHeadlineSignals = EMPTY_DAILY_PITCH_HEADLINE_SIGNALS
 ): Promise<string> {
     const candidates: string[] = [];
     const indices = marketSnapshot?.indices ?? [];
@@ -3432,6 +3598,16 @@ async function buildDailyPitchCandidateSection(
         // Earnings are additive pitch context. Keep narrative generation resilient.
     }
 
+    if (headlineSignals.openAiTargetMissTitles.length > 0) {
+        candidates.push([
+            '[CRITICAL][3C/3E] AI capex叙事进入证伪窗口',
+            `新闻锚点：${headlineSignals.openAiTargetMissTitles[0]}。`,
+            '为什么可聊：OpenAI用户/收入目标争议直接冲击ORCL、CoreWeave、NVDA等AI算力链，今晚Mag7财报的焦点应从“增长多少”升级为“能否证实AI capex回报”。',
+            '建议标题：AI财报迎来证伪点',
+            '适合客户：美股科技仓位客户、AI/半导体FCN客户'
+        ].join('\n'));
+    }
+
     const sox = byCode.get('SOX');
     const hasSoxPitchSignal = Boolean(
         sox
@@ -3449,11 +3625,15 @@ async function buildDailyPitchCandidateSection(
             sox.streak_direction && sox.streak_days
                 ? `，连续${sox.streak_days}${sox.streak_direction === 'up' ? '日上涨' : '日下跌'}`
                 : '';
+        const soxHeadline =
+            sox.streak_direction === 'up' && typeof sox.streak_days === 'number' && sox.streak_days >= 3
+                ? 'SOX连涨进入极值'
+                : 'SOX高位进入验证';
         candidates.push([
             '[HIGH][3A] 半导体指数进入极端区间',
             `数据锚点：${formatPitchCandidateChange(sox)}${streakText}。`,
             '为什么可聊：半导体是AI仓位、科技FCN和高Beta美股风险偏好的共同锚；连续上涨或高位偏离更适合聊仓位拥挤、保护和财报兑现，而不是泛泛说科技反弹。',
-            '建议标题：SOX连涨进入极值',
+            `建议标题：${soxHeadline}`,
             '适合客户：AI/半导体仓位客户、科技FCN客户'
         ].join('\n'));
     }
@@ -3480,6 +3660,34 @@ async function buildDailyPitchCandidateSection(
     }
 
     const oil = byCode.get('BRENT') ?? byCode.get('OIL');
+    if (headlineSignals.uaeOpecExitTitles.length > 0) {
+        candidates.push([
+            '[CRITICAL][3D] OPEC供给框架出现裂缝',
+            `新闻锚点：${headlineSignals.uaeOpecExitTitles[0]}。`,
+            '为什么可聊：UAE退出OPEC/OPEC+会把油价逻辑从霍尔木兹封锁的单一地缘风险，升级为OPEC凝聚力、供给纪律和通胀路径的结构性再定价。',
+            '建议标题：OPEC裂缝重定油价',
+            '适合客户：能源股、黄金、AT1或长久期债客户'
+        ].join('\n'));
+    }
+    if (headlineSignals.centralBankShockTitles.length > 0) {
+        candidates.push([
+            '[CRITICAL][3C/3E] 央行意外政策冲击',
+            `新闻锚点：${headlineSignals.centralBankShockTitles[0]}。`,
+            '为什么可聊：央行意外政策变化直接影响利率路径、汇率走势和久期资产定价；持有AT1、长久期债券或外币资产的客户需要重新校准利率与汇率风险敞口。',
+            '建议标题：央行政策超预期',
+            '适合客户：持有AT1、长久期债或外币资产客户'
+        ].join('\n'));
+    }
+
+    if (headlineSignals.majorGeopoliticalTitles.length > 0) {
+        candidates.push([
+            '[CRITICAL][3D/3E] 地缘结构性风险升级',
+            `新闻锚点：${headlineSignals.majorGeopoliticalTitles[0]}。`,
+            '为什么可聊：结构性地缘事件（台海、制裁、芯片管制）会通过贸易链、供应链和风险溢价同时冲击多类资产；RM需要为客户梳理第一和第二阶传导路径，而不是只讲市场涨跌。',
+            '建议标题：地缘风险结构升级',
+            '适合客户：科技仓位、中资资产或跨境资产客户'
+        ].join('\n'));
+    }
     if (
         oil
         && (
@@ -3578,7 +3786,8 @@ async function buildDailyPitchCandidateSection(
 }
 
 async function buildDeterministicDailyPitchTriggers(
-    marketSnapshot: ClientFocusMarketStateResponse | null
+    marketSnapshot: ClientFocusMarketStateResponse | null,
+    headlineSignals: DailyPitchHeadlineSignals = EMPTY_DAILY_PITCH_HEADLINE_SIGNALS
 ): Promise<NonNullable<DailyMarketNarrative['daily_pitch_triggers']>> {
     const triggers: NonNullable<DailyMarketNarrative['daily_pitch_triggers']> = [];
     const indices = marketSnapshot?.indices ?? [];
@@ -3610,22 +3819,41 @@ async function buildDeterministicDailyPitchTriggers(
             const grouped = earningsRows
                 .map((row) => `${row.symbol}${row.days_until === 1 ? '明日' : `${row.days_until}日后`}`)
                 .join('、');
+            const hasOpenAiStress = headlineSignals.openAiTargetMissTitles.length > 0;
+            const headline = hasOpenAiStress ? 'AI财报迎来证伪点' : '超级财报周开启';
+            const context = hasOpenAiStress
+                ? `OpenAI用户/收入目标争议已压到AI算力链，未来7日内${grouped}等权重/FCN常见底层将发财报，市场要验证AI capex回报能否支撑估值。`
+                : `未来7日内${grouped}等权重/FCN常见底层将发财报，市场焦点从宏观headline切回盈利验证和AI capex回报。`;
             triggers.push({
                 id: 1,
-                headline: '超级财报周开启',
-                hook: '超级财报周开启',
-                context: `未来7日内${grouped}等权重/FCN常见底层将发财报，市场焦点从宏观headline切回盈利验证和AI capex回报。`,
-                why_now: `未来7日内${grouped}等权重/FCN常见底层将发财报，市场焦点从宏观headline切回盈利验证和AI capex回报。`,
-                talking_point: '这周真正要看的不是指数涨跌，而是权重股财报能否证明AI和科技仓位的盈利兑现，您组合里的科技敞口要不要先做一次情景讨论？',
-                pitch_line: '这周真正要看的不是指数涨跌，而是权重股财报能否证明AI和科技仓位的盈利兑现，您组合里的科技敞口要不要先做一次情景讨论？',
+                headline,
+                hook: headline,
+                context,
+                why_now: context,
+                talking_point: hasOpenAiStress
+                    ? '昨天市场已经开始质疑AI投入回报，今晚权重股财报会直接给答案；您科技仓位和相关FCN底层要不要先按好中差三种情景看一遍？'
+                    : '这周真正要看的不是指数涨跌，而是权重股财报能否证明AI和科技仓位的盈利兑现，您组合里的科技敞口要不要先做一次情景讨论？',
+                pitch_line: hasOpenAiStress
+                    ? '昨天市场已经开始质疑AI投入回报，今晚权重股财报会直接给答案；您科技仓位和相关FCN底层要不要先按好中差三种情景看一遍？'
+                    : '这周真正要看的不是指数涨跌，而是权重股财报能否证明AI和科技仓位的盈利兑现，您组合里的科技敞口要不要先做一次情景讨论？',
                 client_type: '美股科技或FCN客户',
-                watchpoints: ['权重股财报', 'AI capex指引', '科技底层波动率'],
-                related_assets: ['US Equities', 'Mag7', 'FCN'],
-                asset_tags: ['US Equities', 'Mag7', 'FCN'],
-                materiality_trigger: '3B: major earnings within 5 trading days',
-                risk_flag: false,
-                time_sensitivity: 'this_week',
-                source_summary: '来自系统财报日历中的未来7日权重/FCN常见底层待发财报。'
+                watchpoints: hasOpenAiStress
+                    ? ['OpenAI相关表述', 'AI capex指引', 'FCN底层IV变化']
+                    : ['权重股财报', 'AI capex指引', '科技底层波动率'],
+                related_assets: hasOpenAiStress
+                    ? ['US Equities', 'ORCL', 'NVDA', 'Mag7', 'FCN']
+                    : ['US Equities', 'Mag7', 'FCN'],
+                asset_tags: hasOpenAiStress
+                    ? ['US Equities', 'ORCL', 'NVDA', 'Mag7', 'FCN']
+                    : ['US Equities', 'Mag7', 'FCN'],
+                materiality_trigger: hasOpenAiStress
+                    ? '3B/3C/3E: major earnings and AI capex narrative stress'
+                    : '3B: major earnings within 5 trading days',
+                risk_flag: hasOpenAiStress,
+                time_sensitivity: 'immediate',
+                source_summary: hasOpenAiStress
+                    ? `来自系统财报日历和新闻标题：${headlineSignals.openAiTargetMissTitles[0]}`
+                    : '来自系统财报日历中的未来7日权重/FCN常见底层待发财报。'
             });
         }
     } catch {
@@ -3641,20 +3869,22 @@ async function buildDeterministicDailyPitchTriggers(
             || (typeof sox.change_ytd_pct === 'number' && sox.change_ytd_pct >= 30)
         )
     ) {
+        const isSoxUpStreak = sox.streak_direction === 'up' && typeof sox.streak_days === 'number' && sox.streak_days >= 3;
+        const headline = isSoxUpStreak ? 'SOX连涨进入极值' : 'SOX高位进入验证';
         const streak = sox.streak_direction && sox.streak_days
             ? `连续${sox.streak_days}${sox.streak_direction === 'up' ? '日上涨' : '日下跌'}`
             : '出现极端动量';
-        const context = `费城半导体${formatPitchCandidateChange(sox)}，${streak}，AI/半导体高Beta仓位进入更拥挤的盈利兑现窗口。`;
+        const context = `${formatPitchCandidateChange(sox)}，${streak}，AI/半导体高Beta仓位进入更拥挤的盈利兑现窗口。`;
         triggers.push({
             id: triggers.length + 1,
-            headline: 'SOX连涨进入极值',
-            hook: 'SOX连涨进入极值',
+            headline,
+            hook: headline,
             context,
             why_now: context,
             talking_point: '半导体这轮不是普通反弹，SOX已经走出连续动量，领涨逻辑会开始从追Beta切到财报兑现和仓位拥挤，您AI仓位要不要看一下保护结构？',
             pitch_line: '半导体这轮不是普通反弹，SOX已经走出连续动量，领涨逻辑会开始从追Beta切到财报兑现和仓位拥挤，您AI仓位要不要看一下保护结构？',
             client_type: 'AI或半导体仓位客户',
-            watchpoints: ['SOX连涨是否中断', '半导体财报', '科技FCN波动率'],
+            watchpoints: [isSoxUpStreak ? 'SOX连涨是否中断' : 'SOX回调是否扩大', '半导体财报', '科技FCN波动率'],
             related_assets: ['SOX', 'Semiconductors', 'AI Theme', 'FCN'],
             asset_tags: ['SOX', 'Semiconductors', 'AI Theme', 'FCN'],
             materiality_trigger: '3A: consecutive streak > 10 sessions',
@@ -3665,6 +3895,27 @@ async function buildDeterministicDailyPitchTriggers(
     }
 
     const oil = byCode.get('BRENT') ?? byCode.get('OIL');
+    if (headlineSignals.uaeOpecExitTitles.length > 0) {
+        const marketAnchor = oil ? `${formatPitchCandidateChange(oil)}，` : '';
+        const context = `${marketAnchor}UAE宣布退出OPEC/OPEC+，油价逻辑从霍尔木兹单一封锁升级为供给纪律和OPEC凝聚力再定价，影响通胀预期、黄金、AT1和长久期债。`;
+        triggers.push({
+            id: triggers.length + 1,
+            headline: 'OPEC裂缝重定油价',
+            hook: 'OPEC裂缝重定油价',
+            context,
+            why_now: context,
+            talking_point: '油价今天不能只聊霍尔木兹，UAE退出OPEC让供给纪律也变成变量；您能源、黄金或AT1敞口要不要先按油价高位持续的情景看一遍？',
+            pitch_line: '油价今天不能只聊霍尔木兹，UAE退出OPEC让供给纪律也变成变量；您能源、黄金或AT1敞口要不要先按油价高位持续的情景看一遍？',
+            client_type: '能源黄金或AT1客户',
+            watchpoints: ['UAE退出执行', 'Brent高位', 'AT1利差'],
+            related_assets: ['Brent', 'Energy', 'Gold', 'AT1', 'US 10Y'],
+            asset_tags: ['Brent', 'Energy', 'Gold', 'AT1', 'US 10Y'],
+            materiality_trigger: '3D/3E: OPEC supply regime event and PB cross-asset exposure',
+            risk_flag: true,
+            time_sensitivity: 'immediate',
+            source_summary: `来自新闻标题：${headlineSignals.uaeOpecExitTitles[0]}`
+        });
+    }
     if (
         oil
         && (
@@ -3695,7 +3946,6 @@ async function buildDeterministicDailyPitchTriggers(
     const tnx = byCode.get('TNX');
     if (
         tnx
-        && triggers.length < 3
         && (
             (typeof tnx.change_pct === 'number' && Math.abs(tnx.change_pct) >= 5)
             || (typeof tnx.change_5d_pct === 'number' && Math.abs(tnx.change_5d_pct) >= 6)
@@ -3726,7 +3976,6 @@ async function buildDeterministicDailyPitchTriggers(
     if (
         hsi
         && hstech
-        && triggers.length < 3
         && (
             Math.abs((hstech.change_pct ?? 0) - (hsi.change_pct ?? 0)) >= 0.8
             || Math.abs(hsi.change_pct ?? 0) >= 0.8
@@ -3753,7 +4002,36 @@ async function buildDeterministicDailyPitchTriggers(
         });
     }
 
-    return triggers.slice(0, 3).map((item, index) => ({ ...item, id: index + 1 }));
+    const gold = byCode.get('GOLD');
+    if (
+        gold
+        && (
+            Math.abs(gold.change_pct ?? 0) >= 1.2
+            || Math.abs(gold.change_5d_pct ?? 0) >= 3
+            || Math.abs(gold.change_ytd_pct ?? 0) >= 15
+        )
+    ) {
+        const context = `${formatPitchCandidateChange(gold)}，黄金话题应聚焦实际利率、美元与地缘风险溢价，而不是单日涨跌本身。`;
+        triggers.push({
+            id: triggers.length + 1,
+            headline: '黄金溢价重新校准',
+            hook: '黄金溢价重新校准',
+            context,
+            why_now: context,
+            talking_point: '黄金这几天的变化不只是价格波动，关键是避险溢价和实际利率谁在主导；您黄金票据或配置仓位要不要先拆一下驱动？',
+            pitch_line: '黄金这几天的变化不只是价格波动，关键是避险溢价和实际利率谁在主导；您黄金票据或配置仓位要不要先拆一下驱动？',
+            client_type: '黄金票据或配置客户',
+            watchpoints: ['实际利率', '美元方向', '避险溢价'],
+            related_assets: ['Gold', 'Real Yield', 'USD'],
+            asset_tags: ['Gold', 'Real Yield', 'USD'],
+            materiality_trigger: '3D: gold risk premium repricing',
+            risk_flag: false,
+            time_sensitivity: 'watch',
+            source_summary: '来自市场快照中的黄金单日、5日和YTD变化。'
+        });
+    }
+
+    return triggers.map((item, index) => ({ ...item, id: index + 1 }));
 }
 
 const DAILY_NARRATIVE_BUCKETS = ['美股', '港股', '黄金', '美债', '汇率'] as const;
@@ -3814,6 +4092,30 @@ function normalizeAssetBuckets(
         }));
 }
 
+function truncateDailyPitchText(text: string, maxLength: number): string {
+    if (text.length <= maxLength) {
+        return text;
+    }
+
+    const hardCut = text.slice(0, maxLength);
+    const sentenceEnd = Math.max(
+        hardCut.lastIndexOf('。'),
+        hardCut.lastIndexOf('；'),
+        hardCut.lastIndexOf('！'),
+        hardCut.lastIndexOf('？'),
+        hardCut.lastIndexOf('.'),
+        hardCut.lastIndexOf(';')
+    );
+    if (sentenceEnd >= Math.floor(maxLength * 0.55)) {
+        return hardCut.slice(0, sentenceEnd + 1);
+    }
+
+    return hardCut
+        .replace(/[A-Za-z0-9/._-]{1,12}$/u, '')
+        .replace(/[，,、：:；;（(]$/u, '')
+        .trim();
+}
+
 function normalizeDailyPitchTriggers(
     triggers: unknown
 ): NonNullable<DailyMarketNarrative['daily_pitch_triggers']> {
@@ -3868,16 +4170,19 @@ function normalizeDailyPitchTriggers(
                     ? item.time_sensitivity
                     : undefined;
             const id = typeof item.id === 'number' && Number.isFinite(item.id) ? item.id : undefined;
+            const headline = truncateDailyPitchText(cleanDailyNarrativeSentence(hookValue), 28);
+            const context = truncateDailyPitchText(cleanDailyNarrativeSentence(whyNowValue), 180);
+            const talkingPoint = truncateDailyPitchText(cleanDailyNarrativeSentence(pitchLineValue), 150);
 
             return [{
                 ...(id ? { id } : {}),
-                headline: cleanDailyNarrativeSentence(hookValue).slice(0, 28),
-                context: cleanDailyNarrativeSentence(whyNowValue).slice(0, 120),
-                talking_point: cleanDailyNarrativeSentence(pitchLineValue).slice(0, 120),
-                hook: cleanDailyNarrativeSentence(hookValue).slice(0, 28),
-                why_now: cleanDailyNarrativeSentence(whyNowValue).slice(0, 120),
+                headline,
+                context,
+                talking_point: talkingPoint,
+                hook: headline,
+                why_now: context,
                 client_type: cleanDailyNarrativeSentence(item.client_type).slice(0, 24),
-                pitch_line: cleanDailyNarrativeSentence(pitchLineValue).slice(0, 120),
+                pitch_line: talkingPoint,
                 watchpoints,
                 risk_flag: item.risk_flag === true,
                 ...(related_assets && related_assets.length > 0 ? { related_assets, asset_tags: related_assets } : {}),
@@ -3911,6 +4216,197 @@ function buildPitchTriggersFromBuckets(
             time_sensitivity: 'watch' as const,
             source_summary: '由旧版资产桶数据转换生成。'
         }));
+}
+
+type PitchAssetLane = 'us_equity' | 'hk_china' | 'fixed_income_credit' | 'gold_fx' | 'macro_event';
+
+function normalizePitchHeadline(trigger: DailyPitchTrigger): string {
+    return (trigger.headline ?? trigger.hook ?? '')
+        .replace(/[，,。.!！?？\s]/g, '')
+        .trim()
+        .toLowerCase();
+}
+
+function classifyPitchAssetLane(trigger: DailyPitchTrigger): PitchAssetLane {
+    const text = [
+        trigger.headline,
+        trigger.hook,
+        trigger.context,
+        trigger.why_now,
+        trigger.client_type,
+        trigger.materiality_trigger,
+        ...(trigger.asset_tags ?? []),
+        ...(trigger.related_assets ?? [])
+    ]
+        .filter((value): value is string => typeof value === 'string')
+        .join(' ')
+        .toLowerCase();
+
+    if (/港股|恒指|hsi|hstech|hong kong|china assets|中资|南向/.test(text)) {
+        return 'hk_china';
+    }
+    if (/at1|债|久期|10y|tnx|treasur|yield|credit|利差|fixed income/.test(text)) {
+        return 'fixed_income_credit';
+    }
+    if (/gold|黄金|美元|dxy|usdcnh|usdjpy|usdchf|fx|汇率|carry|real yield/.test(text)) {
+        return 'gold_fx';
+    }
+    if (/oil|brent|crude|原油|地缘|hormuz|通胀|inflation/.test(text)) {
+        return 'macro_event';
+    }
+    return 'us_equity';
+}
+
+function materialityWeight(trigger: DailyPitchTrigger): number {
+    const materiality = `${trigger.materiality_trigger ?? ''} ${trigger.source_summary ?? ''}`.toLowerCase();
+    let score = 0;
+    if (materiality.includes('3e')) score += 3.2;
+    if (materiality.includes('3b')) score += 2.8;
+    if (materiality.includes('3a')) score += 2.6;
+    if (materiality.includes('3d')) score += 2.4;
+    if (materiality.includes('3c')) score += 2.2;
+    if (/consecutive|streak|极值|ytd|>|>=/.test(materiality)) score += 0.5;
+    return score || 1.4;
+}
+
+function openerQualityWeight(trigger: DailyPitchTrigger): number {
+    const pitch = (trigger.talking_point ?? trigger.pitch_line ?? '').trim();
+    let score = 0;
+    if (pitch.length >= 32) score += 0.7;
+    if (/[？?]$/.test(pitch) || /要不要|是否|我们可以|先看|先聊|拆一下/.test(pitch)) score += 0.8;
+    if (/客户|您|仓位|敞口|组合|票据|fcn|at1/i.test(pitch)) score += 0.7;
+    if (/关注|观察|变化|市场波动/.test(pitch) && !/先看|要不要|拆/.test(pitch)) score -= 0.4;
+    return score;
+}
+
+function timeSensitivityWeight(trigger: DailyPitchTrigger): number {
+    if (trigger.time_sensitivity === 'immediate') return 0.8;
+    if (trigger.time_sensitivity === 'this_week') return 0.5;
+    return 0.2;
+}
+
+function scorePitchTriggerForRm(
+    trigger: DailyPitchTrigger,
+    previousHeadlines: Set<string>,
+    previousLanes: Set<PitchAssetLane>
+): number {
+    let score = materialityWeight(trigger) + openerQualityWeight(trigger) + timeSensitivityWeight(trigger);
+    const headline = normalizePitchHeadline(trigger);
+    const lane = classifyPitchAssetLane(trigger);
+
+    if (trigger.risk_flag) {
+        score += 0.25;
+    }
+    if (trigger.client_type && /客户|仓位|敞口|票据|fcn|at1/i.test(trigger.client_type)) {
+        score += 0.45;
+    }
+    if (previousHeadlines.has(headline)) {
+        score -= 1.7;
+    }
+    if (previousLanes.has(lane)) {
+        score -= 0.35;
+    }
+
+    return score;
+}
+
+function dedupePitchTriggers(
+    triggers: NonNullable<DailyMarketNarrative['daily_pitch_triggers']>
+): NonNullable<DailyMarketNarrative['daily_pitch_triggers']> {
+    const seen = new Set<string>();
+    const deduped: NonNullable<DailyMarketNarrative['daily_pitch_triggers']> = [];
+
+    for (const trigger of triggers) {
+        const key = normalizePitchHeadline(trigger);
+        if (!key || seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        deduped.push(trigger);
+    }
+
+    return deduped;
+}
+
+function applyRmConversationRanking(
+    triggers: NonNullable<DailyMarketNarrative['daily_pitch_triggers']>,
+    previousTriggers: DailyPitchTrigger[]
+): NonNullable<DailyMarketNarrative['daily_pitch_triggers']> {
+    const candidates = dedupePitchTriggers(triggers);
+    if (candidates.length <= 3) {
+        return candidates.map((item, index) => ({ ...item, id: index + 1 }));
+    }
+
+    const previousHeadlines = new Set(previousTriggers.map((trigger) => normalizePitchHeadline(trigger)).filter(Boolean));
+    const previousLanes = new Set(previousTriggers.map((trigger) => classifyPitchAssetLane(trigger)));
+    const selected: NonNullable<DailyMarketNarrative['daily_pitch_triggers']> = [];
+    const selectedLanes = new Set<PitchAssetLane>();
+
+    while (selected.length < 3 && selected.length < candidates.length) {
+        let best: DailyPitchTrigger | null = null;
+        let bestScore = Number.NEGATIVE_INFINITY;
+
+        for (const candidate of candidates) {
+            if (selected.includes(candidate)) {
+                continue;
+            }
+
+            const lane = classifyPitchAssetLane(candidate);
+            let score = scorePitchTriggerForRm(candidate, previousHeadlines, previousLanes);
+            if (selectedLanes.has(lane)) {
+                score -= selected.length === 0 ? 0 : 1.15;
+            }
+            if (selected.length === 2 && selectedLanes.size < 2 && selectedLanes.has(lane)) {
+                score -= 1.5;
+            }
+
+            if (score > bestScore) {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+
+        if (!best) {
+            break;
+        }
+
+        selected.push(best);
+        selectedLanes.add(classifyPitchAssetLane(best));
+    }
+
+    const lastMileLanes: PitchAssetLane[] = ['fixed_income_credit', 'hk_china', 'gold_fx'];
+    const hasLastMileLane = selected.some((item) => lastMileLanes.includes(classifyPitchAssetLane(item)));
+    if (!hasLastMileLane) {
+        let bestLastMileCandidate: DailyPitchTrigger | null = null;
+        let bestLastMileScore = Number.NEGATIVE_INFINITY;
+        for (const candidate of candidates) {
+            if (selected.includes(candidate) || !lastMileLanes.includes(classifyPitchAssetLane(candidate))) {
+                continue;
+            }
+            const score = scorePitchTriggerForRm(candidate, previousHeadlines, previousLanes);
+            if (score > bestLastMileScore) {
+                bestLastMileCandidate = candidate;
+                bestLastMileScore = score;
+            }
+        }
+
+        if (bestLastMileCandidate && selected.length >= 3) {
+            let replaceIndex = 2;
+            let weakestScore = Number.POSITIVE_INFINITY;
+            for (let index = 1; index < selected.length; index += 1) {
+                const score = scorePitchTriggerForRm(selected[index], previousHeadlines, previousLanes);
+                if (score < weakestScore) {
+                    weakestScore = score;
+                    replaceIndex = index;
+                }
+            }
+            selected[replaceIndex] = bestLastMileCandidate;
+        } else if (bestLastMileCandidate) {
+            selected.push(bestLastMileCandidate);
+        }
+    }
+
+    return selected.map((item, index) => ({ ...item, id: index + 1 }));
 }
 
 const SINGLE_STOCK_TICKER_PATTERN =
@@ -4191,6 +4687,10 @@ async function generateDailyMarketNarrative(): Promise<DailyMarketNarrative | nu
     }
 
     const marketSnapshot = await fetchClientFocusMarketStateSnapshot().catch(() => null);
+    const headlineSignals = mergeDailyPitchHeadlineSignalsFromTopics(
+        await fetchDailyPitchHeadlineSignals().catch(() => EMPTY_DAILY_PITCH_HEADLINE_SIGNALS),
+        cachedTopics
+    );
     const fallbackNarrative = buildFallbackDailyNarrative(cachedTopics, marketSnapshot);
 
     const topicSection = cachedTopics
@@ -4220,7 +4720,7 @@ ${latestUpdatesSection}${transmissionChainSection}
         .join('\n\n');
     const marketSignalsSection = buildDailyNarrativeMarketSignalsSection(marketSnapshot);
     const earningsSection = await buildEarningsCalendarSection();
-    const pitchCandidateSection = await buildDailyPitchCandidateSection(marketSnapshot);
+    const pitchCandidateSection = await buildDailyPitchCandidateSection(marketSnapshot, headlineSignals);
     const narrativeHistorySection =
         narrativeHistory.map((record) => `${record.date}: ${record.primary_slug}`).join('\n') || '暂无历史';
 
@@ -4271,7 +4771,7 @@ ${narrativeHistorySection}
 3. 生成 3 条 RM 今日可聊触发器（daily_pitch_triggers）
    - 这是唯一主输出，目标不是替代 CIO office，而是 bridge last mile：告诉RM今天最值得主动和客户聊什么
    - 你不能联网搜索；只能使用上方已注入的新闻摘要、市场数据、财报日历、主题详情和监测信号。没有数据锚点就不要编造
-   - 必须优先从【今日可聊候选信号】选择；若候选中存在 HIGH 级别信号（例如超级财报周、SOX连续涨跌>10日、油价/10Y显著异动），不得用“财报验证反弹质量”“港股资金与结构分化”“10Y收益率重新定价”这类泛标题替代
+   - 必须优先从【今日可聊候选信号】选择；若候选中存在 CRITICAL/HIGH 级别信号（例如OpenAI目标争议、OPEC结构事件、超级财报周、SOX连续涨跌>10日、油价/10Y显著异动），不得用“财报验证反弹质量”“港股资金与结构分化”“10Y收益率重新定价”这类泛标题替代
    - headline 必须写出具体事件或统计极值，例如“超级财报周开启”“SOX连涨进入极值”“油价牵动通胀路径”，禁止只写抽象判断
    - 从以下 surveillance universe 中筛选候选：股票市场结构、AI/半导体/港股/能源等主题、宏观央行/FX/Rates、地缘尾部风险、固收/信用/AT1、结构性产品/波动率、黄金/另类资产
    - 每条必须满足至少一个 materiality trigger：
@@ -4617,12 +5117,17 @@ ${narrativeHistorySection}
             ? parsed.default_expanded_bucket
             : asset_buckets[0]?.bucket ?? '美股';
         const daily_pitch_triggers = normalizeDailyPitchTriggers((parsed as any).daily_pitch_triggers);
-        const deterministicPitchTriggers = await buildDeterministicDailyPitchTriggers(marketSnapshot);
-        const resolvedPitchTriggers = daily_pitch_triggers.length > 0
-            ? daily_pitch_triggers
+        const deterministicPitchTriggers = await buildDeterministicDailyPitchTriggers(marketSnapshot, headlineSignals);
+        const pitchCandidatePool = daily_pitch_triggers.length > 0
+            ? [...daily_pitch_triggers, ...deterministicPitchTriggers]
             : deterministicPitchTriggers.length > 0
                 ? deterministicPitchTriggers
                 : buildPitchTriggersFromBuckets(asset_buckets);
+        const resolvedPitchTriggers = ensureMandatoryHeadlineTriggers(
+            applyRmConversationRanking(pitchCandidatePool, previousDailyPitchTriggers),
+            pitchCandidatePool,
+            headlineSignals
+        );
         if (resolvedPitchTriggers.length < 1) {
             throw new Error('Missing daily pitch triggers');
         }
@@ -4657,8 +5162,13 @@ ${narrativeHistorySection}
             generated_at: new Date().toISOString(),
         };
     } catch (error) {
-        const deterministicPitchTriggers = await buildDeterministicDailyPitchTriggers(marketSnapshot);
+        const deterministicPitchTriggers = await buildDeterministicDailyPitchTriggers(marketSnapshot, headlineSignals);
         if (deterministicPitchTriggers.length > 0) {
+            const rankedPitchTriggers = ensureMandatoryHeadlineTriggers(
+                applyRmConversationRanking(deterministicPitchTriggers, previousDailyPitchTriggers),
+                deterministicPitchTriggers,
+                headlineSignals
+            );
             const fallbackPrimarySlug =
                 fallbackNarrative?.primary_slug && FOCUS_TOPICS.some((topic) => topic.slug === fallbackNarrative.primary_slug)
                     ? fallbackNarrative.primary_slug
@@ -4677,7 +5187,7 @@ ${narrativeHistorySection}
                 ranked_slugs,
                 rank_changes: {},
                 momentum_days: 1,
-                daily_pitch_triggers: deterministicPitchTriggers,
+                daily_pitch_triggers: rankedPitchTriggers,
                 asset_buckets: [],
                 default_expanded_bucket: '美股',
                 generated_at: new Date().toISOString(),
@@ -6680,6 +7190,7 @@ async function fetchHongKongMarketSnapshot(): Promise<ClientFocusMarketSnapshot 
         }
 
         return {
+            updated_at: new Date().toISOString(),
             summary: buildHongKongSnapshotSummary(indices, southboundChart),
             indices: indices.map((item) => ({
                 ...item,
@@ -6960,7 +7471,7 @@ async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientF
 
 async function fetchYahooChartSeries(
     symbol: string,
-    snapshotMeta: { code: string; name: string } = { code: 'GC=F', name: 'COMEX黄金期货' }
+    snapshotMeta: { code: string; name: string; preferHistoryChangePct?: boolean } = { code: 'GC=F', name: 'COMEX黄金期货' }
 ): Promise<{ snapshot: ClientFocusPriceSnapshot | null; history: ClientFocusPriceHistoryPoint[] | null }> {
     try {
         const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`);
@@ -7025,11 +7536,13 @@ async function fetchYahooChartSeries(
         const resolvedPreviousHistoryClose = Number.isFinite(previousHistoryClose) ? previousHistoryClose : null;
         // Prefer regularMarketPrice vs previousClose (real-time, intraday-aware)
         // Fall back to history[-1] vs history[-2] only if meta fields are missing
-        const changePct = Number.isFinite(previousClose) && previousClose !== 0
+        const historyChangePct = resolvedPreviousHistoryClose !== null && resolvedPreviousHistoryClose !== 0
+            ? ((latestPoint.close - resolvedPreviousHistoryClose) / resolvedPreviousHistoryClose) * 100
+            : null;
+        const metaChangePct = Number.isFinite(previousClose) && previousClose !== 0
             ? ((effectiveLatest - previousClose) / previousClose) * 100
-            : resolvedPreviousHistoryClose !== null && resolvedPreviousHistoryClose !== 0
-                ? ((latestPoint.close - resolvedPreviousHistoryClose) / resolvedPreviousHistoryClose) * 100
-                : null;
+            : null;
+        const changePct = snapshotMeta.preferHistoryChangePct ? historyChangePct ?? metaChangePct : metaChangePct ?? historyChangePct;
 
         return {
             snapshot: {
@@ -7566,9 +8079,9 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
         fetchYahooChartSeries('CHF=X', { code: 'USDCHF', name: '美元兑瑞郎' }),
         fetchYahooChartSeries('DX-Y.NYB', { code: 'DXY', name: '美元指数' }),
         fetchUsMarketStateIndices(),
-        fetchYahooChartSeries('CL=F', { code: 'OIL', name: 'WTI原油' }),
-        fetchYahooChartSeries('BZ=F', { code: 'BRENT', name: 'Brent原油' }),
-        fetchYahooChartSeries('NG=F', { code: 'NATGAS', name: '天然气' }),
+        fetchYahooChartSeries('CL=F', { code: 'OIL', name: 'WTI原油', preferHistoryChangePct: true }),
+        fetchYahooChartSeries('BZ=F', { code: 'BRENT', name: 'Brent原油', preferHistoryChangePct: true }),
+        fetchYahooChartSeries('NG=F', { code: 'NATGAS', name: '天然气', preferHistoryChangePct: true }),
         fetchYahooChartSeries('^TNX', { code: 'TNX', name: '美债10Y' }),
     ]);
 
@@ -7702,6 +8215,7 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
     const llmSummary = await generateMarketStateSummaryLLM(indices, recentNewsHeadlines);
 
     const payload: ClientFocusMarketStateResponse = {
+        updated_at: new Date().toISOString(),
         summary: llmSummary ?? buildMarketStateSummary(indices),
         indices
     };
@@ -8282,6 +8796,7 @@ export function getClientFocusStatusesSnapshot(): Array<{ slug: string; status: 
 export async function getClientFocusMarketState(): Promise<ClientFocusMarketStateResponse> {
     const snapshot = await fetchClientFocusMarketStateSnapshot();
     return snapshot ?? {
+        updated_at: new Date().toISOString(),
         summary: '跨资产信号仍有分化，建议结合黄金、美元、美股与港股的相对表现理解今天的客户焦点。',
         indices: []
     };
@@ -8333,8 +8848,17 @@ async function refreshDailyMarketNarrative(
     }
 
     dailyNarrativeRefreshPromise = (async () => {
-        if (dailyNarrativeCache.value?.ranked_slugs?.length) {
-            previousRankedSlugs = [...dailyNarrativeCache.value.ranked_slugs];
+        let previousNarrative = dailyNarrativeCache.value;
+        if (!previousNarrative) {
+            const latest = await getLatestDailyMarketNarrative().catch(() => null);
+            previousNarrative = hydrateDailyNarrativePitchCards(latest?.narrative_json);
+        }
+
+        if (previousNarrative?.ranked_slugs?.length) {
+            previousRankedSlugs = [...previousNarrative.ranked_slugs];
+        }
+        if (previousNarrative?.daily_pitch_triggers?.length) {
+            previousDailyPitchTriggers = [...previousNarrative.daily_pitch_triggers];
         }
 
         try {
