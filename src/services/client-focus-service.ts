@@ -129,11 +129,20 @@ interface FocusTransmissionModelOutput {
     };
 }
 
+interface BreakingNewsCandidate {
+    originalTitle: string;
+    score: number;
+    pitchHeadline: string;
+    whyDiscuss: string;
+    suitableClients: string;
+}
+
 interface DailyPitchHeadlineSignals {
     openAiTargetMissTitles: string[];
     uaeOpecExitTitles: string[];
     centralBankShockTitles: string[];
     majorGeopoliticalTitles: string[];
+    breakingNewsCandidates: BreakingNewsCandidate[];
 }
 
 const ALLOWED_FOCUS_STATUS = ['关注升温', '持续发酵', '压力上升', '风险溢价抬升', '供应扰动交易中', '风险溢价回吐中', '避险扩散确认中'] as const;
@@ -154,6 +163,7 @@ const EMPTY_DAILY_PITCH_HEADLINE_SIGNALS: DailyPitchHeadlineSignals = {
     uaeOpecExitTitles: [],
     centralBankShockTitles: [],
     majorGeopoliticalTitles: [],
+    breakingNewsCandidates: [],
 };
 
 const MIDDLE_EAST_ZH_NEWS_QUERIES = [
@@ -3405,7 +3415,7 @@ async function buildEarningsCalendarSection(): Promise<string> {
         const lines: string[] = Array.from(byDaysUntil.entries())
             .sort((left, right) => left[0] - right[0])
             .map(([daysUntil, symbols]) => {
-                const label = daysUntil === 1 ? '明日待发财报' : `${daysUntil}日后待发财报`;
+                const label = daysUntil === 1 ? '今晚盘后待发财报' : daysUntil === 2 ? '明晚盘后待发财报' : `${daysUntil}日后待发财报`;
                 return `${label}：${symbols.join('、')}`;
             });
         if (lines.length === 0) return '';
@@ -3457,6 +3467,93 @@ function compactHeadlineList(items: NewsItem[], predicate: (title: string) => bo
         .slice(0, 3);
 }
 
+async function scoreBreakingNewsHeadlines(
+    titles: string[]
+): Promise<BreakingNewsCandidate[]> {
+    if (titles.length === 0) return [];
+
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) return [];
+
+    const prompt = `你是一位香港私人银行的投资顾问助手。请对以下新闻标题逐条评分，判断其对私行RM/IC客户（持仓类型：美股科技、港股、黄金、AT1、长久期债、外币资产）的当日沟通相关性。
+
+评分标准：
+9–10：直接影响多类PB持仓的结构性事件（央行意外政策、重大地缘升级、主要市场崩盘、OPEC供给框架变化、AI叙事证伪）
+7–8：明确影响PB常见持仓（财报重大超预期或不及预期、大类资产关键转折、重要监管变化）
+5–6：相关但非紧迫（行业数据、非核心公司动态、已定价事件后续）
+1–4：与PB客户持仓无直接关系或纯噪音
+
+对每条标题返回：
+- score：1–10整数
+- pitch_headline：≤12个中文字的RM可聊话题标题（仅在score≥7时认真写，否则可留空）
+- why_discuss：一句话说明为什么对RM有价值（score≥7时写，否则留空）
+- suitable_clients：适合哪类客户（score≥7时写，否则留空）
+
+新闻标题列表：
+${titles.map((title, index) => `${index + 1}. ${title}`).join('\n')}
+
+严格以JSON数组输出，不得输出JSON以外任何内容：
+[
+  {
+    "index": 1,
+    "score": 数字,
+    "pitch_headline": "标题",
+    "why_discuss": "一句话",
+    "suitable_clients": "客户类型"
+  }
+]`;
+
+    try {
+        const response = await fetch(
+            `${process.env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL}/chat/completions`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${apiKey}`,
+                },
+                body: JSON.stringify({
+                    model: 'deepseek-chat',
+                    temperature: 0.1,
+                    max_tokens: 1200,
+                    messages: [{ role: 'user', content: prompt }],
+                }),
+                signal: AbortSignal.timeout(12000),
+            }
+        );
+
+        if (!response.ok) return [];
+
+        const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+        const content = data.choices?.[0]?.message?.content?.trim() ?? '';
+        const jsonMatch = content.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) return [];
+
+        const parsed = JSON.parse(jsonMatch[0]) as Array<{
+            index: number;
+            score: number;
+            pitch_headline: string;
+            why_discuss: string;
+            suitable_clients: string;
+        }>;
+
+        return parsed
+            .filter((item) => typeof item.score === 'number' && item.score >= 7)
+            .map((item) => ({
+                originalTitle: titles[item.index - 1] ?? '',
+                score: item.score,
+                pitchHeadline: (item.pitch_headline ?? '').slice(0, 20),
+                whyDiscuss: item.why_discuss ?? '',
+                suitableClients: item.suitable_clients ?? '',
+            }))
+            .filter((item) => item.originalTitle && item.pitchHeadline)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 3);
+    } catch {
+        return [];
+    }
+}
+
 async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSignals> {
     const [openAiResults, uaeResults, centralBankResults, geopoliticalResults] = await Promise.allSettled([
         fetchNewsItemsByQuery('OpenAI missed revenue user targets Oracle CoreWeave AI stocks WSJ', {
@@ -3477,12 +3574,44 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
     const uaeItems = uaeResults.status === 'fulfilled' ? uaeResults.value : [];
     const centralBankItems = centralBankResults.status === 'fulfilled' ? centralBankResults.value : [];
     const geopoliticalItems = geopoliticalResults.status === 'fulfilled' ? geopoliticalResults.value : [];
+    const existingTitles = new Set([
+        ...openAiItems.map((item) => item.title),
+        ...uaeItems.map((item) => item.title),
+        ...centralBankItems.map((item) => item.title),
+        ...geopoliticalItems.map((item) => item.title),
+    ].map((title) => title.toLowerCase()));
+
+    const broadNewsResults = await Promise.allSettled([
+        fetchNewsItemsFromNewsData('financial markets central bank geopolitical trade policy', {
+            timeframeHours: 24,
+            language: 'en',
+            categories: ['business', 'politics', 'world'],
+        }),
+        fetchNewsItemsFromNewsData('stock market earnings Fed BOJ OPEC oil gold bonds', {
+            timeframeHours: 24,
+            language: 'en',
+            categories: ['business', 'world'],
+        }),
+    ]);
+
+    const broadItems = [
+        ...(broadNewsResults[0].status === 'fulfilled' ? broadNewsResults[0].value : []),
+        ...(broadNewsResults[1].status === 'fulfilled' ? broadNewsResults[1].value : []),
+    ];
+
+    const unseenTitles = broadItems
+        .map((item) => item.title)
+        .filter((title) => title.length > 10 && !existingTitles.has(title.toLowerCase()))
+        .filter((title, index, arr) => arr.indexOf(title) === index)
+        .slice(0, 20);
+    const breakingNewsCandidates = await scoreBreakingNewsHeadlines(unseenTitles);
 
     return {
         openAiTargetMissTitles: compactHeadlineList(openAiItems, isOpenAiTargetMissHeadline),
         uaeOpecExitTitles: compactHeadlineList(uaeItems, isUaeOpecExitHeadline),
         centralBankShockTitles: compactHeadlineList(centralBankItems, isCentralBankShockHeadline),
         majorGeopoliticalTitles: compactHeadlineList(geopoliticalItems, isMajorGeopoliticalHeadline),
+        breakingNewsCandidates,
     };
 }
 
@@ -3507,7 +3636,8 @@ function mergeDailyPitchHeadlineSignalsFromTopics(
         majorGeopoliticalTitles: [
             ...headlineSignals.majorGeopoliticalTitles,
             ...titles.filter(isMajorGeopoliticalHeadline)
-        ].slice(0, 3)
+        ].slice(0, 3),
+        breakingNewsCandidates: headlineSignals.breakingNewsCandidates,
     };
 }
 
@@ -3522,6 +3652,9 @@ function ensureMandatoryHeadlineTriggers(
         ...(headlineSignals.uaeOpecExitTitles.length > 0 ? ['OPEC裂缝重定油价'] : []),
         ...(headlineSignals.centralBankShockTitles.length > 0 ? ['央行政策超预期'] : []),
         ...(headlineSignals.majorGeopoliticalTitles.length > 0 ? ['地缘风险结构升级'] : []),
+        ...headlineSignals.breakingNewsCandidates
+            .filter((candidate) => candidate.score >= 8)
+            .map((candidate) => candidate.pitchHeadline),
     ];
 
     for (const headline of mandatoryHeadlines) {
@@ -3584,7 +3717,7 @@ async function buildDailyPitchCandidateSection(
             .slice(0, 12);
         if (earningsRows.length >= 2) {
             const grouped = earningsRows
-                .map((row) => `${row.symbol}${row.days_until === 1 ? '(明日)' : `(${row.days_until}日后)`}`)
+                .map((row) => `${row.symbol}${row.days_until === 1 ? '(今晚盘后)' : row.days_until === 2 ? '(明晚盘后)' : `(${row.days_until}日后)`}`)
                 .join('、');
             candidates.push([
                 '[HIGH][3B] 超级财报周开启',
@@ -3686,6 +3819,16 @@ async function buildDailyPitchCandidateSection(
             '为什么可聊：结构性地缘事件（台海、制裁、芯片管制）会通过贸易链、供应链和风险溢价同时冲击多类资产；RM需要为客户梳理第一和第二阶传导路径，而不是只讲市场涨跌。',
             '建议标题：地缘风险结构升级',
             '适合客户：科技仓位、中资资产或跨境资产客户'
+        ].join('\n'));
+    }
+    for (const candidate of headlineSignals.breakingNewsCandidates) {
+        const priority = candidate.score >= 9 ? '[CRITICAL]' : '[HIGH]';
+        candidates.push([
+            `${priority}[3E] 突发事件：${candidate.pitchHeadline}`,
+            `新闻锚点：${candidate.originalTitle.slice(0, 110)}。`,
+            `为什么可聊：${candidate.whyDiscuss}`,
+            `建议标题：${candidate.pitchHeadline}`,
+            `适合客户：${candidate.suitableClients}`,
         ].join('\n'));
     }
     if (
@@ -3817,7 +3960,7 @@ async function buildDeterministicDailyPitchTriggers(
             .slice(0, 8);
         if (earningsRows.length >= 2) {
             const grouped = earningsRows
-                .map((row) => `${row.symbol}${row.days_until === 1 ? '明日' : `${row.days_until}日后`}`)
+                .map((row) => `${row.symbol}${row.days_until === 1 ? '今晚盘后' : row.days_until === 2 ? '明晚盘后' : `${row.days_until}日后`}`)
                 .join('、');
             const hasOpenAiStress = headlineSignals.openAiTargetMissTitles.length > 0;
             const headline = hasOpenAiStress ? 'AI财报迎来证伪点' : '超级财报周开启';
