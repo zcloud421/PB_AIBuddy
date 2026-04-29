@@ -129,7 +129,7 @@ const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
 const DRAWDOWN_PREWARM_COOLDOWN_MS = 30 * 60 * 1000;
 const DRAWDOWN_PREWARM_FRESHNESS_MS = 2 * 60 * 1000;
-const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 28;
+const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 29;
 const DRAWDOWN_TAIL_RISK_HISTORY_LIMIT = 1500;
 const DRAWDOWN_TAIL_RISK_LOOKBACK_DAYS = 365 * 5;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
@@ -2753,10 +2753,26 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         markers: ['拼多多', 'Temu', '竞争加剧', '商家政策', '全球业务前景']
     },
     {
+        id: 'pdd-q4-growth-margin-reset-2025',
+        start: '2025-02-01',
+        end: '2025-04-30',
+        reason_zh: 'Q4收入低预期叠加促销投入上升，增长溢价回落',
+        family: 'pdd-competition',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['PDD'],
+        archetypes: ['china-ecommerce-platform'],
+        subsectors: ['china-ecommerce-platform'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['q4', 'revenue miss', 'slower growth', 'promotion', 'advertising', 'competition', 'transaction services', 'online marketing'],
+        event_signal_tags: ['earnings-miss', 'pricing-pressure'],
+        markers: ['Q4收入低预期', '促销投入', '增长放缓', '竞争压力']
+    },
+    {
         id: 'pdd-temu-tariff-reset-2025',
         start: '2025-04-01',
-        end: '2026-12-31',
-        reason_zh: 'de minimis取消叠加高关税，PDD海外收入预期下调',
+        end: '2025-08-31',
+        reason_zh: '美国小额免税取消叠加关税上调，Temu订单预期下修',
         family: 'pdd-temu-tariff',
         driver_type: 'policy',
         applies_to: 'symbols_only',
@@ -2777,7 +2793,23 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
             'trade war'
         ],
         event_signal_tags: ['tariff-shock', 'demand-slowdown'],
-        markers: ['Temu关税', 'de minimis取消', '145%关税', '美国用户流失']
+        markers: ['Temu关税', '小额免税取消', '145%关税', '美国用户流失']
+    },
+    {
+        id: 'pdd-merchant-investment-margin-reset-2025',
+        start: '2025-09-01',
+        end: '2026-12-31',
+        reason_zh: '商家扶持和生态投入加大，拼多多利润率预期回落',
+        family: 'pdd-competition',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['PDD'],
+        archetypes: ['china-ecommerce-platform'],
+        subsectors: ['china-ecommerce-platform'],
+        cycle_families: ['china-platform-cycle'],
+        keywords: ['merchant support', 'ecosystem investments', 'competitive landscape', 'revenue growth moderated', 'profit margin', 'operating margin', 'supply chain investment'],
+        event_signal_tags: ['pricing-pressure', 'merchant-policy-backlash', 'global-expansion-slowdown'],
+        markers: ['商家扶持', '生态投入', '收入增速放缓', '利润率回落']
     },
     {
         id: 'banking-profitability-reset-2024',
@@ -6576,7 +6608,7 @@ function buildCycleAwarePrimaryDriver(
     if (signalSet.has('accounting-issue')) return `${issuer} 财务透明度与会计风险承压`;
     if (signalSet.has('regulatory-probe')) return `${issuer} 监管与法律风险升温`;
     if (signalSet.has('de-minimis-change') && archetype === 'china-ecommerce-platform') {
-        return `${issuer} 跨境低价电商模式面临关税与 de minimis 政策冲击`;
+        return `${issuer} 跨境低价电商模式面临小额免税取消与关税冲击`;
     }
     if (signalSet.has('merchant-policy-backlash') && archetype === 'china-ecommerce-platform') {
         return `${issuer} 商家政策与平台治理压力抬升盈利不确定性`;
