@@ -129,7 +129,7 @@ const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
 const DRAWDOWN_PREWARM_COOLDOWN_MS = 30 * 60 * 1000;
 const DRAWDOWN_PREWARM_FRESHNESS_MS = 2 * 60 * 1000;
-const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 25;
+const DRAWDOWN_ATTRIBUTION_SCHEMA_VERSION = 26;
 const DRAWDOWN_TAIL_RISK_HISTORY_LIMIT = 1500;
 const DRAWDOWN_TAIL_RISK_LOOKBACK_DAYS = 365 * 5;
 const drawdownAttributionCache = new Map<string, { expiresAt: number; value: DrawdownAttribution[] }>();
@@ -3209,6 +3209,49 @@ const DRAWDOWN_ATTRIBUTION_RULES: AttributionMacroRule[] = [
         event_signal_tags: ['demand-slowdown', 'inventory-correction'],
         keywords: ['smartphone shipments', '5g upgrade cycle', 'handset inventory', 'order cancellations', 'mobile demand', 'soc', 'channel inventory'],
         markers: ['智能手机出货量', '5G换机周期', '手机SoC', '渠道库存去化']
+    },
+    {
+        id: 'analog-industrial-auto-inventory-2022',
+        start: '2022-01-01',
+        end: '2024-06-30',
+        reason_zh: '汽车与工业渠道双重去库存，模拟芯片订单骤降',
+        family: 'mobile-semi-cycle',
+        driver_type: 'sector',
+        applies_to: 'us_tech',
+        archetypes: ['analog-chip'],
+        cycle_families: ['semiconductor-cycle'],
+        event_signal_tags: ['inventory-correction', 'demand-slowdown', 'capex-reset'],
+        keywords: ['automotive inventory', 'industrial destocking', 'channel inventory', 'order cancellations', 'lead time normalization', 'analog demand', 'double ordering', 'turns business'],
+        markers: ['汽车渠道去库存', '工业需求疲软', '模拟芯片订单', '交货期正常化']
+    },
+    {
+        id: 'analog-chip-china-tariff-2025',
+        start: '2025-01-01',
+        end: '2026-12-31',
+        reason_zh: '模拟芯片中国出货占比偏高，关税升级压制出货量预期',
+        family: 'mobile-semi-cycle',
+        driver_type: 'policy',
+        applies_to: 'us_tech',
+        archetypes: ['analog-chip'],
+        cycle_families: ['semiconductor-cycle'],
+        event_signal_tags: ['export-control-risk', 'guidance-cut', 'china-revenue-risk'],
+        keywords: ['china revenue', 'tariff impact', 'export controls', 'china shipments', 'supply chain redirect', 'analog china exposure'],
+        markers: ['中国出货占比', '关税冲击', '模拟芯片中国敞口', '出货量下修']
+    },
+    {
+        id: 'qcom-apple-modem-internalization-2024',
+        start: '2024-01-01',
+        end: '2026-12-31',
+        reason_zh: 'Apple自研基带落地，高毛利许可费收入归零风险升温',
+        family: 'mobile-semi-cycle',
+        driver_type: 'company',
+        applies_to: 'symbols_only',
+        symbols: ['QCOM'],
+        archetypes: ['analog-chip'],
+        cycle_families: ['semiconductor-cycle'],
+        event_signal_tags: ['customer-concentration-risk', 'pricing-pressure'],
+        keywords: ['apple modem', 'apple baseband', 'license fees', 'qdp', 'qualcomm apple', 'iphone modem', 'baseband chip internalization', 'royalty revenue'],
+        markers: ['Apple自研基带', '许可费收入', '高通苹果协议', '基带芯片内化']
     },
     {
         id: 'hyperscaler-custom-asic-displacement-2024',
