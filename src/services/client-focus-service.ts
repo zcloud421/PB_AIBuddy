@@ -26,6 +26,7 @@ import type {
 import { fetchNewsItemsByQuery, fetchNewsItemsFromNewsData } from '../data/news-fetcher';
 import { MassiveDataFetcher } from '../data/massive-fetcher';
 import { MassiveClient } from '../data/massive-client';
+import { pool } from '../db/client';
 import {
     getLatestClientFocusDailyVerdict,
     getLatestDailyMarketNarrative,
@@ -143,7 +144,7 @@ interface DailyPitchHeadlineSignals {
     uaeOpecExitTitles: string[];
     centralBankShockTitles: string[];
     majorGeopoliticalTitles: string[];
-    mag7EarningsResultTitles: string[];
+    majorEarningsResultTitles: string[];
     breakingNewsCandidates: BreakingNewsCandidate[];
 }
 
@@ -165,7 +166,7 @@ const EMPTY_DAILY_PITCH_HEADLINE_SIGNALS: DailyPitchHeadlineSignals = {
     uaeOpecExitTitles: [],
     centralBankShockTitles: [],
     majorGeopoliticalTitles: [],
-    mag7EarningsResultTitles: [],
+    majorEarningsResultTitles: [],
     breakingNewsCandidates: [],
 };
 
@@ -357,6 +358,7 @@ const dailyNarrativeCache = {
 let dailyNarrativeRefreshPromise: Promise<DailyMarketNarrative | null> | null = null;
 let previousRankedSlugs: string[] = [];
 let previousDailyPitchTriggers: DailyPitchTrigger[] = [];
+let yesterdayDailyPitchTriggers: DailyPitchTrigger[] = [];
 let narrativeHistory: Array<{ date: string; primary_slug: string }> = [];
 const DAILY_NARRATIVE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
@@ -3456,16 +3458,16 @@ function isMajorGeopoliticalHeadline(title: string): boolean {
     return hasGeopolitical && hasImpact;
 }
 
-function isMag7EarningsResultHeadline(title: string): boolean {
+function isMajorEarningsResultHeadline(title: string): boolean {
     const normalized = title.toLowerCase();
-    const hasMag7 = /(microsoft|msft|meta|alphabet|google|googl|goog|amazon|amzn)/i.test(title);
+    const hasMajorUnderlying = /(microsoft|msft|meta|alphabet|google|googl|goog|amazon|amzn|nvidia|nvda|tesla|tsla|apple|aapl|tsmc|taiwan semiconductor)/i.test(title);
     const hasEarnings = /(earnings|results|quarter|revenue|profit|eps|sales|cloud|azure|aws|advertising|ai capex|capex|guidance|财报|業績|业绩|营收|營收|利润|雲|云|广告|廣告|指引)/i.test(normalized);
     const hasResult = /(beat|miss|beats|misses|surge|jump|fall|slump|rise|drop|after-hours|after hours|reports|reported|公布|发布|發布|超预期|超預期|不及预期|不及預期|上涨|上漲|下跌)/i.test(normalized);
-    return hasMag7 && hasEarnings && hasResult;
+    return hasMajorUnderlying && hasEarnings && hasResult;
 }
 
-async function getRecentlyReportedMag7EarningsSymbols(): Promise<string[]> {
-    const symbols = ['MSFT', 'META', 'GOOG', 'AMZN'];
+async function getRecentlyReportedMajorEarningsSymbols(): Promise<string[]> {
+    const symbols = ['MSFT', 'META', 'GOOG', 'AMZN', 'AAPL', 'NVDA', 'TSLA', 'TSM'];
     const recentRows = await Promise.allSettled(symbols.map(async (symbol) => {
         const row = await getRecentEarningsBySymbol(symbol);
         return row && typeof row.days_since === 'number' && row.days_since <= 2 ? symbol : null;
@@ -3585,7 +3587,7 @@ ${titles.map((title, index) => `${index + 1}. ${title}`).join('\n')}
 }
 
 async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSignals> {
-    const [openAiResults, uaeResults, centralBankResults, geopoliticalResults, mag7EarningsResults] = await Promise.allSettled([
+    const [openAiResults, uaeResults, centralBankResults, geopoliticalResults, majorEarningsResults] = await Promise.allSettled([
         fetchNewsItemsByQuery('OpenAI missed revenue user targets Oracle CoreWeave AI stocks WSJ', {
             excludeEtfAndFunds: false
         }),
@@ -3607,14 +3609,14 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
     const uaeItems = uaeResults.status === 'fulfilled' ? uaeResults.value : [];
     const centralBankItems = centralBankResults.status === 'fulfilled' ? centralBankResults.value : [];
     const geopoliticalItems = geopoliticalResults.status === 'fulfilled' ? geopoliticalResults.value : [];
-    const mag7EarningsItems = mag7EarningsResults.status === 'fulfilled' ? mag7EarningsResults.value : [];
-    const recentlyReportedMag7 = await getRecentlyReportedMag7EarningsSymbols().catch(() => []);
+    const majorEarningsItems = majorEarningsResults.status === 'fulfilled' ? majorEarningsResults.value : [];
+    const recentlyReportedMajor = await getRecentlyReportedMajorEarningsSymbols().catch(() => []);
     const existingTitles = new Set([
         ...openAiItems.map((item) => item.title),
         ...uaeItems.map((item) => item.title),
         ...centralBankItems.map((item) => item.title),
         ...geopoliticalItems.map((item) => item.title),
-        ...mag7EarningsItems.map((item) => item.title),
+        ...majorEarningsItems.map((item) => item.title),
     ].map((title) => title.toLowerCase()));
 
     const broadNewsResults = await Promise.allSettled([
@@ -3641,9 +3643,9 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
         .filter((title, index, arr) => arr.indexOf(title) === index)
         .slice(0, 20);
     const breakingNewsCandidates = await scoreBreakingNewsHeadlines(unseenTitles);
-    const mag7EarningsResultTitles = compactHeadlineList(mag7EarningsItems, isMag7EarningsResultHeadline);
-    if (recentlyReportedMag7.length >= 2 && mag7EarningsResultTitles.length === 0) {
-        mag7EarningsResultTitles.push(`${recentlyReportedMag7.join('、')}已发布财报，AI云和广告收入进入结果验证`);
+    const majorEarningsResultTitles = compactHeadlineList(majorEarningsItems, isMajorEarningsResultHeadline);
+    if (recentlyReportedMajor.length >= 1 && majorEarningsResultTitles.length === 0) {
+        majorEarningsResultTitles.push(`${recentlyReportedMajor.join('、')}已发布财报，AI云和广告收入进入结果验证`);
     }
 
     return {
@@ -3651,7 +3653,7 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
         uaeOpecExitTitles: compactHeadlineList(uaeItems, isUaeOpecExitHeadline),
         centralBankShockTitles: compactHeadlineList(centralBankItems, isCentralBankShockHeadline),
         majorGeopoliticalTitles: compactHeadlineList(geopoliticalItems, isMajorGeopoliticalHeadline),
-        mag7EarningsResultTitles,
+        majorEarningsResultTitles,
         breakingNewsCandidates,
     };
 }
@@ -3678,9 +3680,9 @@ function mergeDailyPitchHeadlineSignalsFromTopics(
             ...headlineSignals.majorGeopoliticalTitles,
             ...titles.filter(isMajorGeopoliticalHeadline)
         ].slice(0, 3),
-        mag7EarningsResultTitles: [
-            ...headlineSignals.mag7EarningsResultTitles,
-            ...titles.filter(isMag7EarningsResultHeadline)
+        majorEarningsResultTitles: [
+            ...headlineSignals.majorEarningsResultTitles,
+            ...titles.filter(isMajorEarningsResultHeadline)
         ].slice(0, 3),
         breakingNewsCandidates: headlineSignals.breakingNewsCandidates,
     };
@@ -3693,7 +3695,7 @@ function ensureMandatoryHeadlineTriggers(
 ): NonNullable<DailyMarketNarrative['daily_pitch_triggers']> {
     const next = [...selected];
     const mandatoryHeadlines = [
-        ...(headlineSignals.mag7EarningsResultTitles.length > 0 ? ['Mag7财报落地'] : []),
+        ...(headlineSignals.majorEarningsResultTitles.length > 0 ? ['超级财报周结果落地'] : []),
         ...(headlineSignals.openAiTargetMissTitles.length > 0 ? ['今晚财报验证AI叙事'] : []),
         ...(headlineSignals.uaeOpecExitTitles.length > 0 ? ['阿联酋退出OPEC，油市动荡加剧'] : []),
         ...(headlineSignals.centralBankShockTitles.length > 0 ? ['央行政策超预期'] : []),
@@ -3756,34 +3758,41 @@ async function buildDailyPitchCandidateSection(
         'INTC',
         'UNH'
     ]);
+    const recentlyReported = await getRecentlyReportedMajorEarningsSymbols().catch(() => []);
+    const recentlyReportedSet = new Set(recentlyReported);
 
     try {
         const earningsRows = (await getUpcomingEarningsNextNDays(7))
             .filter((row) => row.days_until >= 1 && megaCapOrCommonFcnUnderlyings.has(row.symbol))
+            .filter((row) => !recentlyReportedSet.has(row.symbol))
             .slice(0, 12);
         if (earningsRows.length >= 2) {
             const grouped = earningsRows
                 .map((row) => `${row.symbol}${row.days_until === 1 ? '(今晚盘后)' : row.days_until === 2 ? '(明晚盘后)' : `(${row.days_until}日后)`}`)
                 .join('、');
             candidates.push([
-                '[HIGH][3B] 超级财报周开启',
+                '[PRE-EARNINGS][HIGH][3B] 超级财报周开启',
                 `数据锚点：未来7日内待发财报的权重/FCN常见底层包括 ${grouped}。`,
                 '为什么可聊：市场从宏观headline切回盈利验证，AI capex、云业务、广告或电动车利润率会直接影响美股科技仓位与相关FCN底层波动率。',
                 '建议标题：超级财报周开启',
-                '适合客户：美股科技仓位客户、FCN底层含Mag7/半导体客户'
+                '适合客户：美股科技仓位客户、FCN底层含核心科技/半导体客户'
             ].join('\n'));
         }
     } catch {
         // Earnings are additive pitch context. Keep narrative generation resilient.
     }
 
-    if (headlineSignals.mag7EarningsResultTitles.length > 0) {
+    if (headlineSignals.majorEarningsResultTitles.length > 0) {
+        const reportedForCopy = recentlyReported.length > 0 ? recentlyReported : ['权重科技股'];
+        const postEarningsHeadline = recentlyReported.length >= 3
+            ? '超级财报周结果落地'
+            : `${reportedForCopy[0]}等财报落地`;
         candidates.push([
-            '[CRITICAL][3B/3E] 权重科技股财报已落地',
-            `新闻锚点：${headlineSignals.mag7EarningsResultTitles[0]}。`,
-            '为什么可聊：MSFT、META、GOOG、AMZN财报会同时重定价AI capex、云业务、广告收入和科技FCN底层IV；客户今天关心的是财报结果能否支撑前期科技仓位估值。',
-            '建议标题：Mag7财报落地',
-            '适合客户：美股科技仓位客户、Mag7或AI主题FCN客户'
+            `[POST-EARNINGS][CRITICAL][3B/3E] ${postEarningsHeadline}`,
+            `新闻锚点：${headlineSignals.majorEarningsResultTitles[0]}。`,
+            `为什么可聊：${reportedForCopy.join('、')}财报已落地，会重定价AI capex、云业务、广告/电动车收入和科技FCN底层IV；客户今天关心的是财报结果能否支撑前期科技仓位估值。`,
+            `建议标题：${postEarningsHeadline}`,
+            '适合客户：美股科技仓位客户、核心科技或AI主题FCN客户'
         ].join('\n'));
     }
 
@@ -3791,7 +3800,7 @@ async function buildDailyPitchCandidateSection(
         candidates.push([
             '[CRITICAL][3C/3E] AI capex叙事进入证伪窗口',
             `新闻锚点：${headlineSignals.openAiTargetMissTitles[0]}。`,
-            '为什么可聊：OpenAI用户/收入目标争议直接冲击ORCL、CoreWeave、NVDA等AI算力链，今晚Mag7财报的焦点应从“增长多少”升级为“能否证实AI capex回报”。',
+            '为什么可聊：OpenAI用户/收入目标争议直接冲击ORCL、CoreWeave、NVDA等AI算力链，权重科技股财报的焦点应从“增长多少”升级为“能否证实AI capex回报”。',
             '建议标题：今晚财报验证AI叙事',
             '适合客户：美股科技仓位客户、AI/半导体FCN客户'
         ].join('\n'));
@@ -3979,7 +3988,7 @@ async function buildDailyPitchCandidateSection(
     }
 
     return [
-        '今日可聊候选信号（模型必须优先从这里选择3条；HIGH 优先于 MEDIUM，LOW 只有在缺少更强候选时使用）：',
+        '今日可聊候选信号（模型必须优先从这里选择3条；HIGH 优先于 MEDIUM，LOW 只有在缺少更强候选时使用；若同时存在 [POST-EARNINGS] 和 [PRE-EARNINGS] 且底层标的有重叠，[POST-EARNINGS] 优先，[PRE-EARNINGS] 降级处理或合并为背景信息，不单独占一张卡片）：',
         ...candidates.slice(0, 8).map((candidate, index) => `${index + 1}. ${candidate}`)
     ].join('\n\n');
 }
@@ -4009,23 +4018,29 @@ async function buildDeterministicDailyPitchTriggers(
         'INTC',
         'UNH'
     ]);
+    const recentlyReported = await getRecentlyReportedMajorEarningsSymbols().catch(() => []);
+    const recentlyReportedSet = new Set(recentlyReported);
 
-    if (headlineSignals.mag7EarningsResultTitles.length > 0) {
-        const anchor = headlineSignals.mag7EarningsResultTitles[0];
-        const context = `MSFT、META、GOOG、AMZN财报已集中落地，市场从等待财报切到AI capex、云业务、广告收入和科技FCN底层IV的结果重定价。`;
+    if (headlineSignals.majorEarningsResultTitles.length > 0) {
+        const anchor = headlineSignals.majorEarningsResultTitles[0];
+        const reportedForCopy = recentlyReported.length > 0 ? recentlyReported : ['权重科技股'];
+        const headline = recentlyReported.length >= 3
+            ? '超级财报周结果落地'
+            : `${reportedForCopy[0]}等财报落地`;
+        const context = `${reportedForCopy.join('、')}财报已落地，市场从等待财报切到AI capex、云业务、广告/电动车收入和科技FCN底层IV的结果重定价。`;
         triggers.push({
             id: triggers.length + 1,
-            headline: 'Mag7财报落地',
-            hook: 'Mag7财报落地',
+            headline,
+            hook: headline,
             context,
             why_now: context,
-            talking_point: '昨晚权重科技股财报已经给出第一轮答案，今天客户最需要看的不是指数涨跌，而是AI投入、云和广告能否继续支撑科技仓位估值。',
-            pitch_line: '昨晚权重科技股财报已经给出第一轮答案，今天客户最需要看的不是指数涨跌，而是AI投入、云和广告能否继续支撑科技仓位估值。',
+            talking_point: '权重科技股财报已经给出第一轮答案，今天客户最需要看的不是指数涨跌，而是AI投入、云业务和利润率能否继续支撑科技仓位估值。',
+            pitch_line: '权重科技股财报已经给出第一轮答案，今天客户最需要看的不是指数涨跌，而是AI投入、云业务和利润率能否继续支撑科技仓位估值。',
             client_type: '美股科技或FCN客户',
             watchpoints: ['AI capex指引', '云业务增速', '盘后股价和IV'],
-            related_assets: ['US Equities', 'Mag7', 'MSFT', 'META', 'AMZN'],
-            asset_tags: ['US Equities', 'Mag7', 'MSFT', 'META', 'AMZN'],
-            materiality_trigger: '3B/3E: Mag7 earnings results and FCN underlying repricing',
+            related_assets: ['US Equities', 'Major Tech', ...reportedForCopy].slice(0, 5),
+            asset_tags: ['US Equities', 'Major Tech', ...reportedForCopy].slice(0, 5),
+            materiality_trigger: '3B/3E: major tech earnings results and FCN underlying repricing',
             risk_flag: true,
             time_sensitivity: 'immediate',
             source_summary: `来自财报日历与新闻标题：${anchor}`
@@ -4035,6 +4050,7 @@ async function buildDeterministicDailyPitchTriggers(
     try {
         const earningsRows = (await getUpcomingEarningsNextNDays(7))
             .filter((row) => row.days_until >= 1 && megaCapOrCommonFcnUnderlyings.has(row.symbol))
+            .filter((row) => !recentlyReportedSet.has(row.symbol))
             .slice(0, 8);
         if (earningsRows.length >= 2) {
             const grouped = earningsRows
@@ -4062,11 +4078,11 @@ async function buildDeterministicDailyPitchTriggers(
                     ? ['OpenAI相关表述', 'AI capex指引', 'FCN底层IV变化']
                     : ['权重股财报', 'AI capex指引', '科技底层波动率'],
                 related_assets: hasOpenAiStress
-                    ? ['US Equities', 'ORCL', 'NVDA', 'Mag7', 'FCN']
-                    : ['US Equities', 'Mag7', 'FCN'],
+                    ? ['US Equities', 'ORCL', 'NVDA', 'Major Tech', 'FCN']
+                    : ['US Equities', 'Major Tech', 'FCN'],
                 asset_tags: hasOpenAiStress
-                    ? ['US Equities', 'ORCL', 'NVDA', 'Mag7', 'FCN']
-                    : ['US Equities', 'Mag7', 'FCN'],
+                    ? ['US Equities', 'ORCL', 'NVDA', 'Major Tech', 'FCN']
+                    : ['US Equities', 'Major Tech', 'FCN'],
                 materiality_trigger: hasOpenAiStress
                     ? '3B/3C/3E: major earnings and AI capex narrative stress'
                     : '3B: major earnings within 5 trading days',
@@ -4415,6 +4431,25 @@ function normalizeDailyPitchTriggers(
         .slice(0, 3);
 }
 
+async function getYesterdayDailyPitchTriggers(): Promise<DailyPitchTrigger[]> {
+    try {
+        const result = await pool.query<{ narrative_json: unknown }>(
+            `
+            SELECT narrative_json
+            FROM daily_market_narratives
+            WHERE run_date = (CURRENT_DATE - INTERVAL '1 day')::date
+            ORDER BY created_at DESC
+            LIMIT 1
+            `
+        );
+        const row = result.rows[0];
+        if (!row) return [];
+        return normalizeDailyPitchTriggers((row.narrative_json as any)?.daily_pitch_triggers);
+    } catch {
+        return [];
+    }
+}
+
 function buildPitchTriggersFromBuckets(
     assetBuckets: DailyMarketNarrative['asset_buckets']
 ): NonNullable<DailyMarketNarrative['daily_pitch_triggers']> {
@@ -4506,14 +4541,25 @@ function timeSensitivityWeight(trigger: DailyPitchTrigger): number {
     return 0.2;
 }
 
+function isCriticalPitchTrigger(trigger: DailyPitchTrigger): boolean {
+    const headline = trigger.headline ?? trigger.hook ?? '';
+    return trigger.risk_flag === true
+        || /Mag7财报落地|超级财报周结果落地|今晚财报验证AI叙事|阿联酋退出OPEC|央行政策超预期|地缘风险结构升级/.test(headline)
+        || (trigger.watchpoints?.length ?? 0) >= 2;
+}
+
 function scorePitchTriggerForRm(
     trigger: DailyPitchTrigger,
     previousHeadlines: Set<string>,
-    previousLanes: Set<PitchAssetLane>
+    previousLanes: Set<PitchAssetLane>,
+    yesterdayHeadlines: Set<string> = new Set()
 ): number {
     let score = materialityWeight(trigger) + openerQualityWeight(trigger) + timeSensitivityWeight(trigger);
     const headline = normalizePitchHeadline(trigger);
     const lane = classifyPitchAssetLane(trigger);
+    const isRepetitionExempt = trigger.risk_flag === true
+        || (trigger.watchpoints?.length ?? 0) > 0
+        || /CRITICAL/i.test(trigger.context ?? '');
 
     if (trigger.risk_flag) {
         score += 0.25;
@@ -4521,8 +4567,11 @@ function scorePitchTriggerForRm(
     if (trigger.client_type && /客户|仓位|敞口|票据|fcn|at1/i.test(trigger.client_type)) {
         score += 0.45;
     }
-    if (previousHeadlines.has(headline)) {
+    if (!isRepetitionExempt && previousHeadlines.has(headline)) {
         score -= 1.7;
+    }
+    if (!isRepetitionExempt && yesterdayHeadlines.has(headline)) {
+        score -= 1.2;
     }
     if (previousLanes.has(lane)) {
         score -= 0.35;
@@ -4554,14 +4603,23 @@ function applyRmConversationRanking(
     previousTriggers: DailyPitchTrigger[]
 ): NonNullable<DailyMarketNarrative['daily_pitch_triggers']> {
     const candidates = dedupePitchTriggers(triggers);
-    if (candidates.length <= 3) {
-        return candidates.map((item, index) => ({ ...item, id: index + 1 }));
-    }
-
     const previousHeadlines = new Set(previousTriggers.map((trigger) => normalizePitchHeadline(trigger)).filter(Boolean));
+    const yesterdayHeadlines = new Set(yesterdayDailyPitchTriggers.map((trigger) => normalizePitchHeadline(trigger)).filter(Boolean));
     const previousLanes = new Set(previousTriggers.map((trigger) => classifyPitchAssetLane(trigger)));
     const selected: NonNullable<DailyMarketNarrative['daily_pitch_triggers']> = [];
     const selectedLanes = new Set<PitchAssetLane>();
+    const criticalCandidates = candidates
+        .filter(isCriticalPitchTrigger)
+        .sort((left, right) => (
+            scorePitchTriggerForRm(right, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>())
+            - scorePitchTriggerForRm(left, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>())
+        ));
+    const reservedCriticalCount = criticalCandidates.length > 1 ? 2 : criticalCandidates.length;
+
+    for (const critical of criticalCandidates.slice(0, reservedCriticalCount)) {
+        selected.push(critical);
+        selectedLanes.add(classifyPitchAssetLane(critical));
+    }
 
     while (selected.length < 3 && selected.length < candidates.length) {
         let best: DailyPitchTrigger | null = null;
@@ -4573,7 +4631,7 @@ function applyRmConversationRanking(
             }
 
             const lane = classifyPitchAssetLane(candidate);
-            let score = scorePitchTriggerForRm(candidate, previousHeadlines, previousLanes);
+            let score = scorePitchTriggerForRm(candidate, previousHeadlines, previousLanes, yesterdayHeadlines);
             if (selectedLanes.has(lane)) {
                 score -= selected.length === 0 ? 0 : 1.15;
             }
@@ -4604,7 +4662,7 @@ function applyRmConversationRanking(
             if (selected.includes(candidate) || !lastMileLanes.includes(classifyPitchAssetLane(candidate))) {
                 continue;
             }
-            const score = scorePitchTriggerForRm(candidate, previousHeadlines, previousLanes);
+            const score = scorePitchTriggerForRm(candidate, previousHeadlines, previousLanes, yesterdayHeadlines);
             if (score > bestLastMileScore) {
                 bestLastMileCandidate = candidate;
                 bestLastMileScore = score;
@@ -4615,13 +4673,18 @@ function applyRmConversationRanking(
             let replaceIndex = 2;
             let weakestScore = Number.POSITIVE_INFINITY;
             for (let index = 1; index < selected.length; index += 1) {
-                const score = scorePitchTriggerForRm(selected[index], previousHeadlines, previousLanes);
+                if (isCriticalPitchTrigger(selected[index])) {
+                    continue;
+                }
+                const score = scorePitchTriggerForRm(selected[index], previousHeadlines, previousLanes, yesterdayHeadlines);
                 if (score < weakestScore) {
                     weakestScore = score;
                     replaceIndex = index;
                 }
             }
-            selected[replaceIndex] = bestLastMileCandidate;
+            if (!isCriticalPitchTrigger(selected[replaceIndex])) {
+                selected[replaceIndex] = bestLastMileCandidate;
+            }
         } else if (bestLastMileCandidate) {
             selected.push(bestLastMileCandidate);
         }
@@ -9083,6 +9146,7 @@ async function refreshDailyMarketNarrative(
         if (previousNarrative?.daily_pitch_triggers?.length) {
             previousDailyPitchTriggers = [...previousNarrative.daily_pitch_triggers];
         }
+        yesterdayDailyPitchTriggers = await getYesterdayDailyPitchTriggers();
 
         try {
             const result = await generateDailyMarketNarrative();
