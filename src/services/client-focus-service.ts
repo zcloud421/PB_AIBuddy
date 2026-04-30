@@ -3518,7 +3518,7 @@ function buildFomcDecisionCopy(anchor: string, todayIso: string): {
     const targetRange = extractFomcTargetRange(anchor) ?? (finalMeeting ? '3.5%-3.75%' : null);
     const hasConcreteAnchor = anchor.trim().length > 0 && !/本次会议利率决议已公布/.test(anchor);
     const anchorEvidence = hasConcreteAnchor
-        ? `新闻锚点显示：${anchor.replace(/\s+/g, ' ').slice(0, 96)}。`
+        ? `新闻锚点：${anchor.replace(/\s+/g, ' ').slice(0, 64)}。`
         : '';
     const decisionText =
         action === 'hold'
@@ -3529,9 +3529,9 @@ function buildFomcDecisionCopy(anchor: string, todayIso: string): {
                     ? `美联储宣布加息${targetRange ? `，目标区间调整至${targetRange}` : ''}`
                     : '美联储本次会议利率决议已公布';
     const transitionText = finalMeeting
-        ? '这是鲍威尔任内最后一次主持议息和记者会，领导层交接会影响未来降息路径可信度'
+        ? '鲍威尔最后FOMC记者会，交接期影响降息路径可信度'
         : '市场关注声明措辞和点阵图对未来降息路径的指引';
-    const portfolioImpact = 'RM重点看长久期债券价格、AT1利差、美元对冲成本和carry trade仓位。';
+    const portfolioImpact = '留意长债价格、AT1利差、美元对冲成本和carry trade仓位。';
     const context = `${anchorEvidence}${decisionText}；${transitionText}。${portfolioImpact}`;
     const talkingPoint = finalMeeting
         ? `昨晚美联储${action === 'hold' ? `维持利率${targetRange ? `在${targetRange}` : '不变'}` : '公布议息结果'}，也是鲍威尔最后一次主持FOMC记者会；接下来政策交接会影响债券久期和外币对冲成本，我们今天可以过一下。`
