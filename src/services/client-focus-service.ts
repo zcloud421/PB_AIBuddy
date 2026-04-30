@@ -3484,7 +3484,7 @@ function isFomcDecisionHeadline(title: string): boolean {
     const normalized = title.toLowerCase();
     const hasFed = /(fed|federal reserve|fomc|powell|jerome powell)/i.test(title);
     const hasDecision = /(rate decision|rates unchanged|holds rates|rate hold|rate cut|rate hike|basis points|bps|dot plot|press conference|statement|meeting minutes|inflation target|policy statement|利率决议|按兵不动|降息|加息|利率不变|新闻发布会|声明|点阵图)/i.test(normalized);
-    const isPreview = /(what to expect|preview|ahead of|before the decision|meeting today|watch live|live updates|预览|前瞻|等待)/i.test(normalized);
+    const isPreview = /(what to expect|preview|ahead of|before the decision|meeting today|meeting date|date and time|where to watch|how to watch|what time|when is|watch live|watch fomc|live stream|livestream|live updates|预览|前瞻|等待)/i.test(normalized);
     return hasFed && hasDecision && !isPreview;
 }
 
@@ -3516,7 +3516,7 @@ function buildFomcDecisionCopy(anchor: string, todayIso: string): {
     const parsedAction = extractFomcRateAction(anchor);
     const action = parsedAction ?? (finalMeeting ? 'hold' : null);
     const targetRange = extractFomcTargetRange(anchor) ?? (finalMeeting ? '3.5%-3.75%' : null);
-    const isLowQualityAnchor = /(five key takeaways|key takeaways|everything you need to know|what you need to know|here('s| are| is)|live updates|live blog|watch live|read more|explainer|guide to|what to watch|what happened|recap|roundup)/i.test(anchor);
+    const isLowQualityAnchor = /(five key takeaways|key takeaways|everything you need to know|what you need to know|here('s| are| is)|meeting date|date and time|where to watch|how to watch|what time|when is|live updates|live blog|watch live|watch fomc|live stream|livestream|read more|explainer|guide to|what to watch|what happened|recap|roundup)/i.test(anchor);
     const hasConcreteAnchor = anchor.trim().length > 0
         && !/本次会议利率决议已公布/.test(anchor)
         && !isLowQualityAnchor;
