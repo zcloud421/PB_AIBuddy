@@ -4156,7 +4156,8 @@ async function buildDeterministicDailyPitchTriggers(
     }
 
     if (headlineSignals.fomcMeetingResultTitles.length > 0) {
-        const context = `美联储本次会议利率决议已公布。${headlineSignals.fomcMeetingResultTitles[0]}。市场需重新校准降息路径与久期风险。`;
+        const fomcAnchor = headlineSignals.fomcMeetingResultTitles[0];
+        const context = '美联储本次会议利率决议已公布，市场需重新校准降息路径、美债久期和美元对冲成本。';
         triggers.push({
             id: triggers.length + 1,
             headline: '美联储议息结果落地',
@@ -4172,7 +4173,7 @@ async function buildDeterministicDailyPitchTriggers(
             materiality_trigger: '3B/3C: FOMC decision and rates path repricing',
             risk_flag: false,
             time_sensitivity: 'immediate',
-            source_summary: `来自FOMC窗口与新闻标题：${headlineSignals.fomcMeetingResultTitles[0]}`
+            source_summary: `来自FOMC窗口与新闻标题：${fomcAnchor}`
         });
     }
 
