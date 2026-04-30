@@ -3516,7 +3516,10 @@ function buildFomcDecisionCopy(anchor: string, todayIso: string): {
     const parsedAction = extractFomcRateAction(anchor);
     const action = parsedAction ?? (finalMeeting ? 'hold' : null);
     const targetRange = extractFomcTargetRange(anchor) ?? (finalMeeting ? '3.5%-3.75%' : null);
-    const hasConcreteAnchor = anchor.trim().length > 0 && !/本次会议利率决议已公布/.test(anchor);
+    const isLowQualityAnchor = /(five key takeaways|key takeaways|everything you need to know|what you need to know|here('s| are| is)|live updates|live blog|watch live|read more|explainer|guide to|what to watch|what happened|recap|roundup)/i.test(anchor);
+    const hasConcreteAnchor = anchor.trim().length > 0
+        && !/本次会议利率决议已公布/.test(anchor)
+        && !isLowQualityAnchor;
     const compactAnchor = truncateDailyPitchText(anchor.replace(/\s+/g, ' '), 72)
         .replace(/\s*[-–—]\s*$/u, '');
     const anchorEvidence = hasConcreteAnchor
@@ -3534,7 +3537,10 @@ function buildFomcDecisionCopy(anchor: string, todayIso: string): {
         ? '鲍威尔最后FOMC记者会，交接期影响降息路径可信度'
         : '市场关注声明措辞和点阵图对未来降息路径的指引';
     const portfolioImpact = '留意长债价格、AT1利差、美元对冲成本和carry trade仓位。';
-    const context = `${anchorEvidence}${decisionText}；${transitionText}。${portfolioImpact}`;
+    const context = truncateDailyPitchText(
+        `${anchorEvidence}${decisionText}；${transitionText}。${portfolioImpact}`,
+        120
+    );
     const talkingPoint = finalMeeting
         ? `昨晚美联储${action === 'hold' ? `维持利率${targetRange ? `在${targetRange}` : '不变'}` : '公布议息结果'}，也是鲍威尔最后一次主持FOMC记者会；接下来政策交接会影响债券久期和外币对冲成本，我们今天可以过一下。`
         : `昨晚美联储${action === 'hold' ? `维持利率${targetRange ? `在${targetRange}` : '不变'}` : action === 'cut' ? '降息' : action === 'hike' ? '加息' : '会议结果出来'}，声明和点阵图会影响债券久期和外币对冲成本，我们今天可以过一下。`;
