@@ -3466,6 +3466,13 @@ function isFomcDecisionWindow(todayIso: string): boolean {
     });
 }
 
+function isPowellFinalMeetingWindow(todayIso: string): boolean {
+    const current = Date.parse(`${todayIso}T00:00:00Z`);
+    const start = Date.parse('2026-04-29T00:00:00Z');
+    const end = Date.parse('2026-05-01T00:00:00Z');
+    return current >= start && current <= end;
+}
+
 function isCentralBankShockHeadline(title: string): boolean {
     const normalized = title.toLowerCase();
     const hasCentralBank = /(boj|bank of japan|日銀|日银|fed |federal reserve|ecb|european central bank|pboc|中国人民银行|rba|bank of england|boe)/i.test(title);
@@ -3479,6 +3486,56 @@ function isFomcDecisionHeadline(title: string): boolean {
     const hasDecision = /(rate decision|rates unchanged|holds rates|rate hold|rate cut|rate hike|basis points|bps|dot plot|press conference|statement|meeting minutes|inflation target|policy statement|利率决议|按兵不动|降息|加息|利率不变|新闻发布会|声明|点阵图)/i.test(normalized);
     const isPreview = /(what to expect|preview|ahead of|before the decision|meeting today|watch live|live updates|预览|前瞻|等待)/i.test(normalized);
     return hasFed && hasDecision && !isPreview;
+}
+
+function extractFomcRateAction(title: string): 'hold' | 'cut' | 'hike' | null {
+    const normalized = title.toLowerCase();
+    if (/(rate cut|cut rates|cuts rates|quarter-point reduction|lowered rates|lower rates|降息)/i.test(normalized)) {
+        return 'cut';
+    }
+    if (/(rate hike|hikes rates|raised rates|raise rates|加息)/i.test(normalized)) {
+        return 'hike';
+    }
+    if (/(hold|holds|held|unchanged|keeps rates|leave rates|left rates|steady|按兵不动|利率不变|维持|維持)/i.test(normalized)) {
+        return 'hold';
+    }
+    return null;
+}
+
+function extractFomcTargetRange(title: string): string | null {
+    const match = title.match(/(\d+(?:\.\d+)?\s*%?\s*(?:-|–|—|to|至|到|~)\s*\d+(?:\.\d+)?\s*%)/i);
+    return match ? match[1].replace(/\s+/g, '').replace(/to|至|到|~|–|—/i, '-') : null;
+}
+
+function buildFomcDecisionCopy(anchor: string, todayIso: string): {
+    context: string;
+    talkingPoint: string;
+    watchpoints: string[];
+} {
+    const finalMeeting = isPowellFinalMeetingWindow(todayIso) || /(final|last meeting|last.*chair|最后|最後|任期)/i.test(anchor);
+    const parsedAction = extractFomcRateAction(anchor);
+    const action = parsedAction ?? (finalMeeting ? 'hold' : null);
+    const targetRange = extractFomcTargetRange(anchor) ?? (finalMeeting ? '3.5%-3.75%' : null);
+    const decisionText =
+        action === 'hold'
+            ? `美联储维持利率${targetRange ? `在${targetRange}` : '不变'}`
+            : action === 'cut'
+                ? `美联储宣布降息${targetRange ? `，目标区间调整至${targetRange}` : ''}`
+                : action === 'hike'
+                    ? `美联储宣布加息${targetRange ? `，目标区间调整至${targetRange}` : ''}`
+                    : '美联储本次会议利率决议已公布';
+    const transitionText = finalMeeting
+        ? '这是鲍威尔任内最后一次主持议息，领导层交接增加未来政策路径不确定性'
+        : '市场关注声明措辞和点阵图对未来降息路径的指引';
+    const context = `${decisionText}；${transitionText}，市场需重新校准降息路径、美债久期和美元对冲成本。`;
+    const talkingPoint = finalMeeting
+        ? `昨晚美联储${action === 'hold' ? '维持利率不变' : '公布议息结果'}，也是鲍威尔最后一次主持会议；接下来政策交接会影响债券久期和外币对冲成本，我们今天可以过一下。`
+        : `昨晚美联储${action === 'hold' ? '维持利率不变' : action === 'cut' ? '降息' : action === 'hike' ? '加息' : '会议结果出来'}，声明和点阵图会影响债券久期和外币对冲成本，我们今天可以过一下。`;
+    const watchpoints = finalMeeting
+        ? ['接任人政策取向', '声明措辞变化', '美债10Y走势']
+        : ['声明措辞变化', '点阵图利率路径', '美债10Y走势'];
+
+    return { context, talkingPoint, watchpoints };
 }
 
 function isMajorGeopoliticalHeadline(title: string): boolean {
@@ -3926,10 +3983,14 @@ async function buildDailyPitchCandidateSection(
         ].join('\n'));
     }
     if (headlineSignals.fomcMeetingResultTitles.length > 0) {
+        const fomcCopy = buildFomcDecisionCopy(
+            headlineSignals.fomcMeetingResultTitles[0],
+            new Date().toISOString().slice(0, 10)
+        );
         candidates.push([
             '[CRITICAL][3B/3C] 美联储利率决议落地',
             `新闻锚点：${headlineSignals.fomcMeetingResultTitles[0]}。`,
-            '为什么可聊：FOMC决议直接重定价降息路径、美债久期、美元与carry trade逻辑；持有长久期债券、AT1、外币资产或借外币融资的客户需要今天重新校准利率与汇率敞口。',
+            `为什么可聊：${fomcCopy.context}`,
             '建议标题：美联储议息结果落地',
             '适合客户：持有AT1、长久期债、外币资产或利率敏感仓位的客户',
         ].join('\n'));
@@ -4157,17 +4218,17 @@ async function buildDeterministicDailyPitchTriggers(
 
     if (headlineSignals.fomcMeetingResultTitles.length > 0) {
         const fomcAnchor = headlineSignals.fomcMeetingResultTitles[0];
-        const context = '美联储本次会议利率决议已公布，市场需重新校准降息路径、美债久期和美元对冲成本。';
+        const fomcCopy = buildFomcDecisionCopy(fomcAnchor, new Date().toISOString().slice(0, 10));
         triggers.push({
             id: triggers.length + 1,
             headline: '美联储议息结果落地',
             hook: '美联储议息结果落地',
-            context,
-            why_now: context,
-            talking_point: '昨晚美联储会议结果出来了，声明措辞和点阵图有没有变化，直接影响你持有的债券和外币资产的久期和对冲成本，我们今天可以过一下。',
-            pitch_line: '昨晚美联储会议结果出来了，声明措辞和点阵图有没有变化，直接影响你持有的债券和外币资产的久期和对冲成本，我们今天可以过一下。',
+            context: fomcCopy.context,
+            why_now: fomcCopy.context,
+            talking_point: fomcCopy.talkingPoint,
+            pitch_line: fomcCopy.talkingPoint,
             client_type: '持有AT1、长久期债或外币资产客户',
-            watchpoints: ['声明措辞变化', '点阵图利率路径', '美债10Y走势'],
+            watchpoints: fomcCopy.watchpoints,
             related_assets: ['US Bonds', 'US 10Y', 'DXY', 'AT1', 'USD'],
             asset_tags: ['US Bonds', 'US 10Y', 'DXY', 'AT1', 'USD'],
             materiality_trigger: '3B/3C: FOMC decision and rates path repricing',
