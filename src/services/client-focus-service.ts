@@ -3516,6 +3516,10 @@ function buildFomcDecisionCopy(anchor: string, todayIso: string): {
     const parsedAction = extractFomcRateAction(anchor);
     const action = parsedAction ?? (finalMeeting ? 'hold' : null);
     const targetRange = extractFomcTargetRange(anchor) ?? (finalMeeting ? '3.5%-3.75%' : null);
+    const hasConcreteAnchor = anchor.trim().length > 0 && !/本次会议利率决议已公布/.test(anchor);
+    const anchorEvidence = hasConcreteAnchor
+        ? `新闻锚点显示：${anchor.replace(/\s+/g, ' ').slice(0, 96)}。`
+        : '';
     const decisionText =
         action === 'hold'
             ? `美联储维持利率${targetRange ? `在${targetRange}` : '不变'}`
@@ -3525,14 +3529,15 @@ function buildFomcDecisionCopy(anchor: string, todayIso: string): {
                     ? `美联储宣布加息${targetRange ? `，目标区间调整至${targetRange}` : ''}`
                     : '美联储本次会议利率决议已公布';
     const transitionText = finalMeeting
-        ? '这是鲍威尔任内最后一次主持议息，领导层交接增加未来政策路径不确定性'
+        ? '这是鲍威尔任内最后一次主持议息和记者会，领导层交接会影响未来降息路径可信度'
         : '市场关注声明措辞和点阵图对未来降息路径的指引';
-    const context = `${decisionText}；${transitionText}，市场需重新校准降息路径、美债久期和美元对冲成本。`;
+    const portfolioImpact = 'RM重点看长久期债券价格、AT1利差、美元对冲成本和carry trade仓位。';
+    const context = `${anchorEvidence}${decisionText}；${transitionText}。${portfolioImpact}`;
     const talkingPoint = finalMeeting
-        ? `昨晚美联储${action === 'hold' ? '维持利率不变' : '公布议息结果'}，也是鲍威尔最后一次主持会议；接下来政策交接会影响债券久期和外币对冲成本，我们今天可以过一下。`
-        : `昨晚美联储${action === 'hold' ? '维持利率不变' : action === 'cut' ? '降息' : action === 'hike' ? '加息' : '会议结果出来'}，声明和点阵图会影响债券久期和外币对冲成本，我们今天可以过一下。`;
+        ? `昨晚美联储${action === 'hold' ? `维持利率${targetRange ? `在${targetRange}` : '不变'}` : '公布议息结果'}，也是鲍威尔最后一次主持FOMC记者会；接下来政策交接会影响债券久期和外币对冲成本，我们今天可以过一下。`
+        : `昨晚美联储${action === 'hold' ? `维持利率${targetRange ? `在${targetRange}` : '不变'}` : action === 'cut' ? '降息' : action === 'hike' ? '加息' : '会议结果出来'}，声明和点阵图会影响债券久期和外币对冲成本，我们今天可以过一下。`;
     const watchpoints = finalMeeting
-        ? ['接任人政策取向', '声明措辞变化', '美债10Y走势']
+        ? ['鲍威尔最后记者会措辞', '接任人政策取向', '美债10Y走势']
         : ['声明措辞变化', '点阵图利率路径', '美债10Y走势'];
 
     return { context, talkingPoint, watchpoints };
