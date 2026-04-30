@@ -30,6 +30,7 @@ import {
     getLatestClientFocusDailyVerdict,
     getLatestDailyMarketNarrative,
     getLatestThemeBasketResult,
+    getRecentEarningsBySymbol,
     getUpcomingEarningsNextNDays,
     upsertDailyMarketNarrative
 } from '../db/queries/ideas';
@@ -142,6 +143,7 @@ interface DailyPitchHeadlineSignals {
     uaeOpecExitTitles: string[];
     centralBankShockTitles: string[];
     majorGeopoliticalTitles: string[];
+    mag7EarningsResultTitles: string[];
     breakingNewsCandidates: BreakingNewsCandidate[];
 }
 
@@ -163,6 +165,7 @@ const EMPTY_DAILY_PITCH_HEADLINE_SIGNALS: DailyPitchHeadlineSignals = {
     uaeOpecExitTitles: [],
     centralBankShockTitles: [],
     majorGeopoliticalTitles: [],
+    mag7EarningsResultTitles: [],
     breakingNewsCandidates: [],
 };
 
@@ -3453,6 +3456,27 @@ function isMajorGeopoliticalHeadline(title: string): boolean {
     return hasGeopolitical && hasImpact;
 }
 
+function isMag7EarningsResultHeadline(title: string): boolean {
+    const normalized = title.toLowerCase();
+    const hasMag7 = /(microsoft|msft|meta|alphabet|google|googl|goog|amazon|amzn)/i.test(title);
+    const hasEarnings = /(earnings|results|quarter|revenue|profit|eps|sales|cloud|azure|aws|advertising|ai capex|capex|guidance|财报|業績|业绩|营收|營收|利润|雲|云|广告|廣告|指引)/i.test(normalized);
+    const hasResult = /(beat|miss|beats|misses|surge|jump|fall|slump|rise|drop|after-hours|after hours|reports|reported|公布|发布|發布|超预期|超預期|不及预期|不及預期|上涨|上漲|下跌)/i.test(normalized);
+    return hasMag7 && hasEarnings && hasResult;
+}
+
+async function getRecentlyReportedMag7EarningsSymbols(): Promise<string[]> {
+    const symbols = ['MSFT', 'META', 'GOOG', 'AMZN'];
+    const rows = await Promise.allSettled(symbols.map(async (symbol) => {
+        const row = await getRecentEarningsBySymbol(symbol);
+        return row && typeof row.days_since === 'number' && row.days_since <= 2 ? symbol : null;
+    }));
+
+    return rows
+        .filter((row): row is PromiseFulfilledResult<string | null> => row.status === 'fulfilled')
+        .map((row) => row.value)
+        .filter((symbol): symbol is string => Boolean(symbol));
+}
+
 function compactHeadlineList(items: NewsItem[], predicate: (title: string) => boolean): string[] {
     const seen = new Set<string>();
     return items
@@ -3555,7 +3579,7 @@ ${titles.map((title, index) => `${index + 1}. ${title}`).join('\n')}
 }
 
 async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSignals> {
-    const [openAiResults, uaeResults, centralBankResults, geopoliticalResults] = await Promise.allSettled([
+    const [openAiResults, uaeResults, centralBankResults, geopoliticalResults, mag7EarningsResults] = await Promise.allSettled([
         fetchNewsItemsByQuery('OpenAI missed revenue user targets Oracle CoreWeave AI stocks WSJ', {
             excludeEtfAndFunds: false
         }),
@@ -3567,6 +3591,9 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
         }),
         fetchNewsItemsByQuery('geopolitical Taiwan sanctions tariff trade war chip ban export control market impact', {
             excludeEtfAndFunds: false
+        }),
+        fetchNewsItemsByQuery('Microsoft Meta Alphabet Google Amazon earnings results Azure AWS advertising AI capex guidance after hours', {
+            excludeEtfAndFunds: false
         })
     ]);
 
@@ -3574,11 +3601,14 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
     const uaeItems = uaeResults.status === 'fulfilled' ? uaeResults.value : [];
     const centralBankItems = centralBankResults.status === 'fulfilled' ? centralBankResults.value : [];
     const geopoliticalItems = geopoliticalResults.status === 'fulfilled' ? geopoliticalResults.value : [];
+    const mag7EarningsItems = mag7EarningsResults.status === 'fulfilled' ? mag7EarningsResults.value : [];
+    const recentlyReportedMag7 = await getRecentlyReportedMag7EarningsSymbols().catch(() => []);
     const existingTitles = new Set([
         ...openAiItems.map((item) => item.title),
         ...uaeItems.map((item) => item.title),
         ...centralBankItems.map((item) => item.title),
         ...geopoliticalItems.map((item) => item.title),
+        ...mag7EarningsItems.map((item) => item.title),
     ].map((title) => title.toLowerCase()));
 
     const broadNewsResults = await Promise.allSettled([
@@ -3605,12 +3635,17 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
         .filter((title, index, arr) => arr.indexOf(title) === index)
         .slice(0, 20);
     const breakingNewsCandidates = await scoreBreakingNewsHeadlines(unseenTitles);
+    const mag7EarningsResultTitles = compactHeadlineList(mag7EarningsItems, isMag7EarningsResultHeadline);
+    if (recentlyReportedMag7.length >= 2 && mag7EarningsResultTitles.length === 0) {
+        mag7EarningsResultTitles.push(`${recentlyReportedMag7.join('、')}已发布财报，AI云和广告收入进入结果验证`);
+    }
 
     return {
         openAiTargetMissTitles: compactHeadlineList(openAiItems, isOpenAiTargetMissHeadline),
         uaeOpecExitTitles: compactHeadlineList(uaeItems, isUaeOpecExitHeadline),
         centralBankShockTitles: compactHeadlineList(centralBankItems, isCentralBankShockHeadline),
         majorGeopoliticalTitles: compactHeadlineList(geopoliticalItems, isMajorGeopoliticalHeadline),
+        mag7EarningsResultTitles,
         breakingNewsCandidates,
     };
 }
@@ -3637,6 +3672,10 @@ function mergeDailyPitchHeadlineSignalsFromTopics(
             ...headlineSignals.majorGeopoliticalTitles,
             ...titles.filter(isMajorGeopoliticalHeadline)
         ].slice(0, 3),
+        mag7EarningsResultTitles: [
+            ...headlineSignals.mag7EarningsResultTitles,
+            ...titles.filter(isMag7EarningsResultHeadline)
+        ].slice(0, 3),
         breakingNewsCandidates: headlineSignals.breakingNewsCandidates,
     };
 }
@@ -3648,6 +3687,7 @@ function ensureMandatoryHeadlineTriggers(
 ): NonNullable<DailyMarketNarrative['daily_pitch_triggers']> {
     const next = [...selected];
     const mandatoryHeadlines = [
+        ...(headlineSignals.mag7EarningsResultTitles.length > 0 ? ['Mag7财报落地'] : []),
         ...(headlineSignals.openAiTargetMissTitles.length > 0 ? ['今晚财报验证AI叙事'] : []),
         ...(headlineSignals.uaeOpecExitTitles.length > 0 ? ['阿联酋退出OPEC，油市动荡加剧'] : []),
         ...(headlineSignals.centralBankShockTitles.length > 0 ? ['央行政策超预期'] : []),
@@ -3729,6 +3769,16 @@ async function buildDailyPitchCandidateSection(
         }
     } catch {
         // Earnings are additive pitch context. Keep narrative generation resilient.
+    }
+
+    if (headlineSignals.mag7EarningsResultTitles.length > 0) {
+        candidates.push([
+            '[CRITICAL][3B/3E] 权重科技股财报已落地',
+            `新闻锚点：${headlineSignals.mag7EarningsResultTitles[0]}。`,
+            '为什么可聊：MSFT、META、GOOG、AMZN财报会同时重定价AI capex、云业务、广告收入和科技FCN底层IV；客户今天关心的是财报结果能否支撑前期科技仓位估值。',
+            '建议标题：Mag7财报落地',
+            '适合客户：美股科技仓位客户、Mag7或AI主题FCN客户'
+        ].join('\n'));
     }
 
     if (headlineSignals.openAiTargetMissTitles.length > 0) {
@@ -3953,6 +4003,28 @@ async function buildDeterministicDailyPitchTriggers(
         'INTC',
         'UNH'
     ]);
+
+    if (headlineSignals.mag7EarningsResultTitles.length > 0) {
+        const anchor = headlineSignals.mag7EarningsResultTitles[0];
+        const context = `MSFT、META、GOOG、AMZN财报已集中落地，市场从等待财报切到AI capex、云业务、广告收入和科技FCN底层IV的结果重定价。`;
+        triggers.push({
+            id: triggers.length + 1,
+            headline: 'Mag7财报落地',
+            hook: 'Mag7财报落地',
+            context,
+            why_now: context,
+            talking_point: '昨晚权重科技股财报已经给出第一轮答案，今天客户最需要看的不是指数涨跌，而是AI投入、云和广告能否继续支撑科技仓位估值。',
+            pitch_line: '昨晚权重科技股财报已经给出第一轮答案，今天客户最需要看的不是指数涨跌，而是AI投入、云和广告能否继续支撑科技仓位估值。',
+            client_type: '美股科技或FCN客户',
+            watchpoints: ['AI capex指引', '云业务增速', '盘后股价和IV'],
+            related_assets: ['US Equities', 'Mag7', 'MSFT', 'META', 'AMZN'],
+            asset_tags: ['US Equities', 'Mag7', 'MSFT', 'META', 'AMZN'],
+            materiality_trigger: '3B/3E: Mag7 earnings results and FCN underlying repricing',
+            risk_flag: true,
+            time_sensitivity: 'immediate',
+            source_summary: `来自财报日历与新闻标题：${anchor}`
+        });
+    }
 
     try {
         const earningsRows = (await getUpcomingEarningsNextNDays(7))
