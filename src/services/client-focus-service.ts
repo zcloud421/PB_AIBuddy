@@ -145,6 +145,7 @@ interface DailyPitchHeadlineSignals {
     centralBankShockTitles: string[];
     majorGeopoliticalTitles: string[];
     majorEarningsResultTitles: string[];
+    fomcMeetingResultTitles: string[];
     breakingNewsCandidates: BreakingNewsCandidate[];
 }
 
@@ -167,6 +168,7 @@ const EMPTY_DAILY_PITCH_HEADLINE_SIGNALS: DailyPitchHeadlineSignals = {
     centralBankShockTitles: [],
     majorGeopoliticalTitles: [],
     majorEarningsResultTitles: [],
+    fomcMeetingResultTitles: [],
     breakingNewsCandidates: [],
 };
 
@@ -3444,11 +3446,38 @@ function isUaeOpecExitHeadline(title: string): boolean {
         && /(exit|quit|leave|withdraw|withdraws|leaves|quits|退出|離開|离开)/i.test(normalized);
 }
 
+const FOMC_DECISION_DATES_2026 = [
+    '2026-01-29',
+    '2026-03-19',
+    '2026-04-30',
+    '2026-06-11',
+    '2026-07-30',
+    '2026-09-17',
+    '2026-10-29',
+    '2026-12-10',
+] as const;
+
+function isFomcDecisionWindow(todayIso: string): boolean {
+    return FOMC_DECISION_DATES_2026.some((date) => {
+        const diff = Math.abs(
+            new Date(todayIso).getTime() - new Date(date).getTime()
+        ) / (1000 * 60 * 60 * 24);
+        return diff <= 1;
+    });
+}
+
 function isCentralBankShockHeadline(title: string): boolean {
     const normalized = title.toLowerCase();
     const hasCentralBank = /(boj|bank of japan|日銀|日银|fed |federal reserve|ecb|european central bank|pboc|中国人民银行|rba|bank of england|boe)/i.test(title);
     const hasShock = /(unexpected|surprise|emergency|cut|hike|pause|halt|intervene|intervention|pivot|意外|緊急|紧急|降息|加息|暂停|干预|转向)/i.test(normalized);
     return hasCentralBank && hasShock;
+}
+
+function isFomcDecisionHeadline(title: string): boolean {
+    const normalized = title.toLowerCase();
+    const hasFed = /(fed|federal reserve|fomc|powell|jerome powell)/i.test(title);
+    const hasDecision = /(rate decision|rates unchanged|holds rates|rate hold|rate cut|rate hike|basis points|bps|dot plot|press conference|statement|meeting minutes|inflation target|policy statement|利率决议|按兵不动|降息|加息|利率不变|新闻发布会|声明|点阵图)/i.test(normalized);
+    return hasFed && hasDecision;
 }
 
 function isMajorGeopoliticalHeadline(title: string): boolean {
@@ -3587,7 +3616,9 @@ ${titles.map((title, index) => `${index + 1}. ${title}`).join('\n')}
 }
 
 async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSignals> {
-    const [openAiResults, uaeResults, centralBankResults, geopoliticalResults, majorEarningsResults] = await Promise.allSettled([
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const onFomcWindow = isFomcDecisionWindow(todayIso);
+    const [openAiResults, uaeResults, centralBankResults, geopoliticalResults, majorEarningsResults, fomcResults] = await Promise.allSettled([
         fetchNewsItemsByQuery('OpenAI missed revenue user targets Oracle CoreWeave AI stocks WSJ', {
             excludeEtfAndFunds: false
         }),
@@ -3600,9 +3631,14 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
         fetchNewsItemsByQuery('geopolitical Taiwan sanctions tariff trade war chip ban export control market impact', {
             excludeEtfAndFunds: false
         }),
-        fetchNewsItemsByQuery('Microsoft Meta Alphabet Google Amazon earnings results Azure AWS advertising AI capex guidance after hours', {
+        fetchNewsItemsByQuery('Microsoft Meta Alphabet Google Amazon Apple Nvidia Tesla TSMC earnings results Azure AWS advertising AI capex guidance after hours', {
             excludeEtfAndFunds: false
-        })
+        }),
+        onFomcWindow
+            ? fetchNewsItemsByQuery('Fed FOMC meeting rate decision statement dot plot Powell press conference interest rates', {
+                excludeEtfAndFunds: false
+            })
+            : Promise.resolve([]),
     ]);
 
     const openAiItems = openAiResults.status === 'fulfilled' ? openAiResults.value : [];
@@ -3610,6 +3646,7 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
     const centralBankItems = centralBankResults.status === 'fulfilled' ? centralBankResults.value : [];
     const geopoliticalItems = geopoliticalResults.status === 'fulfilled' ? geopoliticalResults.value : [];
     const majorEarningsItems = majorEarningsResults.status === 'fulfilled' ? majorEarningsResults.value : [];
+    const fomcItems = fomcResults.status === 'fulfilled' ? fomcResults.value : [];
     const recentlyReportedMajor = await getRecentlyReportedMajorEarningsSymbols().catch(() => []);
     const existingTitles = new Set([
         ...openAiItems.map((item) => item.title),
@@ -3617,6 +3654,7 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
         ...centralBankItems.map((item) => item.title),
         ...geopoliticalItems.map((item) => item.title),
         ...majorEarningsItems.map((item) => item.title),
+        ...fomcItems.map((item) => item.title),
     ].map((title) => title.toLowerCase()));
 
     const broadNewsResults = await Promise.allSettled([
@@ -3647,6 +3685,10 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
     if (recentlyReportedMajor.length >= 1 && majorEarningsResultTitles.length === 0) {
         majorEarningsResultTitles.push(`${recentlyReportedMajor.join('、')}已发布财报，AI云和广告收入进入结果验证`);
     }
+    const fomcMeetingResultTitles = compactHeadlineList(fomcItems, isFomcDecisionHeadline);
+    if (onFomcWindow && fomcMeetingResultTitles.length === 0) {
+        fomcMeetingResultTitles.push('美联储本次会议利率决议已公布，市场关注声明措辞与点阵图变化');
+    }
 
     return {
         openAiTargetMissTitles: compactHeadlineList(openAiItems, isOpenAiTargetMissHeadline),
@@ -3654,6 +3696,7 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
         centralBankShockTitles: compactHeadlineList(centralBankItems, isCentralBankShockHeadline),
         majorGeopoliticalTitles: compactHeadlineList(geopoliticalItems, isMajorGeopoliticalHeadline),
         majorEarningsResultTitles,
+        fomcMeetingResultTitles,
         breakingNewsCandidates,
     };
 }
@@ -3684,6 +3727,10 @@ function mergeDailyPitchHeadlineSignalsFromTopics(
             ...headlineSignals.majorEarningsResultTitles,
             ...titles.filter(isMajorEarningsResultHeadline)
         ].slice(0, 3),
+        fomcMeetingResultTitles: [
+            ...headlineSignals.fomcMeetingResultTitles,
+            ...titles.filter(isFomcDecisionHeadline),
+        ].slice(0, 3),
         breakingNewsCandidates: headlineSignals.breakingNewsCandidates,
     };
 }
@@ -3699,6 +3746,7 @@ function ensureMandatoryHeadlineTriggers(
         ...(headlineSignals.openAiTargetMissTitles.length > 0 ? ['今晚财报验证AI叙事'] : []),
         ...(headlineSignals.uaeOpecExitTitles.length > 0 ? ['阿联酋退出OPEC，油市动荡加剧'] : []),
         ...(headlineSignals.centralBankShockTitles.length > 0 ? ['央行政策超预期'] : []),
+        ...(headlineSignals.fomcMeetingResultTitles.length > 0 ? ['美联储议息结果落地'] : []),
         ...(headlineSignals.majorGeopoliticalTitles.length > 0 ? ['地缘风险结构升级'] : []),
         ...headlineSignals.breakingNewsCandidates
             .filter((candidate) => candidate.score >= 8)
@@ -3874,6 +3922,15 @@ async function buildDailyPitchCandidateSection(
             '为什么可聊：央行意外政策变化直接影响利率路径、汇率走势和久期资产定价；持有AT1、长久期债券或外币资产的客户需要重新校准利率与汇率风险敞口。',
             '建议标题：央行政策超预期',
             '适合客户：持有AT1、长久期债或外币资产客户'
+        ].join('\n'));
+    }
+    if (headlineSignals.fomcMeetingResultTitles.length > 0) {
+        candidates.push([
+            '[CRITICAL][3B/3C] 美联储利率决议落地',
+            `新闻锚点：${headlineSignals.fomcMeetingResultTitles[0]}。`,
+            '为什么可聊：FOMC决议直接重定价降息路径、美债久期、美元与carry trade逻辑；持有长久期债券、AT1、外币资产或借外币融资的客户需要今天重新校准利率与汇率敞口。',
+            '建议标题：美联储议息结果落地',
+            '适合客户：持有AT1、长久期债、外币资产或利率敏感仓位的客户',
         ].join('\n'));
     }
 
@@ -4095,6 +4152,27 @@ async function buildDeterministicDailyPitchTriggers(
         }
     } catch {
         // Keep deterministic fallback resilient when earnings DB is temporarily unavailable.
+    }
+
+    if (headlineSignals.fomcMeetingResultTitles.length > 0) {
+        const context = `美联储本次会议利率决议已公布。${headlineSignals.fomcMeetingResultTitles[0]}。市场需重新校准降息路径与久期风险。`;
+        triggers.push({
+            id: triggers.length + 1,
+            headline: '美联储议息结果落地',
+            hook: '美联储议息结果落地',
+            context,
+            why_now: context,
+            talking_point: '昨晚美联储会议结果出来了，声明措辞和点阵图有没有变化，直接影响你持有的债券和外币资产的久期和对冲成本，我们今天可以过一下。',
+            pitch_line: '昨晚美联储会议结果出来了，声明措辞和点阵图有没有变化，直接影响你持有的债券和外币资产的久期和对冲成本，我们今天可以过一下。',
+            client_type: '持有AT1、长久期债或外币资产客户',
+            watchpoints: ['声明措辞变化', '点阵图利率路径', '美债10Y走势'],
+            related_assets: ['US Bonds', 'US 10Y', 'DXY', 'AT1', 'USD'],
+            asset_tags: ['US Bonds', 'US 10Y', 'DXY', 'AT1', 'USD'],
+            materiality_trigger: '3B/3C: FOMC decision and rates path repricing',
+            risk_flag: false,
+            time_sensitivity: 'immediate',
+            source_summary: `来自FOMC窗口与新闻标题：${headlineSignals.fomcMeetingResultTitles[0]}`
+        });
     }
 
     const sox = byCode.get('SOX');
@@ -4544,7 +4622,7 @@ function timeSensitivityWeight(trigger: DailyPitchTrigger): number {
 function isCriticalPitchTrigger(trigger: DailyPitchTrigger): boolean {
     const headline = trigger.headline ?? trigger.hook ?? '';
     return trigger.risk_flag === true
-        || /Mag7财报落地|超级财报周结果落地|今晚财报验证AI叙事|阿联酋退出OPEC|央行政策超预期|地缘风险结构升级/.test(headline)
+        || /Mag7财报落地|超级财报周结果落地|今晚财报验证AI叙事|阿联酋退出OPEC|央行政策超预期|美联储议息结果落地|地缘风险结构升级/.test(headline)
         || (trigger.watchpoints?.length ?? 0) >= 2;
 }
 
@@ -5079,6 +5157,9 @@ ${narrativeHistorySection}
      - source_summary：一句话说明数据/来源依据，必须来自上方输入而不是虚构外部网页
    - 同步填充旧字段以兼容前端：hook=headline，why_now=context，pitch_line=talking_point，related_assets=asset_tags
    - 禁止零售语气：不要写“AI钱花出去了吗”“散户”“韭菜”“这波行情”“大家关注”等
+   - 每张卡片只允许一条主线事件。禁止用'叠加'/'接力'/'同时'将两个不同事件并列为主线写入同一张卡。若第二个事件客观上有关联，只允许作为传导结果出现（一句话，≤15字），不能占据独立段落或成为该卡的第二个核心论点。
+   - context 和 source_summary 必须绑定来自上方输入的具体证据：数字（价格/涨跌幅/bps/收益率）或命名来源（机构名/报告发布方/公司名）。严禁出现'某报告'/'分析显示'/'市场预计'/'据悉'等无法追溯的模糊表述。若输入未提供具体数据，该事件不应生成独立卡片。
+   - 若候选中存在 [POST-EARNINGS] 标签的已落地财报事件，该卡片的 context 和 watchpoints 必须聚焦于已公布的结果和市场反应，禁止在同一张卡里将其他公司'今晚盘后财报'作为'接力'或留意点。待发财报如有必要，应在独立卡片中处理。
    - talking_point 必须像资深IC打开对话，结尾可以是问题或隐含邀请客户回应
 4. asset_buckets 是旧版兼容字段，前端不再展示；优先返回空数组 []
    - 不要为了填 asset_buckets 牺牲 daily_pitch_triggers 的质量
