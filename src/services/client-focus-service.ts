@@ -3477,7 +3477,8 @@ function isFomcDecisionHeadline(title: string): boolean {
     const normalized = title.toLowerCase();
     const hasFed = /(fed|federal reserve|fomc|powell|jerome powell)/i.test(title);
     const hasDecision = /(rate decision|rates unchanged|holds rates|rate hold|rate cut|rate hike|basis points|bps|dot plot|press conference|statement|meeting minutes|inflation target|policy statement|利率决议|按兵不动|降息|加息|利率不变|新闻发布会|声明|点阵图)/i.test(normalized);
-    return hasFed && hasDecision;
+    const isPreview = /(what to expect|preview|ahead of|before the decision|meeting today|watch live|live updates|预览|前瞻|等待)/i.test(normalized);
+    return hasFed && hasDecision && !isPreview;
 }
 
 function isMajorGeopoliticalHeadline(title: string): boolean {
