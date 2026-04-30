@@ -7915,7 +7915,7 @@ async function fetchForexSnapshot(symbol: string, name: string): Promise<ClientF
 async function fetchYahooChartSeries(
     symbol: string,
     snapshotMeta: { code: string; name: string; preferHistoryChangePct?: boolean } = { code: 'GC=F', name: 'COMEX黄金期货' }
-): Promise<{ snapshot: ClientFocusPriceSnapshot | null; history: ClientFocusPriceHistoryPoint[] | null }> {
+): Promise<{ snapshot: ClientFocusPriceSnapshot | null; history: ClientFocusPriceHistoryPoint[] | null; volume?: number | null }> {
     try {
         const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`);
         url.searchParams.set('range', '1y');
@@ -7941,11 +7941,13 @@ async function fetchYahooChartSeries(
                         regularMarketPrice?: number;
                         previousClose?: number;
                         currency?: string;
+                        regularMarketVolume?: number;
                     };
                     timestamp?: number[];
                     indicators?: {
                         quote?: Array<{
                             close?: Array<number | null>;
+                            volume?: Array<number | null>;
                         }>;
                     };
                 }>;
@@ -7955,6 +7957,9 @@ async function fetchYahooChartSeries(
         const timestamps = Array.isArray(result?.timestamp) ? result?.timestamp ?? [] : [];
         const closes = Array.isArray(result?.indicators?.quote?.[0]?.close)
             ? result?.indicators?.quote?.[0]?.close ?? []
+            : [];
+        const volumes = Array.isArray(result?.indicators?.quote?.[0]?.volume)
+            ? result?.indicators?.quote?.[0]?.volume ?? []
             : [];
 
         const history = timestamps
@@ -7989,6 +7994,8 @@ async function fetchYahooChartSeries(
         const changePct = snapshotMeta.preferHistoryChangePct && !hasRealtimeLatest
             ? historyChangePct ?? metaChangePct
             : metaChangePct ?? historyChangePct;
+        const metaVolume = Number(result?.meta?.regularMarketVolume);
+        const latestVolume = Number(volumes[volumes.length - 1]);
 
         return {
             snapshot: {
@@ -7998,11 +8005,51 @@ async function fetchYahooChartSeries(
                 change_pct: Number.isFinite(changePct) ? changePct : null,
                 as_of: latestPoint.date
             },
-            history
+            history,
+            volume: Number.isFinite(metaVolume)
+                ? metaVolume
+                : Number.isFinite(latestVolume)
+                    ? latestVolume
+                    : null
         };
     } catch {
         return { snapshot: null, history: null };
     }
+}
+
+const YAHOO_FUTURES_MONTH_CODES = ['F', 'G', 'H', 'J', 'K', 'M', 'N', 'Q', 'U', 'V', 'X', 'Z'] as const;
+
+function buildYahooFuturesSymbol(root: string, date: Date): string {
+    const monthCode = YAHOO_FUTURES_MONTH_CODES[date.getUTCMonth()];
+    const yearCode = String(date.getUTCFullYear()).slice(-2);
+    return `${root}${monthCode}${yearCode}.NYM`;
+}
+
+function addUtcMonths(date: Date, months: number): Date {
+    const next = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1));
+    return next;
+}
+
+async function fetchActiveBrentChartSeries(): Promise<{ snapshot: ClientFocusPriceSnapshot | null; history: ClientFocusPriceHistoryPoint[] | null }> {
+    const now = new Date();
+    const candidateSymbols = Array.from(new Set(
+        Array.from({ length: 7 }, (_, index) => buildYahooFuturesSymbol('BZ', addUtcMonths(now, index)))
+    ));
+    const contractResults = await Promise.all(
+        candidateSymbols.map(async (symbol) => ({
+            symbol,
+            result: await fetchYahooChartSeries(symbol, { code: 'BRENT', name: 'Brent原油' })
+        }))
+    );
+    const activeContract = contractResults
+        .filter((item) => item.result.snapshot && typeof item.result.volume === 'number' && item.result.volume > 0)
+        .sort((left, right) => (right.result.volume ?? 0) - (left.result.volume ?? 0))[0]?.result;
+
+    if (activeContract?.snapshot) {
+        return activeContract;
+    }
+
+    return fetchYahooChartSeries('BZ=F', { code: 'BRENT', name: 'Brent原油', preferHistoryChangePct: true });
 }
 
 async function fetchFocusPriceSnapshot(slug: string): Promise<ClientFocusPriceSnapshot | null> {
@@ -8526,7 +8573,7 @@ async function fetchClientFocusMarketStateSnapshot(): Promise<ClientFocusMarketS
         fetchYahooChartSeries('DX-Y.NYB', { code: 'DXY', name: '美元指数' }),
         fetchUsMarketStateIndices(),
         fetchYahooChartSeries('CL=F', { code: 'OIL', name: 'WTI原油', preferHistoryChangePct: true }),
-        fetchYahooChartSeries('BZ=F', { code: 'BRENT', name: 'Brent原油', preferHistoryChangePct: true }),
+        fetchActiveBrentChartSeries(),
         fetchYahooChartSeries('NG=F', { code: 'NATGAS', name: '天然气', preferHistoryChangePct: true }),
         fetchYahooChartSeries('^TNX', { code: 'TNX', name: '美债10Y' }),
     ]);
