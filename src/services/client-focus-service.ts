@@ -7974,6 +7974,7 @@ async function fetchYahooChartSeries(
         const latestPoint = history[history.length - 1];
         const previousClose = Number(result?.meta?.previousClose);
         const latest = Number(result?.meta?.regularMarketPrice);
+        const hasRealtimeLatest = Number.isFinite(latest);
         const effectiveLatest = Number.isFinite(latest) ? latest : latestPoint.close;
         const previousHistoryClose = history.length >= 2 ? history[history.length - 2].close : null;
         const resolvedPreviousHistoryClose = Number.isFinite(previousHistoryClose) ? previousHistoryClose : null;
@@ -7985,7 +7986,9 @@ async function fetchYahooChartSeries(
         const metaChangePct = Number.isFinite(previousClose) && previousClose !== 0
             ? ((effectiveLatest - previousClose) / previousClose) * 100
             : null;
-        const changePct = snapshotMeta.preferHistoryChangePct ? historyChangePct ?? metaChangePct : metaChangePct ?? historyChangePct;
+        const changePct = snapshotMeta.preferHistoryChangePct && !hasRealtimeLatest
+            ? historyChangePct ?? metaChangePct
+            : metaChangePct ?? historyChangePct;
 
         return {
             snapshot: {
