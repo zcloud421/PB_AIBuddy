@@ -5486,7 +5486,7 @@ ${narrativeHistorySection}
         const daily_pitch_triggers = normalizeDailyPitchTriggers((parsed as any).daily_pitch_triggers);
         const deterministicPitchTriggers = await buildDeterministicDailyPitchTriggers(marketSnapshot, headlineSignals);
         const pitchCandidatePool = daily_pitch_triggers.length > 0
-            ? [...daily_pitch_triggers, ...deterministicPitchTriggers]
+            ? [...deterministicPitchTriggers, ...daily_pitch_triggers]
             : deterministicPitchTriggers.length > 0
                 ? deterministicPitchTriggers
                 : buildPitchTriggersFromBuckets(asset_buckets);
