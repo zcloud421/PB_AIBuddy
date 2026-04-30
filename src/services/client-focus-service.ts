@@ -3466,15 +3466,21 @@ function isMag7EarningsResultHeadline(title: string): boolean {
 
 async function getRecentlyReportedMag7EarningsSymbols(): Promise<string[]> {
     const symbols = ['MSFT', 'META', 'GOOG', 'AMZN'];
-    const rows = await Promise.allSettled(symbols.map(async (symbol) => {
+    const recentRows = await Promise.allSettled(symbols.map(async (symbol) => {
         const row = await getRecentEarningsBySymbol(symbol);
         return row && typeof row.days_since === 'number' && row.days_since <= 2 ? symbol : null;
     }));
-
-    return rows
+    const recentSymbols = recentRows
         .filter((row): row is PromiseFulfilledResult<string | null> => row.status === 'fulfilled')
         .map((row) => row.value)
         .filter((symbol): symbol is string => Boolean(symbol));
+
+    const sameDayRows = await getUpcomingEarningsNextNDays(1).catch(() => []);
+    const sameDaySymbols = sameDayRows
+        .filter((row) => row.days_until === 0 && symbols.includes(row.symbol))
+        .map((row) => row.symbol);
+
+    return Array.from(new Set([...recentSymbols, ...sameDaySymbols]));
 }
 
 function compactHeadlineList(items: NewsItem[], predicate: (title: string) => boolean): string[] {
