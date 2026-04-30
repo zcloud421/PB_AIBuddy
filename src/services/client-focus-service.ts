@@ -4637,6 +4637,14 @@ function normalizePitchHeadline(trigger: DailyPitchTrigger): string {
         .toLowerCase();
 }
 
+function normalizePitchThemeKey(trigger: DailyPitchTrigger): string {
+    const headline = trigger.headline ?? trigger.hook ?? '';
+    if (/超级财报周结果落地|今晚财报验证AI叙事|Mag7财报落地|超级财报周开启/.test(headline)) {
+        return 'major-tech-earnings';
+    }
+    return normalizePitchHeadline(trigger);
+}
+
 function classifyPitchAssetLane(trigger: DailyPitchTrigger): PitchAssetLane {
     const text = [
         trigger.headline,
@@ -4702,6 +4710,16 @@ function isCriticalPitchTrigger(trigger: DailyPitchTrigger): boolean {
         || (trigger.watchpoints?.length ?? 0) >= 2;
 }
 
+function criticalPitchPriority(trigger: DailyPitchTrigger): number {
+    const headline = trigger.headline ?? trigger.hook ?? '';
+    if (/超级财报周结果落地/.test(headline)) return 100;
+    if (/今晚财报验证AI叙事|Mag7财报落地/.test(headline)) return 92;
+    if (/美联储议息结果落地|央行政策超预期/.test(headline)) return 90;
+    if (/阿联酋退出OPEC/.test(headline)) return 82;
+    if (/地缘风险结构升级/.test(headline)) return 78;
+    return trigger.risk_flag === true ? 70 : 50;
+}
+
 function scorePitchTriggerForRm(
     trigger: DailyPitchTrigger,
     previousHeadlines: Set<string>,
@@ -4737,15 +4755,32 @@ function scorePitchTriggerForRm(
 function dedupePitchTriggers(
     triggers: NonNullable<DailyMarketNarrative['daily_pitch_triggers']>
 ): NonNullable<DailyMarketNarrative['daily_pitch_triggers']> {
-    const seen = new Set<string>();
+    const seenIndex = new Map<string, number>();
     const deduped: NonNullable<DailyMarketNarrative['daily_pitch_triggers']> = [];
 
     for (const trigger of triggers) {
-        const key = normalizePitchHeadline(trigger);
-        if (!key || seen.has(key)) {
+        const key = normalizePitchThemeKey(trigger);
+        if (!key) {
             continue;
         }
-        seen.add(key);
+        const existingIndex = seenIndex.get(key);
+        if (existingIndex !== undefined) {
+            const existing = deduped[existingIndex];
+            const triggerPriority = criticalPitchPriority(trigger);
+            const existingPriority = criticalPitchPriority(existing);
+            if (
+                triggerPriority > existingPriority
+                || (
+                    triggerPriority === existingPriority
+                    && scorePitchTriggerForRm(trigger, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>())
+                    > scorePitchTriggerForRm(existing, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>())
+                )
+            ) {
+                deduped[existingIndex] = trigger;
+            }
+            continue;
+        }
+        seenIndex.set(key, deduped.length);
         deduped.push(trigger);
     }
 
@@ -4765,7 +4800,8 @@ function applyRmConversationRanking(
     const criticalCandidates = candidates
         .filter(isCriticalPitchTrigger)
         .sort((left, right) => (
-            scorePitchTriggerForRm(right, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>())
+            criticalPitchPriority(right) - criticalPitchPriority(left)
+            || scorePitchTriggerForRm(right, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>())
             - scorePitchTriggerForRm(left, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>())
         ));
     const reservedCriticalCount = criticalCandidates.length > 1 ? 2 : criticalCandidates.length;
