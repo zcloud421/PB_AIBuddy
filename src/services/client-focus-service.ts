@@ -3517,7 +3517,8 @@ function buildFomcDecisionCopy(anchor: string, todayIso: string): {
     const action = parsedAction ?? (finalMeeting ? 'hold' : null);
     const targetRange = extractFomcTargetRange(anchor) ?? (finalMeeting ? '3.5%-3.75%' : null);
     const hasConcreteAnchor = anchor.trim().length > 0 && !/本次会议利率决议已公布/.test(anchor);
-    const compactAnchor = truncateDailyPitchText(anchor.replace(/\s+/g, ' '), 72);
+    const compactAnchor = truncateDailyPitchText(anchor.replace(/\s+/g, ' '), 72)
+        .replace(/\s*[-–—]\s*$/u, '');
     const anchorEvidence = hasConcreteAnchor
         ? `新闻锚点：${compactAnchor}。`
         : '';
