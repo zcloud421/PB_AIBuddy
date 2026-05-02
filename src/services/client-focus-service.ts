@@ -4143,7 +4143,7 @@ async function buildDailyPitchCandidateSection(
             candidates.push([
                 '[PRE-EARNINGS][HIGH][3B] 超级财报周开启',
                 `数据锚点：未来7日内待发财报的权重/FCN常见底层包括 ${grouped}。`,
-                '为什么可聊：市场从宏观headline切回盈利验证，AI capex、云业务和核心业务收入会直接影响美股科技仓位与相关FCN底层波动率。',
+                '为什么可聊：市场焦点从宏观数据切回盈利验证，AI资本开支指引、云业务成长性和核心收入预期将直接影响科技仓位走向。',
                 '建议标题：超级财报周开启',
                 '适合客户：美股科技仓位客户、FCN底层含核心科技/半导体客户'
             ].join('\n'));
@@ -4164,7 +4164,7 @@ async function buildDailyPitchCandidateSection(
         candidates.push([
             `[POST-EARNINGS][CRITICAL][3B/3E] ${postEarningsHeadline}`,
             `新闻锚点：${headlineSignals.majorEarningsResultTitles[0]}。`,
-            `为什么可聊：${reportedForCopy.join('、')}财报已落地，会重定价AI capex、云业务和核心业务收入预期，直接影响科技FCN底层IV与仓位估值；客户今天关心的是财报结果能否支撑前期科技仓位。`,
+            `为什么可聊：${reportedForCopy.join('、')}财报已落地，市场开始对AI资本开支指引、云业务成长性和核心收入进行重定价；关键是财报结果能否支撑前期科技仓位的估值基础。`,
             `建议标题：${postEarningsHeadline}`,
             '适合客户：美股科技仓位客户、核心科技或AI主题FCN客户'
         ].join('\n'));
@@ -4440,7 +4440,7 @@ async function buildDailyPitchCandidateSection(
             candidates.push([
                 '[LOW][3A] 美股5日动量信号',
                 `数据锚点：${formatPitchCandidateChange(spx)}，近5日${dir}。`,
-                '为什么可聊：美股5日动量超过2%，高于平均波动区间，值得讨论是结构性追涨还是拥挤交易；FCN底层波动率和科技仓位的锁定期都会受影响。',
+                '为什么可聊：美股5日动量超过2%，高于平均波动区间，值得讨论是结构性追涨还是拥挤交易；科技仓位的集中度和锁定期需要一并评估。',
                 '建议标题：美股动量持续，仓位检视',
                 '适合客户：美股科技仓位或FCN底层含主要指数客户'
             ].join('\n'));
@@ -4527,7 +4527,7 @@ async function buildDeterministicDailyPitchTriggers(
                 : recentlyReported.length === 1
                     ? `${reportedForCopy[0]}财报落地`
                     : 'Mag7财报落地';
-        const context = `${reportedForCopy.join('、')}财报已落地，市场从等待财报切到AI capex、云业务和核心业务收入的结果重定价，科技FCN底层IV与仓位估值进入验证窗口。`;
+        const context = `${reportedForCopy.join('、')}财报已落地，市场从等待财报转向对AI资本开支方向、云业务成长性和核心收入的实际兑现定价。`;
         triggers.push({
             id: triggers.length + 1,
             headline,
@@ -4566,7 +4566,7 @@ async function buildDeterministicDailyPitchTriggers(
                 ? `OpenAI用户/收入目标争议已压到AI算力链，${grouped}等权重/FCN常见底层将发财报，市场要验证AI capex回报能否支撑估值。`
                 : `${grouped}等权重/FCN常见底层将发财报，市场焦点从宏观headline切回盈利验证和AI capex回报。`;
             const talkingPoint = hasOpenAiStress
-                ? `市场已开始质疑AI投入回报，${timingWord}权重股财报会直接给答案；您科技仓位和相关FCN底层要不要先按好中差三种情景看一遍？`
+                ? `市场已开始质疑AI投入回报，${timingWord}权重股财报会直接给答案；科技仓位要不要先按好中差三种情景看一遍？`
                 : `${weekend ? '下周' : '这周'}真正要看的不是指数涨跌，而是权重股财报能否证明AI和科技仓位的盈利兑现，您组合里的科技敞口要不要先做一次情景讨论？`;
             triggers.push({
                 id: 1,
@@ -4578,8 +4578,8 @@ async function buildDeterministicDailyPitchTriggers(
                 pitch_line: talkingPoint,
                 client_type: '美股科技或FCN客户',
                 watchpoints: hasOpenAiStress
-                    ? ['OpenAI相关表述', 'AI capex指引', 'FCN底层IV变化']
-                    : ['权重股财报', 'AI capex指引', '科技底层波动率'],
+                    ? ['OpenAI相关表述', 'AI capex指引', '科技期权波动率']
+                    : ['权重股财报', 'AI capex指引', '科技期权波动率'],
                 related_assets: hasOpenAiStress
                     ? ['US Equities', 'ORCL', 'NVDA', 'Major Tech', 'FCN']
                     : ['US Equities', 'Major Tech', 'FCN'],
