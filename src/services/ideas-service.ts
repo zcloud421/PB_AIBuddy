@@ -7319,7 +7319,7 @@ function rankAttributionRules(
             const specificityScore = getRuleSpecificityScore(rule, symbol);
             const windowSpecificityScore = getRuleWindowSpecificityScore(rule);
             const peakAlignmentScore = getRulePeakAlignmentScore(rule, peakDate, troughDate);
-            const keywordScore = countKeywordHits(newsItems, rule.keywords) * 8;
+            const keywordScore = countKeywordHits(newsItems, rule.keywords) * 14;
             const driverScore = getDriverPriority(rule);
             const archetypeScore = inferredArchetype && rule.archetypes?.includes(inferredArchetype) ? 16 : 0;
             const subsectorScore = inferredSubsector && rule.subsectors?.includes(inferredSubsector) ? 18 : 0;
@@ -7697,6 +7697,7 @@ async function refineDrawdownAttributionsWithLLM(input: {
         heuristic_reason: string;
         allowed_markers: string[];
         news_titles: string[];
+        news_count: number;
     }>;
 }): Promise<Map<string, string>> {
     const apiKey = process.env.DEEPSEEK_API_KEY;
@@ -7708,25 +7709,29 @@ async function refineDrawdownAttributionsWithLLM(input: {
 你是香港私人银行 IC，正在为个股历史回撤分析撰写归因短句。
 
 目标：
-- 对每段回撤给出 1 句中文主因归因，18-40 字
+- 对每段回撤给出 1 句中文主因归因
 - reason_zh 严格控制在 30–50 个中文字符以内
 - 最多两个分句，只允许一层因果链
 - 禁止出现"最终使……被下修"、"进而导致……估值被系统性调整"等三层递进结构
-- 若已有 primary_driver 和 background_regime，直接压缩改写，不要展开
-- 只能基于已提供的背景环境、主因、放大因素改写
-- 严禁引入任何未提供的事件名称、政策名称、公司丑闻或宏观冲击
 - 不要写成长段分析，不要给投资建议
-- 若 primary_driver_type 为 'company' 且 background_regime、primary 或 heuristic 包含 'AI预期落差' 或 'sentiment'：
-  说明这是情绪驱动的回撤，不是基本面恶化；应写"市场从X预期切换至Y验证"的结构，
-  禁止写成"AI投入回收放慢"或"AI拖累业绩"，因果方向相反。
-- 若 primary_driver_type 为 'macro' 且 event_signal_tags 或 markers 包含 'archegos-forced-deleveraging' / 'Archegos'：
-  说明这是流动性冲击，应明确写出"与公司经营无关"，禁止引入广告/AI/监管作为解释。
+
+归因策略（按 news_count 优先级执行）：
+1. news_count ≥ 2：以 news_titles 中出现的事件为主因依据；heuristic 仅提供制度背景参考，不约束主因表述。从新闻标题中提取最显著的具体事件作为 reason_zh 的核心。
+2. news_count < 2：直接压缩改写 heuristic_reason，不扩展
+3. 任何情况下：reason_zh 中引用的事件名称、政策名称、公司事件 必须出现在 news_titles 或 heuristic_reason 之一中，不得凭空引入训练数据中的知识
+4. background_regime 提供宏观制度背景；除非 news_titles 与其明显矛盾，否则可保留作前置语境
+
+特殊规则：
+- 若 primary_driver_type 为 'company' 且 heuristic 包含 'AI预期落差' 或 'sentiment'：
+  应写"市场从X预期切换至Y验证"的结构，禁止写成"AI投入回收放慢"或"AI拖累业绩"
+- 若 markers 包含 'archegos-forced-deleveraging'：
+  应明确写出"与公司经营无关"，禁止引入广告/AI/监管
 
 个股：${normalizeIssuerName(input.symbol, input.companyName)}
 回撤清单：
 ${input.items.map((item, index) => {
     const newsBlock = item.news_titles.length > 0 ? item.news_titles.map((title) => `- ${title}`).join('\n') : '- 无明确新闻标题';
-    return `${index + 1}. peak=${item.peak_date}, trough=${item.trough_date}, drawdown=${item.max_drawdown_pct.toFixed(1)}%, background=${item.background_regime ?? '无'}, primary_type=${item.primary_driver_type ?? 'unknown'}, primary=${item.primary_driver ?? '无'}, secondary=${item.secondary_driver ?? '无'}, heuristic=${item.heuristic_reason}, markers=${item.allowed_markers.join('/') || '无'}\n${newsBlock}`;
+    return `${index + 1}. peak=${item.peak_date}, trough=${item.trough_date}, drawdown=${item.max_drawdown_pct.toFixed(1)}%, background=${item.background_regime ?? '无'}, primary_type=${item.primary_driver_type ?? 'unknown'}, primary=${item.primary_driver ?? '无'}, secondary=${item.secondary_driver ?? '无'}, heuristic=${item.heuristic_reason}, markers=${item.allowed_markers.join('/') || '无'}, news_count=${item.news_count}\n${newsBlock}`;
 }).join('\n\n')}
 
 请返回纯 JSON 数组：
@@ -7899,7 +7904,8 @@ async function buildEnrichedDrawdownAttributions(
                     item.heuristicReason.primary_rule_id,
                     item.heuristicReason.background_rule_id
                 ]),
-                news_titles: item.newsItems.map((news) => news.title)
+                news_titles: item.newsItems.map((news) => news.title),
+                news_count: item.newsItems.length
             }))
         }),
         new Map<string, string>(),
