@@ -4624,12 +4624,14 @@ async function buildDeterministicDailyPitchTriggers(
 
     if (headlineSignals.bojMeetingResultTitles.length > 0) {
         const bojAnchor = headlineSignals.bojMeetingResultTitles[0];
+        const bojAnchorIsEnglish = (bojAnchor.match(/[a-zA-Z]/g) ?? []).length > bojAnchor.length * 0.3;
+        const bojAnchorDisplay = bojAnchorIsEnglish ? '日本央行本次利率决议已公布' : bojAnchor;
         triggers.push({
             id: triggers.length + 1,
             headline: '日银议息结果落地',
             hook: '日银议息结果落地',
-            context: `日本央行本次利率决议已公布。${bojAnchor}。BOJ加息路径直接影响日元汇率与全球套利交易（carry trade）的平仓节奏，是跨货币仓位的即时再评估窗口。`,
-            why_now: `日本央行本次利率决议已公布。${bojAnchor}。BOJ加息路径直接影响日元汇率与全球套利交易（carry trade）的平仓节奏，是跨货币仓位的即时再评估窗口。`,
+            context: `${bojAnchorDisplay}。BOJ加息路径直接影响日元汇率与全球套利交易（carry trade）的平仓节奏，是跨货币仓位的即时再评估窗口。`,
+            why_now: `${bojAnchorDisplay}。BOJ加息路径直接影响日元汇率与全球套利交易（carry trade）的平仓节奏，是跨货币仓位的即时再评估窗口。`,
             talking_point: '日银今天的决定不只是日本国内的事，套利交易的平仓节奏和日元升值幅度会直接影响您的跨货币资产；我们可以先看一下组合里有哪些仓位对日元汇率敏感。',
             pitch_line: '日银今天的决定不只是日本国内的事，套利交易的平仓节奏和日元升值幅度会直接影响您的跨货币资产；我们可以先看一下组合里有哪些仓位对日元汇率敏感。',
             client_type: '持有日元资产、外汇套利仓位或跨货币债券客户',
@@ -4649,10 +4651,10 @@ async function buildDeterministicDailyPitchTriggers(
         const macroHeadline = macroType === 'NFP' ? '美国非农数据落地' : macroType === 'CPI' ? '美国CPI数据落地' : '美国PCE数据落地';
         const localizedAnchor = localizeMarcoAnchor(macroAnchor, macroType ?? 'NFP');
         const macroContext = macroType === 'NFP'
-            ? `${localizedAnchor}，就业数据是美联储双重目标之一，直接影响降息预期与美债利率走势，传导链覆盖AT1、港元利率和港股估值。`
+            ? `${localizedAnchor}。就业数据是美联储双重目标之一，直接影响降息预期与美债利率走势，传导链覆盖AT1、港元利率和港股估值。`
             : macroType === 'CPI'
-            ? `${localizedAnchor}，CPI走势决定美联储降息时间窗口，超预期压制长端债券，低于预期打开降息空间，是利率敏感仓位的即时评估节点。`
-            : `${localizedAnchor}，PCE是美联储首选通胀指标，核心PCE走势决定降息路径，是讨论组合久期与利率对冲的最佳切入点。`;
+            ? `${localizedAnchor}。CPI走势决定美联储降息时间窗口，超预期压制长端债券价格，低于预期打开降息空间，是利率敏感仓位的即时评估节点。`
+            : `${localizedAnchor}。PCE是美联储首选通胀指标，核心PCE走势决定降息路径，是讨论组合久期与利率对冲的最佳切入点。`;
         const macroTalkingPoint = macroType === 'NFP'
             ? '非农数据出来了，现在降息预期的定价在重新校准；您持有的美债和AT1仓位对利率路径的敏感度，我们可以现在拆一遍。'
             : macroType === 'CPI'
@@ -4695,7 +4697,7 @@ async function buildDeterministicDailyPitchTriggers(
         const streak = sox.streak_direction && sox.streak_days
             ? `连续${sox.streak_days}${sox.streak_direction === 'up' ? '日上涨' : '日下跌'}`
             : '出现极端动量';
-        const context = `${formatPitchCandidateChange(sox)}，${streak}，AI/半导体高Beta仓位进入更拥挤的盈利兑现窗口。`;
+        const context = `${formatPitchCandidateChange(sox)}，${streak}。AI/半导体高Beta仓位进入更拥挤的盈利兑现窗口。`;
         triggers.push({
             id: triggers.length + 1,
             headline,
@@ -4717,7 +4719,7 @@ async function buildDeterministicDailyPitchTriggers(
 
     const oil = byCode.get('BRENT') ?? byCode.get('OIL');
     if (headlineSignals.uaeOpecExitTitles.length > 0) {
-        const marketAnchor = oil ? `${formatPitchCandidateChange(oil)}，` : '';
+        const marketAnchor = oil ? `${formatPitchCandidateChange(oil)}。` : '';
         const context = `${marketAnchor}UAE宣布退出OPEC/OPEC+，油价逻辑从霍尔木兹单一封锁升级为供给纪律和OPEC凝聚力再定价，影响通胀预期、黄金、AT1和长久期债。`;
         triggers.push({
             id: triggers.length + 1,
@@ -4744,7 +4746,7 @@ async function buildDeterministicDailyPitchTriggers(
             || (typeof oil.change_5d_pct === 'number' && Math.abs(oil.change_5d_pct) >= 5)
         )
     ) {
-        const context = `${formatPitchCandidateChange(oil)}，能源风险溢价仍在重定价，传导链落在通胀预期、降息路径、黄金和AT1信用利差。`;
+        const context = `${formatPitchCandidateChange(oil)}。能源风险溢价仍在重定价，传导链落在通胀预期、降息路径、黄金和AT1信用利差。`;
         triggers.push({
             id: triggers.length + 1,
             headline: '油价震荡，通胀预期升温',
@@ -4772,7 +4774,7 @@ async function buildDeterministicDailyPitchTriggers(
             || (typeof tnx.change_5d_pct === 'number' && Math.abs(tnx.change_5d_pct) >= 6)
         )
     ) {
-        const context = `${formatPitchCandidateChange(tnx)}，长端利率仍在区间内重新定价，长久期债券价格和IG债券基金净值承压，AT1信用利差走阔风险上升。`;
+        const context = `${formatPitchCandidateChange(tnx)}。长端利率重新定价，长久期债券价格和IG债券基金净值承压，AT1信用利差走阔风险上升。`;
         triggers.push({
             id: triggers.length + 1,
             headline: '长端利率上行，债基净值受压',
@@ -4803,7 +4805,7 @@ async function buildDeterministicDailyPitchTriggers(
             || Math.abs(hstech.change_pct ?? 0) >= 1.2
         )
     ) {
-        const context = `${formatPitchCandidateChange(hsi)}；${formatPitchCandidateChange(hstech)}，港股需要区分指数方向、恒科弹性与南向流动性。`;
+        const context = `${formatPitchCandidateChange(hsi)}；${formatPitchCandidateChange(hstech)}。港股需要区分指数方向、恒科弹性与南向流动性。`;
         triggers.push({
             id: triggers.length + 1,
             headline: '港股结构分化升温',
@@ -4832,7 +4834,7 @@ async function buildDeterministicDailyPitchTriggers(
             || Math.abs(gold.change_ytd_pct ?? 0) >= 15
         )
     ) {
-        const context = `${formatPitchCandidateChange(gold)}，黄金话题应聚焦实际利率、美元与地缘风险溢价，而不是单日涨跌本身。`;
+        const context = `${formatPitchCandidateChange(gold)}。黄金近期走势应聚焦实际利率、美元与地缘风险溢价作为驱动，而不是单日涨跌本身。`;
         triggers.push({
             id: triggers.length + 1,
             headline: '黄金避险溢价或回落',
@@ -4856,7 +4858,9 @@ async function buildDeterministicDailyPitchTriggers(
         const chinaAnchor = headlineSignals.chinaMacroTitles[0];
         const isSurprise = /beat|miss|surprise|超预期|不及预期|意外/i.test(chinaAnchor);
         const direction = /beat|above|better|超预期|高于/i.test(chinaAnchor) ? '好于预期' : /miss|below|worse|不及预期|低于/i.test(chinaAnchor) ? '不及预期' : '已公布';
-        const context = `中国宏观数据${direction}。${chinaAnchor.slice(0, 80)}。数据直接影响港股、人民币汇率和中资资产估值预期，是判断南向资金和港元流动性的关键观察窗口。`;
+        const chinaAnchorIsEnglish = (chinaAnchor.match(/[a-zA-Z]/g) ?? []).length > chinaAnchor.length * 0.3;
+        const chinaAnchorDisplay = chinaAnchorIsEnglish ? `中国宏观数据${direction}` : chinaAnchor.slice(0, 60);
+        const context = `${chinaAnchorDisplay}。数据直接影响港股、人民币汇率和中资资产估值预期，是判断南向资金和港元流动性的关键观察窗口。`;
         triggers.push({
             id: triggers.length + 1,
             headline: '中国宏观数据超预期',
