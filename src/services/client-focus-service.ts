@@ -3570,6 +3570,70 @@ function isMacroDataHeadline(title: string, type: 'NFP' | 'CPI' | 'PCE'): boolea
     return false;
 }
 
+function localizeMarcoAnchor(title: string, type: 'NFP' | 'CPI' | 'PCE'): string {
+    const isEnglish = (title.match(/[a-zA-Z]/g) ?? []).length > title.length * 0.3;
+    if (!isEnglish) return title;
+
+    if (type === 'NFP') {
+        const jobsMatch = title.match(/(\d[\d,]+)\s*(thousand|k)?\s*(jobs|payrolls|positions)/i)
+            ?? title.match(/payrolls?\s+(?:rose|added|gained|increased)\s+(?:by\s+)?(\d[\d,]+)/i)
+            ?? title.match(/(?:added|rose|gained)\s+(?:by\s+)?(\d[\d,]+)/i);
+        const unemployMatch = title.match(/unemployment\s+(?:rate\s+)?(?:at|of|to|fell to|rose to)\s+([\d.]+)%/i);
+        const beatMiss = /beat|above|more than expected|better/i.test(title) ? '超预期' : /miss|below|less than|worse/i.test(title) ? '不及预期' : null;
+        const monthMatch = title.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i);
+        const monthMap: Record<string, string> = { january:'1月', february:'2月', march:'3月', april:'4月', may:'5月', june:'6月', july:'7月', august:'8月', september:'9月', october:'10月', november:'11月', december:'12月' };
+        const monthStr = monthMatch ? (monthMap[monthMatch[1].toLowerCase()] ?? '') : '';
+
+        if (jobsMatch) {
+            const rawNum = jobsMatch[1].replace(/,/g, '');
+            const num = parseInt(rawNum, 10);
+            const numStr = num >= 10000 ? `${(num / 10000).toFixed(1)}万` : `${(num / 1000).toFixed(0)}千`;
+            const parts = [`美国${monthStr}非农新增就业${numStr}人`];
+            if (beatMiss) parts.push(beatMiss);
+            if (unemployMatch) parts.push(`失业率${unemployMatch[1]}%`);
+            return parts.join('，');
+        }
+        const parts = [`美国${monthStr}非农就业数据已公布`];
+        if (beatMiss) parts.push(beatMiss);
+        if (unemployMatch) parts.push(`失业率${unemployMatch[1]}%`);
+        return parts.join('，');
+    }
+
+    if (type === 'CPI') {
+        const cpiMatch = title.match(/cpi\s+(?:rose|fell|climbed|eased|up|down|at|came in at)\s+([\d.]+)%/i)
+            ?? title.match(/([\d.]+)%\s+(?:year-over-year|yoy|annually)/i);
+        const coreCpiMatch = title.match(/core\s+cpi\s+(?:rose|fell|up|down|at)\s+([\d.]+)%/i);
+        const beatMiss = /beat|above|more than expected|hotter/i.test(title) ? '超预期' : /miss|below|cooler|softer/i.test(title) ? '不及预期' : null;
+        const monthMatch = title.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i);
+        const monthMap: Record<string, string> = { january:'1月', february:'2月', march:'3月', april:'4月', may:'5月', june:'6月', july:'7月', august:'8月', september:'9月', october:'10月', november:'11月', december:'12月' };
+        const monthStr = monthMatch ? (monthMap[monthMatch[1].toLowerCase()] ?? '') : '';
+
+        const parts: string[] = [];
+        if (cpiMatch) parts.push(`美国${monthStr} CPI同比${cpiMatch[1]}%`);
+        else parts.push(`美国${monthStr} CPI数据已公布`);
+        if (coreCpiMatch) parts.push(`核心CPI ${coreCpiMatch[1]}%`);
+        if (beatMiss) parts.push(beatMiss);
+        return parts.join('，');
+    }
+
+    if (type === 'PCE') {
+        const pceMatch = title.match(/(?:core\s+)?pce\s+(?:rose|fell|up|down|at|came in at)\s+([\d.]+)%/i)
+            ?? title.match(/([\d.]+)%\s+(?:year-over-year|yoy)/i);
+        const beatMiss = /beat|above|hotter/i.test(title) ? '超预期' : /miss|below|cooler|softer/i.test(title) ? '不及预期' : null;
+        const monthMatch = title.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i);
+        const monthMap: Record<string, string> = { january:'1月', february:'2月', march:'3月', april:'4月', may:'5月', june:'6月', july:'7月', august:'8月', september:'9月', october:'10月', november:'11月', december:'12月' };
+        const monthStr = monthMatch ? (monthMap[monthMatch[1].toLowerCase()] ?? '') : '';
+
+        const parts: string[] = [];
+        if (pceMatch) parts.push(`美国${monthStr}核心PCE同比${pceMatch[1]}%`);
+        else parts.push(`美国${monthStr}核心PCE数据已公布`);
+        if (beatMiss) parts.push(beatMiss);
+        return parts.join('，');
+    }
+
+    return title;
+}
+
 function isCentralBankShockHeadline(title: string): boolean {
     const normalized = title.toLowerCase();
     const hasCentralBank = /(boj|bank of japan|日銀|日银|fed |federal reserve|ecb|european central bank|pboc|中国人民银行|rba|bank of england|boe)/i.test(title);
@@ -4191,9 +4255,10 @@ async function buildDailyPitchCandidateSection(
             ? 'CPI超预期会延后降息预期，压制长端债券价格和高估值股票；CPI走弱则打开降息空间。对持有利率敏感资产的客户是直接触发再平衡讨论的数据。'
             : 'PCE是美联储首选通胀指标，核心PCE走势决定降息时间窗口。数据落地是和客户讨论组合久期与利率对冲的最佳切入点。';
         const macroHeadline = macroType === 'NFP' ? '美国非农数据落地' : macroType === 'CPI' ? '美国CPI数据落地' : '美国PCE数据落地';
+        const localizedMacroAnchor = localizeMarcoAnchor(headlineSignals.macroDataResultTitles[0], macroType ?? 'NFP');
         candidates.push([
             '[CRITICAL][3B/3C] 美国宏观数据落地',
-            `新闻锚点：${macroHeadline}已公布（来源：${headlineSignals.macroDataResultTitles[0].slice(0, 60)}）。`,
+            `新闻锚点：${localizedMacroAnchor}。`,
             `为什么可聊：${macroWhy}`,
             `建议标题：${macroHeadline}`,
             '适合客户：持有美债、AT1、利率衍生品或对美联储路径敏感的客户',
@@ -4545,11 +4610,12 @@ async function buildDeterministicDailyPitchTriggers(
         const macroType = headlineSignals.macroDataEventType;
         const macroAnchor = headlineSignals.macroDataResultTitles[0];
         const macroHeadline = macroType === 'NFP' ? '美国非农数据落地' : macroType === 'CPI' ? '美国CPI数据落地' : '美国PCE数据落地';
+        const localizedAnchor = localizeMarcoAnchor(macroAnchor, macroType ?? 'NFP');
         const macroContext = macroType === 'NFP'
-            ? '美国非农就业数据今日公布，就业数据是美联储双重目标之一，直接影响降息预期与美债利率走势，传导链覆盖AT1、港元利率和港股估值。'
+            ? `${localizedAnchor}，就业数据是美联储双重目标之一，直接影响降息预期与美债利率走势，传导链覆盖AT1、港元利率和港股估值。`
             : macroType === 'CPI'
-            ? '美国CPI通胀数据今日公布，CPI走势决定美联储降息时间窗口，超预期压制长端债券，低于预期打开降息空间，是利率敏感仓位的即时评估节点。'
-            : '美国PCE核心通胀数据今日公布，PCE是美联储首选通胀指标，核心PCE走势决定降息路径，是讨论组合久期与利率对冲的最佳切入点。';
+            ? `${localizedAnchor}，CPI走势决定美联储降息时间窗口，超预期压制长端债券，低于预期打开降息空间，是利率敏感仓位的即时评估节点。`
+            : `${localizedAnchor}，PCE是美联储首选通胀指标，核心PCE走势决定降息路径，是讨论组合久期与利率对冲的最佳切入点。`;
         const macroTalkingPoint = macroType === 'NFP'
             ? '非农数据出来了，现在降息预期的定价在重新校准；您持有的美债和AT1仓位对利率路径的敏感度，我们可以现在拆一遍。'
             : macroType === 'CPI'
