@@ -152,6 +152,7 @@ interface DailyPitchHeadlineSignals {
     bojMeetingResultTitles: string[];
     macroDataResultTitles: string[];
     macroDataEventType: 'NFP' | 'CPI' | 'PCE' | null;
+    chinaMacroTitles: string[];
     breakingNewsCandidates: BreakingNewsCandidate[];
 }
 
@@ -178,6 +179,7 @@ const EMPTY_DAILY_PITCH_HEADLINE_SIGNALS: DailyPitchHeadlineSignals = {
     bojMeetingResultTitles: [],
     macroDataResultTitles: [],
     macroDataEventType: null,
+    chinaMacroTitles: [],
     breakingNewsCandidates: [],
 };
 
@@ -3634,6 +3636,13 @@ function localizeMarcoAnchor(title: string, type: 'NFP' | 'CPI' | 'PCE'): string
     return title;
 }
 
+function isChinaMacroSurpriseHeadline(title: string): boolean {
+    const hasData = /(china|chinese|pmi|caixin|nbs|pboc|beijing|中国|人民银行|制造业|服务业|gdp|retail sales|trade data|exports|imports|fixed asset|social financing|工业|通胀|贸易)/i.test(title);
+    const hasSurprise = /(beat|miss|surprise|above|below|better|worse|expand|contract|slump|surge|record|unexpected|超预期|不及预期|超出|高于|低于|大幅|骤降|急升|意外)/i.test(title);
+    const hasResult = /(data|report|figures|result|reading|released|shows|climbed|fell|rose|dropped|公布|发布|出炉)/i.test(title);
+    return hasData && (hasSurprise || hasResult);
+}
+
 function isCentralBankShockHeadline(title: string): boolean {
     const normalized = title.toLowerCase();
     const hasCentralBank = /(boj|bank of japan|日銀|日银|fed |federal reserve|ecb|european central bank|pboc|中国人民银行|rba|bank of england|boe)/i.test(title);
@@ -3864,7 +3873,7 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
     const onFomcWindow = isFomcDecisionWindow(todayIso);
     const onBojWindow = isBojDecisionWindow(todayIso);
     const nearestMacroEvent = getNearestMacroDataEvent(todayIso);
-    const [openAiResults, uaeResults, centralBankResults, geopoliticalResults, majorEarningsResults, fomcResults, bojResults, macroResults] = await Promise.allSettled([
+    const [openAiResults, uaeResults, centralBankResults, geopoliticalResults, majorEarningsResults, fomcResults, bojResults, macroResults, chinaResults] = await Promise.allSettled([
         fetchNewsItemsByQuery('OpenAI missed revenue user targets Oracle CoreWeave AI stocks WSJ', {
             excludeEtfAndFunds: false
         }),
@@ -3900,6 +3909,9 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
                 { excludeEtfAndFunds: false }
             )
             : Promise.resolve([]),
+        fetchNewsItemsByQuery('China PMI NBS Caixin manufacturing services GDP retail sales trade data beat miss surprise PBOC stimulus', {
+            excludeEtfAndFunds: false,
+        }),
     ]);
 
     const openAiItems = openAiResults.status === 'fulfilled' ? openAiResults.value : [];
@@ -3910,6 +3922,7 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
     const fomcItems = fomcResults.status === 'fulfilled' ? fomcResults.value : [];
     const bojItems = bojResults.status === 'fulfilled' ? bojResults.value : [];
     const macroItems = macroResults.status === 'fulfilled' ? macroResults.value : [];
+    const chinaItems = chinaResults.status === 'fulfilled' ? chinaResults.value : [];
     const recentlyReportedMajor = await getRecentlyReportedMajorEarningsSymbols().catch(() => []);
     const existingTitles = new Set([
         ...openAiItems.map((item) => item.title),
@@ -3920,6 +3933,7 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
         ...fomcItems.map((item) => item.title),
         ...bojItems.map((item) => item.title),
         ...macroItems.map((item) => item.title),
+        ...chinaItems.map((item) => item.title),
     ].map((title) => title.toLowerCase()));
 
     const broadNewsResults = await Promise.allSettled([
@@ -3968,6 +3982,7 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
         macroDataResultTitles.push(`美国${macroLabel}已公布，市场评估对美联储政策路径的影响`);
     }
     const macroDataEventType = nearestMacroEvent?.type ?? null;
+    const chinaMacroTitles = compactHeadlineList(chinaItems, isChinaMacroSurpriseHeadline);
 
     return {
         openAiTargetMissTitles: compactHeadlineList(openAiItems, isOpenAiTargetMissHeadline),
@@ -3979,6 +3994,7 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
         bojMeetingResultTitles,
         macroDataResultTitles,
         macroDataEventType,
+        chinaMacroTitles,
         breakingNewsCandidates,
     };
 }
@@ -4022,6 +4038,10 @@ function mergeDailyPitchHeadlineSignalsFromTopics(
             ...titles.filter((t) => headlineSignals.macroDataEventType ? isMacroDataHeadline(t, headlineSignals.macroDataEventType) : false),
         ].slice(0, 3),
         macroDataEventType: headlineSignals.macroDataEventType,
+        chinaMacroTitles: [
+            ...headlineSignals.chinaMacroTitles,
+            ...titles.filter(isChinaMacroSurpriseHeadline),
+        ].slice(0, 3),
         breakingNewsCandidates: headlineSignals.breakingNewsCandidates,
     };
 }
@@ -4042,18 +4062,24 @@ function ensureMandatoryHeadlineTriggers(
         ...(headlineSignals.macroDataResultTitles.length > 0
             ? [headlineSignals.macroDataEventType === 'NFP' ? '美国非农数据落地' : headlineSignals.macroDataEventType === 'CPI' ? '美国CPI数据落地' : '美国PCE数据落地']
             : []),
+        ...(headlineSignals.chinaMacroTitles.length > 0 ? ['中国宏观数据超预期'] : []),
         ...(headlineSignals.majorGeopoliticalTitles.length > 0 ? ['地缘风险结构升级'] : []),
         ...headlineSignals.breakingNewsCandidates
             .filter((candidate) => candidate.score >= 8)
             .map((candidate) => candidate.pitchHeadline),
     ];
 
+    const matchesHeadline = (item: { headline?: string | null; hook?: string | null }, target: string) => {
+        const h = (item.headline ?? item.hook ?? '').trim();
+        return h === target || h.includes(target) || target.includes(h);
+    };
+
     for (const headline of mandatoryHeadlines) {
-        if (next.some((item) => item.headline === headline || item.hook === headline)) {
+        if (next.some((item) => matchesHeadline(item, headline))) {
             continue;
         }
 
-        const candidate = candidates.find((item) => item.headline === headline || item.hook === headline);
+        const candidate = candidates.find((item) => matchesHeadline(item, headline));
         if (!candidate) {
             continue;
         }
@@ -4065,7 +4091,8 @@ function ensureMandatoryHeadlineTriggers(
 
         let replaceIndex = 0;
         for (let index = next.length - 1; index >= 0; index -= 1) {
-            if (!mandatoryHeadlines.includes(next[index].headline ?? next[index].hook ?? '')) {
+            const isAlreadyMandatory = mandatoryHeadlines.some((mh) => matchesHeadline(next[index], mh));
+            if (!isAlreadyMandatory) {
                 replaceIndex = index;
                 break;
             }
@@ -4265,11 +4292,21 @@ async function buildDailyPitchCandidateSection(
         ].join('\n'));
     }
 
+    if (headlineSignals.chinaMacroTitles.length > 0) {
+        candidates.push([
+            '[HIGH][3B/3C] 中国宏观数据出炉',
+            `新闻锚点：${headlineSignals.chinaMacroTitles[0]}。`,
+            '为什么可聊：中国PMI、贸易数据或社融数据超预期或不及预期，会直接影响港股、A股ETF的估值预期，以及人民币汇率和资金流向；是和持有中资资产或港股低配客户开启对话的最直接切入点。',
+            '建议标题：中国宏观数据超预期',
+            '适合客户：港股低配客户、中资资产或USDCNH敞口客户'
+        ].join('\n'));
+    }
+
     if (headlineSignals.majorGeopoliticalTitles.length > 0) {
         candidates.push([
             '[CRITICAL][3D/3E] 地缘结构性风险升级',
             `新闻锚点：${headlineSignals.majorGeopoliticalTitles[0]}。`,
-            '为什么可聊：结构性地缘事件（台海、制裁、芯片管制）会通过贸易链、供应链和风险溢价同时冲击多类资产；RM需要为客户梳理第一和第二阶传导路径，而不是只讲市场涨跌。',
+            '为什么可聊：结构性地缘事件（台海、制裁、芯片管制）通过贸易链、供应链和风险溢价传导至多类资产；RM应为客户梳理第一和第二阶传导路径，而不是只讲市场涨跌。',
             '建议标题：地缘风险结构升级',
             '适合客户：科技仓位、中资资产或跨境资产客户'
         ].join('\n'));
@@ -4443,7 +4480,7 @@ async function buildDailyPitchCandidateSection(
     }
 
     const quietDayNote = isQuietDay && candidates.length > 0
-        ? '\n\n【今日为低信号交易日】今天缺乏高优先级的突发事件或财报催化，候选信号基于市场数据统计特征。模型应选择数据锚点最清晰的信号，context 和 talking_point 必须绑定具体数字；禁止在缺乏数据支撑时生成泛泛的"市场情绪改善"或"风险偏好修复"类卡片。若实在没有合格的3条，可将3条中最弱的替换为组合检视类话题，但 materiality_trigger 必须注明低信号日。'
+        ? '\n\n【今日为低信号交易日】今天缺乏高优先级的突发事件或财报催化，候选信号基于市场数据统计特征。规则：(1) 优先选择有具体数字锚点的候选信号；(2) 若只有2条合格候选，只生成2条，不要为了凑3条编造第3条；(3) 禁止生成"市场情绪改善"/"风险偏好修复"等无数据支撑的泛泛卡片；(4) 若生成第3条，materiality_trigger 必须标注"低信号日-统计特征"。'
         : '';
 
     return [
@@ -4812,6 +4849,34 @@ async function buildDeterministicDailyPitchTriggers(
             risk_flag: false,
             time_sensitivity: 'watch',
             source_summary: '来自市场快照中的黄金单日、5日和YTD变化。'
+        });
+    }
+
+    if (headlineSignals.chinaMacroTitles.length > 0) {
+        const chinaAnchor = headlineSignals.chinaMacroTitles[0];
+        const isSurprise = /beat|miss|surprise|超预期|不及预期|意外/i.test(chinaAnchor);
+        const direction = /beat|above|better|超预期|高于/i.test(chinaAnchor) ? '好于预期' : /miss|below|worse|不及预期|低于/i.test(chinaAnchor) ? '不及预期' : '已公布';
+        const context = `中国宏观数据${direction}。${chinaAnchor.slice(0, 80)}。数据直接影响港股、人民币汇率和中资资产估值预期，是判断南向资金和港元流动性的关键观察窗口。`;
+        triggers.push({
+            id: triggers.length + 1,
+            headline: '中国宏观数据超预期',
+            hook: '中国宏观数据超预期',
+            context,
+            why_now: context,
+            talking_point: isSurprise
+                ? '中国数据今天出来了，数字和预期有明显落差；港股和人民币的方向很可能跟着走，您持有的中资资产或港股仓位，我们可以先确认一下方向。'
+                : '中国宏观数据刚公布，市场正在消化数字对港股和人民币的影响；如果您有中资资产或港股敞口，今天是讨论配置方向的好时机。',
+            pitch_line: isSurprise
+                ? '中国数据今天出来了，数字和预期有明显落差；港股和人民币的方向很可能跟着走，您持有的中资资产或港股仓位，我们可以先确认一下方向。'
+                : '中国宏观数据刚公布，市场正在消化数字对港股和人民币的影响；如果您有中资资产或港股敞口，今天是讨论配置方向的好时机。',
+            client_type: '港股低配客户、中资资产或USDCNH敞口客户',
+            watchpoints: ['数据实际值 vs 预期', '港股当日走势', 'USDCNH汇率反应'],
+            related_assets: ['Hong Kong Equities', 'USDCNH', 'China A-shares', 'HSI'],
+            asset_tags: ['Hong Kong Equities', 'USDCNH', 'China A-shares', 'HSI'],
+            materiality_trigger: '3B/3C: China macro data release and HK market impact',
+            risk_flag: false,
+            time_sensitivity: 'immediate',
+            source_summary: `来自中国宏观数据新闻：${chinaAnchor.slice(0, 100)}`,
         });
     }
 
@@ -5670,7 +5735,7 @@ ${narrativeHistorySection}
    - 每条必须满足至少一个 materiality trigger：
      3A 统计极值：主要指数/ETF单日>|3%|、连续涨跌>10日、偏离200日均线>20%、YTD>|30%|、相关性/利差/比率创多年极值
      3B 事件临近：未来5个交易日内>$200B公司财报、央行会议，或未来2个交易日内CPI/PCE/NFP/GDP等高影响数据
-     3C regime change：VIX穿越20/30、领导板块反转、股债相关性切换、央行语言明显转向
+     3C regime change：领导板块反转、股债相关性切换、央行语言明显转向（VIX数据若未出现在市场快照中则不可引用）
      3D 地缘二元事件：停火达成/破裂、制裁、霍尔木兹/苏伊士等关键通道扰动、军事升级/降级
      3E 私行特异性：FCN常见底层IV显著变化、AT1/GSIB资本工具新闻、HK SFC/MAS分销适当性、家办/UHNWI结构性议题
    - 三条必须满足多样性约束：至少覆盖2个资产类别；纯宏观/央行不超过1条；单一股票不超过1条，除非它有明确跨资产传导；同等重要时优先最近12小时与更清晰的PB客户组合含义
@@ -5678,7 +5743,7 @@ ${narrativeHistorySection}
      - id：1、2、3
      - headline：≤20个中文字符，写法参考香港财经晨报或Wind中文摘要；要通顺自然的中文，不要英文直译语序；禁止使用"进入验证/牵动/重新校准/证伪点/传导待确认"这类翻译腔词汇；好的示例："${isHktWeekend() ? '下周财报验证AI叙事' : '今晚财报验证AI叙事'}"、"阿联酋退出OPEC，油市震荡加剧"、"美债收益率重新定价"
      - context：80-120个中文字符，写给RM理解为什么重要；必须包含具体数字/事件、传导机制和组合含义方向
-     - talking_point：60-100个中文字符，写成RM对高净值客户开口的话；专业、自然、可开启对话，不给直接买卖建议
+     - talking_point：60-100个中文字符，写成RM对高净值客户开口的话；专业、自然、可开启对话，不给直接买卖建议；禁止在开头加客户称谓（如"陈太"、"李先生"等），直接从事件或判断切入
      - client_type：≤20字，最适合主动触达的客户类型，必须落到敞口
      - watchpoints：1-3个具体观察点，每个≤20字
      - asset_tags：资产类别和具体工具/指数，最多5个
