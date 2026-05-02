@@ -3400,16 +3400,34 @@ function formatPitchCandidateChange(item: ClientFocusMarketStateResponse['indice
     return parts.join('，');
 }
 
+function isHktWeekend(): boolean {
+    const dow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Hong_Kong' })).getDay();
+    return dow === 0 || dow === 6;
+}
+
+function earningsTimingLabel(daysUntil: number): string {
+    if (isHktWeekend()) return '下周盘后';
+    if (daysUntil === 1) return '今晚盘后';
+    if (daysUntil === 2) return '明晚盘后';
+    return `${daysUntil}日后`;
+}
+
+const EARNINGS_CALENDAR_SYMBOLS = new Set([
+    'AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOG', 'GOOGL', 'META', 'TSLA',
+    'AVGO', 'TSM', 'BABA', 'AMD', 'NFLX', 'ORCL', 'INTC', 'UNH',
+]);
+
 async function buildEarningsCalendarSection(): Promise<string> {
     try {
         const rows = await getUpcomingEarningsNextNDays(2);
         if (rows.length === 0) return '';
 
-        // earnings_calendar only stores the earnings date, not whether the print is
-        // pre-market or after-close. To avoid stale wording like "等待UNH财报" after
-        // the company has already reported, only feed clearly unreleased earnings
-        // (days_until >= 1) into the daily narrative prompt.
-        const upcomingRows = rows.filter((row) => row.days_until >= 1);
+        // Only feed clearly unreleased earnings from the high-relevance symbol universe.
+        // Smaller names (e.g. PLTR) are excluded to prevent the LLM from anchoring
+        // AI-narrative cards on non-Mag7 companies.
+        const upcomingRows = rows.filter(
+            (row) => row.days_until >= 1 && EARNINGS_CALENDAR_SYMBOLS.has(row.symbol)
+        );
         if (upcomingRows.length === 0) return '';
 
         const byDaysUntil = new Map<number, string[]>();
@@ -3422,7 +3440,7 @@ async function buildEarningsCalendarSection(): Promise<string> {
         const lines: string[] = Array.from(byDaysUntil.entries())
             .sort((left, right) => left[0] - right[0])
             .map(([daysUntil, symbols]) => {
-                const label = daysUntil === 1 ? '今晚盘后待发财报' : daysUntil === 2 ? '明晚盘后待发财报' : `${daysUntil}日后待发财报`;
+                const label = `${earningsTimingLabel(daysUntil)}待发财报`;
                 return `${label}：${symbols.join('、')}`;
             });
         if (lines.length === 0) return '';
@@ -3814,7 +3832,7 @@ function ensureMandatoryHeadlineTriggers(
     const next = [...selected];
     const mandatoryHeadlines = [
         ...(headlineSignals.majorEarningsResultTitles.length > 0 ? ['超级财报周结果落地'] : []),
-        ...(headlineSignals.openAiTargetMissTitles.length > 0 ? ['今晚财报验证AI叙事'] : []),
+        ...(headlineSignals.openAiTargetMissTitles.length > 0 ? [isHktWeekend() ? '下周财报验证AI叙事' : '今晚财报验证AI叙事'] : []),
         ...(headlineSignals.uaeOpecExitTitles.length > 0 ? ['阿联酋退出OPEC，油市动荡加剧'] : []),
         ...(headlineSignals.centralBankShockTitles.length > 0 ? ['央行政策超预期'] : []),
         ...(headlineSignals.fomcMeetingResultTitles.length > 0 ? ['美联储议息结果落地'] : []),
@@ -3887,12 +3905,12 @@ async function buildDailyPitchCandidateSection(
             .slice(0, 12);
         if (earningsRows.length >= 2) {
             const grouped = earningsRows
-                .map((row) => `${row.symbol}${row.days_until === 1 ? '(今晚盘后)' : row.days_until === 2 ? '(明晚盘后)' : `(${row.days_until}日后)`}`)
+                .map((row) => `${row.symbol}(${earningsTimingLabel(row.days_until)})`)
                 .join('、');
             candidates.push([
                 '[PRE-EARNINGS][HIGH][3B] 超级财报周开启',
                 `数据锚点：未来7日内待发财报的权重/FCN常见底层包括 ${grouped}。`,
-                '为什么可聊：市场从宏观headline切回盈利验证，AI capex、云业务、广告或电动车利润率会直接影响美股科技仓位与相关FCN底层波动率。',
+                '为什么可聊：市场从宏观headline切回盈利验证，AI capex、云业务和核心业务收入会直接影响美股科技仓位与相关FCN底层波动率。',
                 '建议标题：超级财报周开启',
                 '适合客户：美股科技仓位客户、FCN底层含核心科技/半导体客户'
             ].join('\n'));
@@ -3905,11 +3923,15 @@ async function buildDailyPitchCandidateSection(
         const reportedForCopy = recentlyReported.length > 0 ? recentlyReported : ['权重科技股'];
         const postEarningsHeadline = recentlyReported.length >= 3
             ? '超级财报周结果落地'
-            : `${reportedForCopy[0]}等财报落地`;
+            : recentlyReported.length === 2
+                ? `${reportedForCopy[0]}、${reportedForCopy[1]}财报落地`
+                : recentlyReported.length === 1
+                    ? `${reportedForCopy[0]}财报落地`
+                    : 'Mag7财报落地';
         candidates.push([
             `[POST-EARNINGS][CRITICAL][3B/3E] ${postEarningsHeadline}`,
             `新闻锚点：${headlineSignals.majorEarningsResultTitles[0]}。`,
-            `为什么可聊：${reportedForCopy.join('、')}财报已落地，会重定价AI capex、云业务、广告/电动车收入和科技FCN底层IV；客户今天关心的是财报结果能否支撑前期科技仓位估值。`,
+            `为什么可聊：${reportedForCopy.join('、')}财报已落地，会重定价AI capex、云业务和核心业务收入预期，直接影响科技FCN底层IV与仓位估值；客户今天关心的是财报结果能否支撑前期科技仓位。`,
             `建议标题：${postEarningsHeadline}`,
             '适合客户：美股科技仓位客户、核心科技或AI主题FCN客户'
         ].join('\n'));
@@ -4158,8 +4180,12 @@ async function buildDeterministicDailyPitchTriggers(
         const reportedForCopy = recentlyReported.length > 0 ? recentlyReported : ['权重科技股'];
         const headline = recentlyReported.length >= 3
             ? '超级财报周结果落地'
-            : `${reportedForCopy[0]}等财报落地`;
-        const context = `${reportedForCopy.join('、')}财报已落地，市场从等待财报切到AI capex、云业务、广告/电动车收入和科技FCN底层IV的结果重定价。`;
+            : recentlyReported.length === 2
+                ? `${reportedForCopy[0]}、${reportedForCopy[1]}财报落地`
+                : recentlyReported.length === 1
+                    ? `${reportedForCopy[0]}财报落地`
+                    : 'Mag7财报落地';
+        const context = `${reportedForCopy.join('、')}财报已落地，市场从等待财报切到AI capex、云业务和核心业务收入的结果重定价，科技FCN底层IV与仓位估值进入验证窗口。`;
         triggers.push({
             id: triggers.length + 1,
             headline,
@@ -4186,25 +4212,28 @@ async function buildDeterministicDailyPitchTriggers(
             .slice(0, 8);
         if (earningsRows.length >= 2) {
             const grouped = earningsRows
-                .map((row) => `${row.symbol}${row.days_until === 1 ? '今晚盘后' : row.days_until === 2 ? '明晚盘后' : `${row.days_until}日后`}`)
+                .map((row) => `${row.symbol}${earningsTimingLabel(row.days_until)}`)
                 .join('、');
             const hasOpenAiStress = headlineSignals.openAiTargetMissTitles.length > 0;
-            const headline = hasOpenAiStress ? '今晚财报验证AI叙事' : '超级财报周开启';
+            const weekend = isHktWeekend();
+            const timingWord = weekend ? '下周' : '今晚';
+            const headline = hasOpenAiStress
+                ? `${timingWord}财报验证AI叙事`
+                : '超级财报周开启';
             const context = hasOpenAiStress
-                ? `OpenAI用户/收入目标争议已压到AI算力链，未来7日内${grouped}等权重/FCN常见底层将发财报，市场要验证AI capex回报能否支撑估值。`
-                : `未来7日内${grouped}等权重/FCN常见底层将发财报，市场焦点从宏观headline切回盈利验证和AI capex回报。`;
+                ? `OpenAI用户/收入目标争议已压到AI算力链，${grouped}等权重/FCN常见底层将发财报，市场要验证AI capex回报能否支撑估值。`
+                : `${grouped}等权重/FCN常见底层将发财报，市场焦点从宏观headline切回盈利验证和AI capex回报。`;
+            const talkingPoint = hasOpenAiStress
+                ? `市场已开始质疑AI投入回报，${timingWord}权重股财报会直接给答案；您科技仓位和相关FCN底层要不要先按好中差三种情景看一遍？`
+                : `${weekend ? '下周' : '这周'}真正要看的不是指数涨跌，而是权重股财报能否证明AI和科技仓位的盈利兑现，您组合里的科技敞口要不要先做一次情景讨论？`;
             triggers.push({
                 id: 1,
                 headline,
                 hook: headline,
                 context,
                 why_now: context,
-                talking_point: hasOpenAiStress
-                    ? '昨天市场已经开始质疑AI投入回报，今晚权重股财报会直接给答案；您科技仓位和相关FCN底层要不要先按好中差三种情景看一遍？'
-                    : '这周真正要看的不是指数涨跌，而是权重股财报能否证明AI和科技仓位的盈利兑现，您组合里的科技敞口要不要先做一次情景讨论？',
-                pitch_line: hasOpenAiStress
-                    ? '昨天市场已经开始质疑AI投入回报，今晚权重股财报会直接给答案；您科技仓位和相关FCN底层要不要先按好中差三种情景看一遍？'
-                    : '这周真正要看的不是指数涨跌，而是权重股财报能否证明AI和科技仓位的盈利兑现，您组合里的科技敞口要不要先做一次情景讨论？',
+                talking_point: talkingPoint,
+                pitch_line: talkingPoint,
                 client_type: '美股科技或FCN客户',
                 watchpoints: hasOpenAiStress
                     ? ['OpenAI相关表述', 'AI capex指引', 'FCN底层IV变化']
