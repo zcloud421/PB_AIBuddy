@@ -4084,7 +4084,7 @@ async function buildDailyPitchCandidateSection(
             '[CRITICAL][3C/3E] AI capex叙事进入证伪窗口',
             `新闻锚点：${headlineSignals.openAiTargetMissTitles[0]}。`,
             '为什么可聊：OpenAI用户/收入目标争议直接冲击ORCL、CoreWeave、NVDA等AI算力链，权重科技股财报的焦点应从“增长多少”升级为“能否证实AI capex回报”。',
-            '建议标题：今晚财报验证AI叙事',
+            `建议标题：${isHktWeekend() ? '下周财报验证AI叙事' : '今晚财报验证AI叙事'}`,
             '适合客户：美股科技仓位客户、AI/半导体FCN客户'
         ].join('\n'));
     }
@@ -4988,7 +4988,7 @@ function normalizePitchHeadline(trigger: DailyPitchTrigger): string {
 
 function normalizePitchThemeKey(trigger: DailyPitchTrigger): string {
     const headline = trigger.headline ?? trigger.hook ?? '';
-    if (/超级财报周结果落地|今晚财报验证AI叙事|Mag7财报落地|超级财报周开启/.test(headline)) {
+    if (/超级财报周结果落地|今晚财报验证AI叙事|下周财报验证AI叙事|Mag7财报落地|超级财报周开启/.test(headline)) {
         return 'major-tech-earnings';
     }
     return normalizePitchHeadline(trigger);
@@ -5610,7 +5610,7 @@ ${narrativeHistorySection}
    - 三条必须满足多样性约束：至少覆盖2个资产类别；纯宏观/央行不超过1条；单一股票不超过1条，除非它有明确跨资产传导；同等重要时优先最近12小时与更清晰的PB客户组合含义
    - 每条必须包含：
      - id：1、2、3
-     - headline：≤20个中文字符，写法参考香港财经晨报或Wind中文摘要；要通顺自然的中文，不要英文直译语序；禁止使用"进入验证/牵动/重新校准/证伪点/传导待确认"这类翻译腔词汇；好的示例："今晚财报验证AI叙事"、"阿联酋退出OPEC，油市震荡加剧"、"美债收益率重新定价"
+     - headline：≤20个中文字符，写法参考香港财经晨报或Wind中文摘要；要通顺自然的中文，不要英文直译语序；禁止使用"进入验证/牵动/重新校准/证伪点/传导待确认"这类翻译腔词汇；好的示例："${isHktWeekend() ? '下周财报验证AI叙事' : '今晚财报验证AI叙事'}"、"阿联酋退出OPEC，油市震荡加剧"、"美债收益率重新定价"
      - context：80-120个中文字符，写给RM理解为什么重要；必须包含具体数字/事件、传导机制和组合含义方向
      - talking_point：60-100个中文字符，写成RM对高净值客户开口的话；专业、自然、可开启对话，不给直接买卖建议
      - client_type：≤20字，最适合主动触达的客户类型，必须落到敞口
