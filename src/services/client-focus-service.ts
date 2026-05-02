@@ -137,6 +137,9 @@ interface BreakingNewsCandidate {
     pitchHeadline: string;
     whyDiscuss: string;
     suitableClients: string;
+    context: string;
+    talkingPoint: string;
+    watchpoints: string[];
 }
 
 interface DailyPitchHeadlineSignals {
@@ -146,6 +149,9 @@ interface DailyPitchHeadlineSignals {
     majorGeopoliticalTitles: string[];
     majorEarningsResultTitles: string[];
     fomcMeetingResultTitles: string[];
+    bojMeetingResultTitles: string[];
+    macroDataResultTitles: string[];
+    macroDataEventType: 'NFP' | 'CPI' | 'PCE' | null;
     breakingNewsCandidates: BreakingNewsCandidate[];
 }
 
@@ -169,6 +175,9 @@ const EMPTY_DAILY_PITCH_HEADLINE_SIGNALS: DailyPitchHeadlineSignals = {
     majorGeopoliticalTitles: [],
     majorEarningsResultTitles: [],
     fomcMeetingResultTitles: [],
+    bojMeetingResultTitles: [],
+    macroDataResultTitles: [],
+    macroDataEventType: null,
     breakingNewsCandidates: [],
 };
 
@@ -3491,6 +3500,76 @@ function isPowellFinalMeetingWindow(todayIso: string): boolean {
     return current >= start && current <= end;
 }
 
+const BOJ_DECISION_DATES_2026 = [
+    '2026-01-24', '2026-03-19', '2026-04-30', '2026-06-17',
+    '2026-07-31', '2026-09-19', '2026-10-29', '2026-12-18',
+] as const;
+
+function isBojDecisionWindow(todayIso: string): boolean {
+    return BOJ_DECISION_DATES_2026.some((date) => {
+        const diff = Math.abs(new Date(todayIso).getTime() - new Date(date).getTime()) / (1000 * 60 * 60 * 24);
+        return diff <= 1;
+    });
+}
+
+function isBojDecisionHeadline(title: string): boolean {
+    const normalized = title.toLowerCase();
+    const hasBoj = /(boj|bank of japan|日銀|日银|黑田|植田|ueda)/i.test(title);
+    const hasDecision = /(rate decision|holds rates|rate hold|rate cut|rate hike|yield curve control|ycc|negative rate|policy rate|basis points|bps|press conference|statement|利率决议|按兵不动|降息|加息|利率不变|新闻发布会|声明|政策利率|收益率曲线)/i.test(normalized);
+    const isPreview = /(what to expect|preview|ahead of|before the|watch live|预览|前瞻|等待)/i.test(normalized);
+    return hasBoj && hasDecision && !isPreview;
+}
+
+interface MacroDataEvent {
+    date: string;
+    type: 'NFP' | 'CPI' | 'PCE';
+}
+
+const US_MACRO_DATA_EVENTS_2026: MacroDataEvent[] = [
+    { date: '2026-01-09', type: 'NFP' }, { date: '2026-01-14', type: 'CPI' }, { date: '2026-01-30', type: 'PCE' },
+    { date: '2026-02-06', type: 'NFP' }, { date: '2026-02-12', type: 'CPI' }, { date: '2026-02-27', type: 'PCE' },
+    { date: '2026-03-06', type: 'NFP' }, { date: '2026-03-12', type: 'CPI' }, { date: '2026-03-27', type: 'PCE' },
+    { date: '2026-04-03', type: 'NFP' }, { date: '2026-04-10', type: 'CPI' }, { date: '2026-04-30', type: 'PCE' },
+    { date: '2026-05-01', type: 'NFP' }, { date: '2026-05-13', type: 'CPI' }, { date: '2026-05-29', type: 'PCE' },
+    { date: '2026-06-05', type: 'NFP' }, { date: '2026-06-11', type: 'CPI' }, { date: '2026-06-26', type: 'PCE' },
+    { date: '2026-07-02', type: 'NFP' }, { date: '2026-07-14', type: 'CPI' }, { date: '2026-07-31', type: 'PCE' },
+    { date: '2026-08-07', type: 'NFP' }, { date: '2026-08-12', type: 'CPI' }, { date: '2026-08-28', type: 'PCE' },
+    { date: '2026-09-04', type: 'NFP' }, { date: '2026-09-11', type: 'CPI' }, { date: '2026-09-25', type: 'PCE' },
+    { date: '2026-10-02', type: 'NFP' }, { date: '2026-10-14', type: 'CPI' }, { date: '2026-10-30', type: 'PCE' },
+    { date: '2026-11-06', type: 'NFP' }, { date: '2026-11-12', type: 'CPI' }, { date: '2026-11-25', type: 'PCE' },
+    { date: '2026-12-04', type: 'NFP' }, { date: '2026-12-10', type: 'CPI' }, { date: '2026-12-23', type: 'PCE' },
+];
+
+function getNearestMacroDataEvent(todayIso: string): MacroDataEvent | null {
+    let nearest: MacroDataEvent | null = null;
+    let minDiff = Number.POSITIVE_INFINITY;
+    for (const event of US_MACRO_DATA_EVENTS_2026) {
+        const diff = Math.abs(new Date(todayIso).getTime() - new Date(event.date).getTime()) / (1000 * 60 * 60 * 24);
+        if (diff <= 1 && diff < minDiff) {
+            minDiff = diff;
+            nearest = event;
+        }
+    }
+    return nearest;
+}
+
+function isMacroDataHeadline(title: string, type: 'NFP' | 'CPI' | 'PCE'): boolean {
+    const normalized = title.toLowerCase();
+    if (type === 'NFP') {
+        return /(nonfarm payroll|non-farm payroll|jobs report|labor market|unemployment rate|payrolls|非农|就业|失业率)/i.test(normalized)
+            && /(added|gained|beat|miss|rose|fell|report|data|figures|result|数据|公布|发布|超预期|不及预期)/i.test(normalized);
+    }
+    if (type === 'CPI') {
+        return /(consumer price|cpi|inflation rate|core cpi|通胀|消费者物价)/i.test(normalized)
+            && /(rose|fell|climbed|eased|data|report|figures|result|公布|发布|超预期|不及预期)/i.test(normalized);
+    }
+    if (type === 'PCE') {
+        return /(pce|personal consumption expenditure|core pce|fed.*inflation|通胀.*美联储|美联储.*通胀)/i.test(normalized)
+            && /(rose|fell|data|report|result|公布|发布|超预期|不及预期)/i.test(normalized);
+    }
+    return false;
+}
+
 function isCentralBankShockHeadline(title: string): boolean {
     const normalized = title.toLowerCase();
     const hasCentralBank = /(boj|bank of japan|日銀|日银|fed |federal reserve|ecb|european central bank|pboc|中国人民银行|rba|bank of england|boe)/i.test(title);
@@ -3633,11 +3712,14 @@ async function scoreBreakingNewsHeadlines(
 5–6：相关但非紧迫（行业数据、非核心公司动态、已定价事件后续）
 1–4：与PB客户持仓无直接关系或纯噪音
 
-对每条标题返回：
+对每条标题返回（score≥7时所有字段认真填写，否则pitch_headline/why_discuss/suitable_clients/context/talking_point/watchpoints均留空）：
 - score：1–10整数
-- pitch_headline：≤12个中文字的RM可聊话题标题（仅在score≥7时认真写，否则可留空）
-- why_discuss：一句话说明为什么对RM有价值（score≥7时写，否则留空）
-- suitable_clients：适合哪类客户（score≥7时写，否则留空）
+- pitch_headline：≤12个中文字的RM可聊话题标题
+- why_discuss：一句话说明为什么对RM有价值
+- suitable_clients：适合哪类客户（例："持有AT1或长久期债客户"）
+- context：2–3句背景说明，解释事件对PB持仓的具体传导机制，引用具体资产名称，禁止使用"某报告"/"分析显示"等模糊表达
+- talking_point：一句自然口语化的RM开场白，可直接对客户说，语气专业但不生硬
+- watchpoints：3个关键观察点，JSON字符串数组格式
 
 新闻标题列表：
 ${titles.map((title, index) => `${index + 1}. ${title}`).join('\n')}
@@ -3649,7 +3731,10 @@ ${titles.map((title, index) => `${index + 1}. ${title}`).join('\n')}
     "score": 数字,
     "pitch_headline": "标题",
     "why_discuss": "一句话",
-    "suitable_clients": "客户类型"
+    "suitable_clients": "客户类型",
+    "context": "背景说明",
+    "talking_point": "口语化开场白",
+    "watchpoints": ["观察点1", "观察点2", "观察点3"]
   }
 ]`;
 
@@ -3685,6 +3770,9 @@ ${titles.map((title, index) => `${index + 1}. ${title}`).join('\n')}
             pitch_headline: string;
             why_discuss: string;
             suitable_clients: string;
+            context: string;
+            talking_point: string;
+            watchpoints: string[];
         }>;
 
         return parsed
@@ -3695,6 +3783,9 @@ ${titles.map((title, index) => `${index + 1}. ${title}`).join('\n')}
                 pitchHeadline: (item.pitch_headline ?? '').slice(0, 20),
                 whyDiscuss: item.why_discuss ?? '',
                 suitableClients: item.suitable_clients ?? '',
+                context: item.context ?? '',
+                talkingPoint: item.talking_point ?? '',
+                watchpoints: Array.isArray(item.watchpoints) ? item.watchpoints.slice(0, 3) : [],
             }))
             .filter((item) => item.originalTitle && item.pitchHeadline)
             .sort((a, b) => b.score - a.score)
@@ -3707,7 +3798,9 @@ ${titles.map((title, index) => `${index + 1}. ${title}`).join('\n')}
 async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSignals> {
     const todayIso = new Date().toISOString().slice(0, 10);
     const onFomcWindow = isFomcDecisionWindow(todayIso);
-    const [openAiResults, uaeResults, centralBankResults, geopoliticalResults, majorEarningsResults, fomcResults] = await Promise.allSettled([
+    const onBojWindow = isBojDecisionWindow(todayIso);
+    const nearestMacroEvent = getNearestMacroDataEvent(todayIso);
+    const [openAiResults, uaeResults, centralBankResults, geopoliticalResults, majorEarningsResults, fomcResults, bojResults, macroResults] = await Promise.allSettled([
         fetchNewsItemsByQuery('OpenAI missed revenue user targets Oracle CoreWeave AI stocks WSJ', {
             excludeEtfAndFunds: false
         }),
@@ -3728,6 +3821,21 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
                 excludeEtfAndFunds: false
             })
             : Promise.resolve([]),
+        onBojWindow
+            ? fetchNewsItemsByQuery('BOJ Bank of Japan rate decision policy statement press conference interest rates yield curve', {
+                excludeEtfAndFunds: false
+            })
+            : Promise.resolve([]),
+        nearestMacroEvent
+            ? fetchNewsItemsByQuery(
+                nearestMacroEvent.type === 'NFP'
+                    ? 'nonfarm payrolls jobs report unemployment rate labor market US economy'
+                    : nearestMacroEvent.type === 'CPI'
+                        ? 'CPI consumer price index inflation rate core CPI US economy'
+                        : 'PCE personal consumption expenditure core PCE Fed inflation gauge',
+                { excludeEtfAndFunds: false }
+            )
+            : Promise.resolve([]),
     ]);
 
     const openAiItems = openAiResults.status === 'fulfilled' ? openAiResults.value : [];
@@ -3736,6 +3844,8 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
     const geopoliticalItems = geopoliticalResults.status === 'fulfilled' ? geopoliticalResults.value : [];
     const majorEarningsItems = majorEarningsResults.status === 'fulfilled' ? majorEarningsResults.value : [];
     const fomcItems = fomcResults.status === 'fulfilled' ? fomcResults.value : [];
+    const bojItems = bojResults.status === 'fulfilled' ? bojResults.value : [];
+    const macroItems = macroResults.status === 'fulfilled' ? macroResults.value : [];
     const recentlyReportedMajor = await getRecentlyReportedMajorEarningsSymbols().catch(() => []);
     const existingTitles = new Set([
         ...openAiItems.map((item) => item.title),
@@ -3744,6 +3854,8 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
         ...geopoliticalItems.map((item) => item.title),
         ...majorEarningsItems.map((item) => item.title),
         ...fomcItems.map((item) => item.title),
+        ...bojItems.map((item) => item.title),
+        ...macroItems.map((item) => item.title),
     ].map((title) => title.toLowerCase()));
 
     const broadNewsResults = await Promise.allSettled([
@@ -3779,6 +3891,20 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
         fomcMeetingResultTitles.push('美联储本次会议利率决议已公布，市场关注声明措辞与点阵图变化');
     }
 
+    const bojMeetingResultTitles = compactHeadlineList(bojItems, isBojDecisionHeadline);
+    if (onBojWindow && bojMeetingResultTitles.length === 0) {
+        bojMeetingResultTitles.push('日本央行本次会议利率决议已公布，市场关注加息路径与汇率信号');
+    }
+
+    const macroDataResultTitles = nearestMacroEvent
+        ? compactHeadlineList(macroItems, (title) => isMacroDataHeadline(title, nearestMacroEvent.type))
+        : [];
+    if (nearestMacroEvent && macroDataResultTitles.length === 0) {
+        const macroLabel = nearestMacroEvent.type === 'NFP' ? '非农就业数据' : nearestMacroEvent.type === 'CPI' ? 'CPI通胀数据' : 'PCE核心通胀数据';
+        macroDataResultTitles.push(`美国${macroLabel}已公布，市场评估对美联储政策路径的影响`);
+    }
+    const macroDataEventType = nearestMacroEvent?.type ?? null;
+
     return {
         openAiTargetMissTitles: compactHeadlineList(openAiItems, isOpenAiTargetMissHeadline),
         uaeOpecExitTitles: compactHeadlineList(uaeItems, isUaeOpecExitHeadline),
@@ -3786,6 +3912,9 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
         majorGeopoliticalTitles: compactHeadlineList(geopoliticalItems, isMajorGeopoliticalHeadline),
         majorEarningsResultTitles,
         fomcMeetingResultTitles,
+        bojMeetingResultTitles,
+        macroDataResultTitles,
+        macroDataEventType,
         breakingNewsCandidates,
     };
 }
@@ -3820,6 +3949,15 @@ function mergeDailyPitchHeadlineSignalsFromTopics(
             ...headlineSignals.fomcMeetingResultTitles,
             ...titles.filter(isFomcDecisionHeadline),
         ].slice(0, 3),
+        bojMeetingResultTitles: [
+            ...headlineSignals.bojMeetingResultTitles,
+            ...titles.filter(isBojDecisionHeadline),
+        ].slice(0, 3),
+        macroDataResultTitles: [
+            ...headlineSignals.macroDataResultTitles,
+            ...titles.filter((t) => headlineSignals.macroDataEventType ? isMacroDataHeadline(t, headlineSignals.macroDataEventType) : false),
+        ].slice(0, 3),
+        macroDataEventType: headlineSignals.macroDataEventType,
         breakingNewsCandidates: headlineSignals.breakingNewsCandidates,
     };
 }
@@ -3836,6 +3974,10 @@ function ensureMandatoryHeadlineTriggers(
         ...(headlineSignals.uaeOpecExitTitles.length > 0 ? ['阿联酋退出OPEC，油市动荡加剧'] : []),
         ...(headlineSignals.centralBankShockTitles.length > 0 ? ['央行政策超预期'] : []),
         ...(headlineSignals.fomcMeetingResultTitles.length > 0 ? ['美联储议息结果落地'] : []),
+        ...(headlineSignals.bojMeetingResultTitles.length > 0 ? ['日银议息结果落地'] : []),
+        ...(headlineSignals.macroDataResultTitles.length > 0
+            ? [headlineSignals.macroDataEventType === 'NFP' ? '美国非农数据落地' : headlineSignals.macroDataEventType === 'CPI' ? '美国CPI数据落地' : '美国PCE数据落地']
+            : []),
         ...(headlineSignals.majorGeopoliticalTitles.length > 0 ? ['地缘风险结构升级'] : []),
         ...headlineSignals.breakingNewsCandidates
             .filter((candidate) => candidate.score >= 8)
@@ -4031,6 +4173,33 @@ async function buildDailyPitchCandidateSection(
         ].join('\n'));
     }
 
+    if (headlineSignals.bojMeetingResultTitles.length > 0) {
+        candidates.push([
+            '[CRITICAL][3B/3C] 日本央行利率决议落地',
+            `新闻锚点：${headlineSignals.bojMeetingResultTitles[0]}。`,
+            '为什么可聊：BOJ加息路径直接影响日元汇率与套利交易（carry trade）的平仓节奏，对持有日元资产或跨货币仓位的客户有直接影响；同时是全球利率正常化进程的重要观察窗口。',
+            '建议标题：日银议息结果落地',
+            '适合客户：持有日元资产、外汇套利仓位或跨货币债券客户',
+        ].join('\n'));
+    }
+
+    if (headlineSignals.macroDataResultTitles.length > 0) {
+        const macroType = headlineSignals.macroDataEventType;
+        const macroWhy = macroType === 'NFP'
+            ? '非农数据是美联储双重目标之一，就业超预期会压低降息预期，推升美元和利率；低于预期则相反。PB客户最关注的传导链：美债→AT1→港元利率→港股估值。'
+            : macroType === 'CPI'
+            ? 'CPI超预期会延后降息预期，压制长端债券价格和高估值股票；CPI走弱则打开降息空间。对持有利率敏感资产的客户是直接触发再平衡讨论的数据。'
+            : 'PCE是美联储首选通胀指标，核心PCE走势决定降息时间窗口。数据落地是和客户讨论组合久期与利率对冲的最佳切入点。';
+        const macroHeadline = macroType === 'NFP' ? '美国非农数据落地' : macroType === 'CPI' ? '美国CPI数据落地' : '美国PCE数据落地';
+        candidates.push([
+            '[CRITICAL][3B/3C] 美国宏观数据落地',
+            `新闻锚点：${headlineSignals.macroDataResultTitles[0]}。`,
+            `为什么可聊：${macroWhy}`,
+            `建议标题：${macroHeadline}`,
+            '适合客户：持有美债、AT1、利率衍生品或对美联储路径敏感的客户',
+        ].join('\n'));
+    }
+
     if (headlineSignals.majorGeopoliticalTitles.length > 0) {
         candidates.push([
             '[CRITICAL][3D/3E] 地缘结构性风险升级',
@@ -4137,12 +4306,83 @@ async function buildDailyPitchCandidateSection(
         ].join('\n'));
     }
 
+    const isQuietDay = candidates.length < 3;
+
+    if (isQuietDay) {
+        const usdjpy = byCode.get('USDJPY');
+        const spx = byCode.get('SPX') ?? byCode.get('SP500');
+        const gold = byCode.get('GOLD');
+        const dxy = byCode.get('DXY');
+
+        if (
+            usdjpy
+            && typeof usdjpy.change_5d_pct === 'number'
+            && Math.abs(usdjpy.change_5d_pct) >= 0.8
+        ) {
+            const dir = usdjpy.change_5d_pct > 0 ? '走弱' : '升值';
+            candidates.push([
+                '[LOW][3C] 日元汇率5日趋势值得关注',
+                `数据锚点：${formatPitchCandidateChange(usdjpy)}，日元近5日${dir}。`,
+                '为什么可聊：日元走势是全球carry trade的晴雨表；若日元明显升值，套利交易平仓压力会影响高Beta股票和新兴市场资产；反之美元强势影响HKD敞口。',
+                '建议标题：日元汇率5日趋势',
+                '适合客户：持有外汇套利仓位或非美资产客户'
+            ].join('\n'));
+        }
+
+        if (
+            spx
+            && typeof spx.change_5d_pct === 'number'
+            && Math.abs(spx.change_5d_pct) >= 2
+        ) {
+            const dir = spx.change_5d_pct > 0 ? '5日持续上涨' : '5日持续回调';
+            candidates.push([
+                '[LOW][3A] 美股5日动量信号',
+                `数据锚点：${formatPitchCandidateChange(spx)}，近5日${dir}。`,
+                '为什么可聊：美股5日动量超过2%，高于平均波动区间，值得讨论是结构性追涨还是拥挤交易；FCN底层波动率和科技仓位的锁定期都会受影响。',
+                '建议标题：美股动量持续，仓位检视',
+                '适合客户：美股科技仓位或FCN底层含主要指数客户'
+            ].join('\n'));
+        }
+
+        if (
+            gold
+            && typeof gold.change_5d_pct === 'number'
+            && Math.abs(gold.change_5d_pct) >= 2
+        ) {
+            candidates.push([
+                '[LOW][3D] 黄金5日趋势信号',
+                `数据锚点：${formatPitchCandidateChange(gold)}。`,
+                '为什么可聊：黄金近5日动量可能反映实际利率或地缘溢价的结构性变化，适合和有黄金票据或配置仓位的客户讨论重新定价逻辑。',
+                '建议标题：黄金趋势背后的驱动',
+                '适合客户：黄金票据或配置仓位客户'
+            ].join('\n'));
+        }
+
+        if (
+            dxy
+            && typeof dxy.change_5d_pct === 'number'
+            && Math.abs(dxy.change_5d_pct) >= 0.8
+        ) {
+            candidates.push([
+                '[LOW][3C] 美元指数5日走势',
+                `数据锚点：${formatPitchCandidateChange(dxy)}。`,
+                '为什么可聊：美元5日走势影响外币资产估值和HKD联系汇率下的资金流；可借机与持有非美资产客户讨论汇率对冲必要性。',
+                '建议标题：美元走势，汇率影响再评估',
+                '适合客户：非美资产或FX敞口客户'
+            ].join('\n'));
+        }
+    }
+
     if (candidates.length === 0) {
         return '';
     }
 
+    const quietDayNote = isQuietDay && candidates.length > 0
+        ? '\n\n【今日为低信号交易日】今天缺乏高优先级的突发事件或财报催化，候选信号基于市场数据统计特征。模型应选择数据锚点最清晰的信号，context 和 talking_point 必须绑定具体数字；禁止在缺乏数据支撑时生成泛泛的"市场情绪改善"或"风险偏好修复"类卡片。若实在没有合格的3条，可将3条中最弱的替换为组合检视类话题，但 materiality_trigger 必须注明低信号日。'
+        : '';
+
     return [
-        '今日可聊候选信号（模型必须优先从这里选择3条；HIGH 优先于 MEDIUM，LOW 只有在缺少更强候选时使用；若同时存在 [POST-EARNINGS] 和 [PRE-EARNINGS] 且底层标的有重叠，[POST-EARNINGS] 优先，[PRE-EARNINGS] 降级处理或合并为背景信息，不单独占一张卡片）：',
+        `今日可聊候选信号（模型必须优先从这里选择3条；HIGH 优先于 MEDIUM，LOW 只有在缺少更强候选时使用；若同时存在 [POST-EARNINGS] 和 [PRE-EARNINGS] 且底层标的有重叠，[POST-EARNINGS] 优先，[PRE-EARNINGS] 降级处理或合并为背景信息，不单独占一张卡片）：${quietDayNote}`,
         ...candidates.slice(0, 8).map((candidate, index) => `${index + 1}. ${candidate}`)
     ].join('\n\n');
 }
@@ -4277,6 +4517,64 @@ async function buildDeterministicDailyPitchTriggers(
             risk_flag: false,
             time_sensitivity: 'immediate',
             source_summary: `来自FOMC窗口与新闻标题：${fomcAnchor}`
+        });
+    }
+
+    if (headlineSignals.bojMeetingResultTitles.length > 0) {
+        const bojAnchor = headlineSignals.bojMeetingResultTitles[0];
+        triggers.push({
+            id: triggers.length + 1,
+            headline: '日银议息结果落地',
+            hook: '日银议息结果落地',
+            context: `日本央行本次利率决议已公布。${bojAnchor}。BOJ加息路径直接影响日元汇率与全球套利交易（carry trade）的平仓节奏，是跨货币仓位的即时再评估窗口。`,
+            why_now: `日本央行本次利率决议已公布。${bojAnchor}。BOJ加息路径直接影响日元汇率与全球套利交易（carry trade）的平仓节奏，是跨货币仓位的即时再评估窗口。`,
+            talking_point: '日银今天的决定不只是日本国内的事，套利交易的平仓节奏和日元升值幅度会直接影响您的跨货币资产；我们可以先看一下组合里有哪些仓位对日元汇率敏感。',
+            pitch_line: '日银今天的决定不只是日本国内的事，套利交易的平仓节奏和日元升值幅度会直接影响您的跨货币资产；我们可以先看一下组合里有哪些仓位对日元汇率敏感。',
+            client_type: '持有日元资产、外汇套利仓位或跨货币债券客户',
+            watchpoints: ['BOJ加息幅度', '日元汇率走势', '套利交易平仓规模', '港元利率联动'],
+            related_assets: ['USDJPY', 'JPY Bonds', 'Carry Trade', 'DXY'],
+            asset_tags: ['USDJPY', 'JPY Bonds', 'Carry Trade', 'DXY'],
+            materiality_trigger: '3B/3C: BOJ decision and carry trade repricing',
+            risk_flag: false,
+            time_sensitivity: 'immediate',
+            source_summary: `来自BOJ决议窗口与新闻标题：${bojAnchor}`,
+        });
+    }
+
+    if (headlineSignals.macroDataResultTitles.length > 0) {
+        const macroType = headlineSignals.macroDataEventType;
+        const macroAnchor = headlineSignals.macroDataResultTitles[0];
+        const macroHeadline = macroType === 'NFP' ? '美国非农数据落地' : macroType === 'CPI' ? '美国CPI数据落地' : '美国PCE数据落地';
+        const macroContext = macroType === 'NFP'
+            ? `美国非农就业数据已公布。${macroAnchor}。就业数据是美联储双重目标之一，直接影响降息预期与美债利率走势，传导链覆盖AT1、港元利率和港股估值。`
+            : macroType === 'CPI'
+            ? `美国CPI通胀数据已公布。${macroAnchor}。CPI走势决定美联储降息时间窗口，超预期压制长端债券，低于预期打开降息空间，是利率敏感仓位的即时评估节点。`
+            : `美国PCE核心通胀数据已公布。${macroAnchor}。PCE是美联储首选通胀指标，核心PCE走势决定降息路径，是讨论组合久期与利率对冲的最佳切入点。`;
+        const macroTalkingPoint = macroType === 'NFP'
+            ? '非农数据出来了，现在降息预期的定价在重新校准；您持有的美债和AT1仓位对利率路径的敏感度，我们可以现在拆一遍。'
+            : macroType === 'CPI'
+            ? 'CPI数据出来了，市场对降息节奏的预期会重新定价；您利率敏感的仓位要不要先按高通胀持续的情景看一遍？'
+            : 'PCE数据是美联储最看重的通胀信号，今天落地之后降息窗口的时间表会重新讨论；您的久期和利率对冲结构现在是合适的时间点来确认一下。';
+        triggers.push({
+            id: triggers.length + 1,
+            headline: macroHeadline,
+            hook: macroHeadline,
+            context: macroContext,
+            why_now: macroContext,
+            talking_point: macroTalkingPoint,
+            pitch_line: macroTalkingPoint,
+            client_type: '持有美债、AT1、利率衍生品或对美联储路径敏感的客户',
+            watchpoints: macroType === 'NFP'
+                ? ['就业数据实际值 vs 预期', '美债10Y即时走势', 'AT1利差变化', '降息预期重定价']
+                : macroType === 'CPI'
+                ? ['CPI实际值 vs 预期', '核心CPI走势', '美债反应', '降息概率曲线']
+                : ['核心PCE实际值 vs 预期', '美联储反应函数', '美债久期影响', '美元走势'],
+            related_assets: ['US Bonds', 'US 10Y', 'AT1', 'DXY', 'USD'],
+            asset_tags: ['US Bonds', 'US 10Y', 'AT1', 'DXY', 'USD'],
+            materiality_trigger: '3B/3C: US macro data release and Fed policy path repricing',
+            risk_flag: false,
+            time_sensitivity: 'immediate',
+            source_summary: `来自宏观数据窗口与新闻标题：${macroAnchor}`,
         });
     }
 
@@ -4448,6 +4746,28 @@ async function buildDeterministicDailyPitchTriggers(
             risk_flag: false,
             time_sensitivity: 'watch',
             source_summary: '来自市场快照中的黄金单日、5日和YTD变化。'
+        });
+    }
+
+    for (const candidate of headlineSignals.breakingNewsCandidates.filter((c) => c.score >= 9)) {
+        const context = candidate.context || `${candidate.originalTitle.slice(0, 110)}。${candidate.whyDiscuss}`;
+        const talkingPoint = candidate.talkingPoint || candidate.whyDiscuss;
+        triggers.push({
+            id: triggers.length + 1,
+            headline: candidate.pitchHeadline,
+            hook: candidate.pitchHeadline,
+            context,
+            why_now: context,
+            talking_point: talkingPoint,
+            pitch_line: talkingPoint,
+            client_type: candidate.suitableClients,
+            watchpoints: candidate.watchpoints.length > 0 ? candidate.watchpoints : ['后续发展', '市场反应', '跨资产传导'],
+            related_assets: [],
+            asset_tags: [],
+            materiality_trigger: '3E: breaking event score 9+',
+            risk_flag: true,
+            time_sensitivity: 'immediate',
+            source_summary: `来自突发新闻标题：${candidate.originalTitle.slice(0, 100)}`,
         });
     }
 
@@ -4735,17 +5055,21 @@ function timeSensitivityWeight(trigger: DailyPitchTrigger): number {
 function isCriticalPitchTrigger(trigger: DailyPitchTrigger): boolean {
     const headline = trigger.headline ?? trigger.hook ?? '';
     return trigger.risk_flag === true
-        || /Mag7财报落地|超级财报周结果落地|今晚财报验证AI叙事|阿联酋退出OPEC|央行政策超预期|美联储议息结果落地|地缘风险结构升级/.test(headline)
+        || /财报.*落地|财报周|财报.*AI|AI.*财报|美联储|FOMC|BOJ|日银.*政策|日本央行|央行政策|OPEC.*退出|退出.*OPEC|地缘风险|CPI.*数据|NFP|PCE.*数据|就业.*数据|通胀.*数据/.test(headline)
         || (trigger.watchpoints?.length ?? 0) >= 2;
 }
 
 function criticalPitchPriority(trigger: DailyPitchTrigger): number {
     const headline = trigger.headline ?? trigger.hook ?? '';
-    if (/超级财报周结果落地/.test(headline)) return 100;
-    if (/今晚财报验证AI叙事|Mag7财报落地/.test(headline)) return 92;
-    if (/美联储议息结果落地|央行政策超预期/.test(headline)) return 90;
-    if (/阿联酋退出OPEC/.test(headline)) return 82;
-    if (/地缘风险结构升级/.test(headline)) return 78;
+    if (/超级财报周.*落地|Mag7.*落地|财报周结果/.test(headline)) return 100;
+    if (/财报.*验证.*AI|AI.*叙事.*财报/.test(headline)) return 92;
+    if (/美联储议息|FOMC.*结果|央行政策超预期/.test(headline)) return 90;
+    if (/BOJ|日银.*政策|日本央行.*议息/.test(headline)) return 88;
+    if (/NFP|就业.*数据|非农/.test(headline)) return 87;
+    if (/CPI|PCE|通胀.*数据/.test(headline)) return 86;
+    if (/OPEC.*退出|退出.*OPEC|阿联酋.*OPEC/.test(headline)) return 82;
+    if (/地缘风险.*升级|地缘.*结构/.test(headline)) return 78;
+    if (/财报.*落地/.test(headline)) return 75;
     return trigger.risk_flag === true ? 70 : 50;
 }
 
