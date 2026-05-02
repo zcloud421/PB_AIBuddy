@@ -4193,7 +4193,7 @@ async function buildDailyPitchCandidateSection(
         const macroHeadline = macroType === 'NFP' ? '美国非农数据落地' : macroType === 'CPI' ? '美国CPI数据落地' : '美国PCE数据落地';
         candidates.push([
             '[CRITICAL][3B/3C] 美国宏观数据落地',
-            `新闻锚点：${headlineSignals.macroDataResultTitles[0]}。`,
+            `新闻锚点：${macroHeadline}已公布（来源：${headlineSignals.macroDataResultTitles[0].slice(0, 60)}）。`,
             `为什么可聊：${macroWhy}`,
             `建议标题：${macroHeadline}`,
             '适合客户：持有美债、AT1、利率衍生品或对美联储路径敏感的客户',
@@ -4546,10 +4546,10 @@ async function buildDeterministicDailyPitchTriggers(
         const macroAnchor = headlineSignals.macroDataResultTitles[0];
         const macroHeadline = macroType === 'NFP' ? '美国非农数据落地' : macroType === 'CPI' ? '美国CPI数据落地' : '美国PCE数据落地';
         const macroContext = macroType === 'NFP'
-            ? `${macroAnchor}。就业数据是美联储双重目标之一，直接影响降息预期与美债利率走势，传导链覆盖AT1、港元利率和港股估值。`
+            ? '美国非农就业数据今日公布，就业数据是美联储双重目标之一，直接影响降息预期与美债利率走势，传导链覆盖AT1、港元利率和港股估值。'
             : macroType === 'CPI'
-            ? `${macroAnchor}。CPI走势决定美联储降息时间窗口，超预期压制长端债券，低于预期打开降息空间，是利率敏感仓位的即时评估节点。`
-            : `${macroAnchor}。PCE是美联储首选通胀指标，核心PCE走势决定降息路径，是讨论组合久期与利率对冲的最佳切入点。`;
+            ? '美国CPI通胀数据今日公布，CPI走势决定美联储降息时间窗口，超预期压制长端债券，低于预期打开降息空间，是利率敏感仓位的即时评估节点。'
+            : '美国PCE核心通胀数据今日公布，PCE是美联储首选通胀指标，核心PCE走势决定降息路径，是讨论组合久期与利率对冲的最佳切入点。';
         const macroTalkingPoint = macroType === 'NFP'
             ? '非农数据出来了，现在降息预期的定价在重新校准；您持有的美债和AT1仓位对利率路径的敏感度，我们可以现在拆一遍。'
             : macroType === 'CPI'
