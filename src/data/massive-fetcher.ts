@@ -57,7 +57,7 @@ export class MassiveDataFetcher implements DataFetcherInterface {
         const rows = await this.fetchOptionSnapshotFirstPage(symbol, minExpiry, maxStrike);
         const eligibleTickers = new Set(eligibleContracts);
 
-        return rows
+        const result = rows
             .map((row) => mapOptionRow(row))
             .filter((row): row is StrikeDataWithRaw => row !== null)
             .filter((row) => {
@@ -71,6 +71,9 @@ export class MassiveDataFetcher implements DataFetcherInterface {
             .filter((row) => row.open_interest >= 10)
             .filter((row) => row.delta >= -0.40 && row.delta <= -0.15)
             .map(({ raw: _raw, ...strike }) => strike);
+
+        console.log(`[chain] ${symbol}: eligibleContracts=${eligibleContracts.length} snapshotRows=${rows.length} passedFilters=${result.length} window=${minExpiry}..${maxExpiry} maxStrike=${maxStrike}`);
+        return result;
     }
 
     async fetchSymbolData(symbol: string): Promise<SymbolData> {
