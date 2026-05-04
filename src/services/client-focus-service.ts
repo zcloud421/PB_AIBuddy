@@ -4707,7 +4707,7 @@ async function buildDeterministicDailyPitchTriggers(
             talking_point: '半导体这轮不是普通反弹，SOX已经走出连续动量，领涨逻辑会开始从追Beta切到财报兑现和仓位拥挤，您AI仓位要不要看一下保护结构？',
             pitch_line: '半导体这轮不是普通反弹，SOX已经走出连续动量，领涨逻辑会开始从追Beta切到财报兑现和仓位拥挤，您AI仓位要不要看一下保护结构？',
             client_type: 'AI或半导体仓位客户',
-            watchpoints: [isSoxUpStreak ? 'SOX连涨是否中断' : 'SOX回调是否扩大', '半导体财报', '科技FCN波动率'],
+            watchpoints: [isSoxUpStreak ? 'SOX连涨是否中断' : 'SOX回调是否扩大', '半导体财报', '科技期权波动率'],
             related_assets: ['SOX', 'Semiconductors', 'AI Theme', 'FCN'],
             asset_tags: ['SOX', 'Semiconductors', 'AI Theme', 'FCN'],
             materiality_trigger: '3A: consecutive streak > 10 sessions',
