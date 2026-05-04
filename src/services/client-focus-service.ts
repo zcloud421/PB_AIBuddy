@@ -372,6 +372,7 @@ let dailyNarrativeRefreshPromise: Promise<DailyMarketNarrative | null> | null = 
 let previousRankedSlugs: string[] = [];
 let previousDailyPitchTriggers: DailyPitchTrigger[] = [];
 let yesterdayDailyPitchTriggers: DailyPitchTrigger[] = [];
+let dayBeforeYesterdayDailyPitchTriggers: DailyPitchTrigger[] = [];
 let narrativeHistory: Array<{ date: string; primary_slug: string }> = [];
 const DAILY_NARRATIVE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
@@ -3133,14 +3134,14 @@ function buildFallbackDailyNarrative(
             usAttribution = '美股反弹更多反映地缘缓和后的risk-on延续，但这波上涨能否站稳仍取决于财报季的盈利验证。';
             usImplication = '接下来重点看财报季与利率路径，确认上涨能否从情绪修复扩散到更扎实的盈利主线。';
         }
+        // asset_buckets are no longer rendered on Focus tab (replaced by daily_pitch_triggers).
+        // The bucket fields are kept only for downstream consumers (theme-basket-service).
+        // Do not populate trigger/client_type/pitch_line — those concerns belong to pitch_triggers.
         assetBuckets.push({
             bucket: '美股',
             thesis_check: usAttribution,
             today_signal: usEquitySignal,
-            portfolio_implication: usImplication,
-            trigger: '财报验证反弹质量',
-            client_type: '美股或科技仓位客户',
-            pitch_line: '这波美股反弹，今天重点看财报能不能接住。'
+            portfolio_implication: usImplication
         });
     }
 
@@ -3163,10 +3164,7 @@ function buildFallbackDailyNarrative(
             bucket: '港股',
             thesis_check: hkAttribution,
             today_signal: hkSignal,
-            portfolio_implication: hkImplication,
-            trigger: '港股资金与结构分化',
-            client_type: '港股持仓或低配客户',
-            pitch_line: '今天港股要看南向和结构热点有没有继续扩散。'
+            portfolio_implication: hkImplication
         });
     }
 
@@ -3197,10 +3195,7 @@ function buildFallbackDailyNarrative(
             bucket: '黄金',
             thesis_check: goldAttribution,
             today_signal: goldSignal,
-            portfolio_implication: goldImplication,
-            trigger: '黄金避险溢价重定价',
-            client_type: '黄金票据或配置客户',
-            pitch_line: '黄金这波变化，重点不是涨跌，是避险逻辑有没有变。'
+            portfolio_implication: goldImplication
         });
     }
 
@@ -3411,6 +3406,26 @@ function formatPitchCandidateChange(item: ClientFocusMarketStateResponse['indice
     return parts.join('，');
 }
 
+/**
+ * Compact data anchor for pitch_line opener. Returns the most material number(s)
+ * for an asset without the asset name (caller already mentions it).
+ * Examples: "今日+3.2%、5日+8.1%"  /  "10Y收益率+9bps"  /  "$2382/oz、5日-3.1%"
+ */
+function formatPitchDataAnchor(item: ClientFocusMarketStateResponse['indices'][number]): string {
+    if (!item) return '';
+    const parts: string[] = [];
+    const isTnx = item.code === 'TNX';
+    const fmt = (value: number) => `${value >= 0 ? '+' : ''}${value.toFixed(isTnx ? 1 : 2)}${isTnx ? 'bps' : '%'}`;
+
+    if (item.change_pct !== null && item.change_pct !== undefined && !Number.isNaN(item.change_pct)) {
+        parts.push(`今日${fmt(item.change_pct)}`);
+    }
+    if (item.change_5d_pct !== null && item.change_5d_pct !== undefined && !Number.isNaN(item.change_5d_pct) && Math.abs(item.change_5d_pct) >= (isTnx ? 5 : 1.5)) {
+        parts.push(`5日${fmt(item.change_5d_pct)}`);
+    }
+    return parts.join('、');
+}
+
 function isHktWeekend(): boolean {
     const dow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Hong_Kong' })).getDay();
     return dow === 0 || dow === 6;
@@ -3418,9 +3433,29 @@ function isHktWeekend(): boolean {
 
 function earningsTimingLabel(daysUntil: number): string {
     if (isHktWeekend()) return '下周盘后';
-    if (daysUntil === 1) return '今晚盘后';
-    if (daysUntil === 2) return '明晚盘后';
+    // HKT 视角下的口语标签。SQL 计算 (report_date - CURRENT_DATE) 时 CURRENT_DATE 走 server tz（通常 UTC），
+    // US after-close 报告日 N 对应 HKT 次日早晨 → 从 HKT 视角是 "前一晚"/"今晚"/"明晚"。
+    // days_until=0 表示 report_date 等于 UTC 当日（多在 HKT 当天下午时） → US 当日盘后 ≈ HKT 今晚→明早 → "今晚盘后"
+    // days_until=1 表示 report_date 是 UTC 明日 → US 明日盘后 ≈ HKT 明晚→后天早 → "明晚盘后"
+    if (daysUntil <= 0) return '今晚盘后';
+    if (daysUntil === 1) return '明晚盘后';
+    if (daysUntil === 2) return '后天盘后';
+    if (daysUntil >= 3 && daysUntil <= 4) return '本周盘后';
     return `${daysUntil}日后`;
+}
+
+/**
+ * 基于最近一条权重财报的 days_until，决定 headline 里用 "今晚/明晚/本周/下周"。
+ * 仅用于 deterministic fallback；AI 路径直接看 candidate section 里的具体标签。
+ */
+function nearestEarningsHeadlineTimingWord(earningsRows: Array<{ days_until: number }>): string {
+    if (isHktWeekend()) return '下周';
+    if (earningsRows.length === 0) return '本周';
+    const minDays = Math.min(...earningsRows.map((row) => row.days_until));
+    if (minDays <= 0) return '今晚';
+    if (minDays === 1) return '明晚';
+    if (minDays === 2) return '后天';
+    return '本周';
 }
 
 const EARNINGS_CALENDAR_SYMBOLS = new Set([
@@ -4054,7 +4089,9 @@ function ensureMandatoryHeadlineTriggers(
     const next = [...selected];
     const mandatoryHeadlines = [
         ...(headlineSignals.majorEarningsResultTitles.length > 0 ? ['超级财报周结果落地'] : []),
-        ...(headlineSignals.openAiTargetMissTitles.length > 0 ? [isHktWeekend() ? '下周财报验证AI叙事' : '今晚财报验证AI叙事'] : []),
+        // Use substring match — actual headline timing word ("今晚/明晚/本周/下周") is decided dynamically
+        // by nearestEarningsHeadlineTimingWord based on the soonest earnings days_until.
+        ...(headlineSignals.openAiTargetMissTitles.length > 0 ? ['财报验证AI叙事'] : []),
         ...(headlineSignals.uaeOpecExitTitles.length > 0 ? ['阿联酋退出OPEC，油市动荡加剧'] : []),
         ...(headlineSignals.centralBankShockTitles.length > 0 ? ['央行政策超预期'] : []),
         ...(headlineSignals.fomcMeetingResultTitles.length > 0 ? ['美联储议息结果落地'] : []),
@@ -4074,6 +4111,10 @@ function ensureMandatoryHeadlineTriggers(
         return h === target || h.includes(target) || target.includes(h);
     };
 
+    const yesterdayKeys = new Set(yesterdayDailyPitchTriggers.map((trigger) => normalizePitchThemeKey(trigger)).filter(Boolean));
+    const dayBeforeKeys = new Set(dayBeforeYesterdayDailyPitchTriggers.map((trigger) => normalizePitchThemeKey(trigger)).filter(Boolean));
+    const multiDayStreakKeys = new Set([...yesterdayKeys].filter((key) => dayBeforeKeys.has(key)));
+
     for (const headline of mandatoryHeadlines) {
         if (next.some((item) => matchesHeadline(item, headline))) {
             continue;
@@ -4081,6 +4122,13 @@ function ensureMandatoryHeadlineTriggers(
 
         const candidate = candidates.find((item) => matchesHeadline(item, headline));
         if (!candidate) {
+            continue;
+        }
+
+        // Suppress mandatory injection if this theme already ran 2+ consecutive days —
+        // prevent a CRITICAL event from staying on the pitch list for 3+ days in a row.
+        const candidateThemeKey = normalizePitchThemeKey(candidate);
+        if (candidateThemeKey && multiDayStreakKeys.has(candidateThemeKey)) {
             continue;
         }
 
@@ -4130,12 +4178,14 @@ async function buildDailyPitchCandidateSection(
     ]);
     const recentlyReported = await getRecentlyReportedMajorEarningsSymbols().catch(() => []);
     const recentlyReportedSet = new Set(recentlyReported);
+    let upcomingMegaEarningsRows: Array<{ symbol: string; report_date: string; days_until: number }> = [];
 
     try {
         const earningsRows = (await getUpcomingEarningsNextNDays(7))
             .filter((row) => row.days_until >= 1 && megaCapOrCommonFcnUnderlyings.has(row.symbol))
             .filter((row) => !recentlyReportedSet.has(row.symbol))
             .slice(0, 12);
+        upcomingMegaEarningsRows = earningsRows;
         if (earningsRows.length >= 2) {
             const grouped = earningsRows
                 .map((row) => `${row.symbol}(${earningsTimingLabel(row.days_until)})`)
@@ -4171,11 +4221,12 @@ async function buildDailyPitchCandidateSection(
     }
 
     if (headlineSignals.openAiTargetMissTitles.length > 0) {
+        const aiTimingWord = nearestEarningsHeadlineTimingWord(upcomingMegaEarningsRows);
         candidates.push([
             '[CRITICAL][3C/3E] AI capex叙事进入证伪窗口',
             `新闻锚点：${headlineSignals.openAiTargetMissTitles[0]}。`,
-            '为什么可聊：OpenAI用户/收入目标争议直接冲击ORCL、CoreWeave、NVDA等AI算力链，权重科技股财报的焦点应从“增长多少”升级为“能否证实AI capex回报”。',
-            `建议标题：${isHktWeekend() ? '下周财报验证AI叙事' : '今晚财报验证AI叙事'}`,
+            '为什么可聊：OpenAI用户/收入目标争议直接冲击ORCL、CoreWeave、NVDA等AI算力链，权重科技股财报的焦点应从"增长多少"升级为"能否证实AI capex回报"。',
+            `建议标题：${aiTimingWord}财报验证AI叙事`,
             '适合客户：美股科技仓位客户、AI/半导体FCN客户'
         ].join('\n'));
     }
@@ -4557,8 +4608,7 @@ async function buildDeterministicDailyPitchTriggers(
                 .map((row) => `${row.symbol}${earningsTimingLabel(row.days_until)}`)
                 .join('、');
             const hasOpenAiStress = headlineSignals.openAiTargetMissTitles.length > 0;
-            const weekend = isHktWeekend();
-            const timingWord = weekend ? '下周' : '今晚';
+            const timingWord = nearestEarningsHeadlineTimingWord(earningsRows);
             const headline = hasOpenAiStress
                 ? `${timingWord}财报验证AI叙事`
                 : '超级财报周开启';
@@ -4566,8 +4616,8 @@ async function buildDeterministicDailyPitchTriggers(
                 ? `OpenAI用户/收入目标争议已压到AI算力链，${grouped}等权重/FCN常见底层将发财报，市场要验证AI capex回报能否支撑估值。`
                 : `${grouped}等权重/FCN常见底层将发财报，市场焦点从宏观headline切回盈利验证和AI capex回报。`;
             const talkingPoint = hasOpenAiStress
-                ? `市场已开始质疑AI投入回报，${timingWord}权重股财报会直接给答案；科技仓位要不要先按好中差三种情景看一遍？`
-                : `${weekend ? '下周' : '这周'}真正要看的不是指数涨跌，而是权重股财报能否证明AI和科技仓位的盈利兑现，您组合里的科技敞口要不要先做一次情景讨论？`;
+                ? `市场质疑AI capex回报，${timingWord}权重股财报给答案；高估值AI/半导体仓位面临重新定价压力。`
+                : `${grouped}陆续发布财报，焦点从宏观headline切回盈利验证；权重股若不及预期，科技/FCN底层估值承压。`;
             triggers.push({
                 id: 1,
                 headline,
@@ -4698,14 +4748,22 @@ async function buildDeterministicDailyPitchTriggers(
             ? `连续${sox.streak_days}${sox.streak_direction === 'up' ? '日上涨' : '日下跌'}`
             : '出现极端动量';
         const context = `${formatPitchCandidateChange(sox)}，${streak}。AI/半导体高Beta仓位进入更拥挤的盈利兑现窗口。`;
+        const soxAnchor = formatPitchDataAnchor(sox);
+        const soxStreakClause = sox.streak_direction === 'up' && typeof sox.streak_days === 'number' && sox.streak_days >= 3
+            ? `连涨${sox.streak_days}天`
+            : '动量异常';
+        const soxYtdClause = typeof sox.change_ytd_pct === 'number'
+            ? `（YTD${sox.change_ytd_pct >= 0 ? '+' : ''}${sox.change_ytd_pct.toFixed(1)}%）`
+            : '';
+        const soxTalkingPoint = `SOX${soxAnchor ? '今天' + soxAnchor : ''}，${soxStreakClause}${soxYtdClause}。逻辑从追Beta切向财报兑现与仓位拥挤验证，高Beta仓位回撤风险升高。`;
         triggers.push({
             id: triggers.length + 1,
             headline,
             hook: headline,
             context,
             why_now: context,
-            talking_point: '半导体这轮不是普通反弹，SOX已经走出连续动量，领涨逻辑会开始从追Beta切到财报兑现和仓位拥挤，您AI仓位要不要看一下保护结构？',
-            pitch_line: '半导体这轮不是普通反弹，SOX已经走出连续动量，领涨逻辑会开始从追Beta切到财报兑现和仓位拥挤，您AI仓位要不要看一下保护结构？',
+            talking_point: soxTalkingPoint,
+            pitch_line: soxTalkingPoint,
             client_type: 'AI或半导体仓位客户',
             watchpoints: [isSoxUpStreak ? 'SOX连涨是否中断' : 'SOX回调是否扩大', '半导体财报', '科技期权波动率'],
             related_assets: ['SOX', 'Semiconductors', 'AI Theme', 'FCN'],
@@ -4721,14 +4779,17 @@ async function buildDeterministicDailyPitchTriggers(
     if (headlineSignals.uaeOpecExitTitles.length > 0) {
         const marketAnchor = oil ? `${formatPitchCandidateChange(oil)}。` : '';
         const context = `${marketAnchor}UAE宣布退出OPEC/OPEC+，油价逻辑从霍尔木兹单一封锁升级为供给纪律和OPEC凝聚力再定价，影响通胀预期、黄金、AT1和长久期债。`;
+        const oilAnchor = oil ? formatPitchDataAnchor(oil) : '';
+        const oilHeadClause = oilAnchor ? `油价${oilAnchor}` : '油价波动';
+        const opecTalkingPoint = `${oilHeadClause}。UAE退出OPEC使供给纪律成为新变量，传导路径覆盖通胀预期、黄金避险溢价与AT1利差，能源相关敞口面临持续高位风险。`;
         triggers.push({
             id: triggers.length + 1,
             headline: '阿联酋退出OPEC，油市动荡加剧',
             hook: '阿联酋退出OPEC，油市动荡加剧',
             context,
             why_now: context,
-            talking_point: '油价今天不能只聊霍尔木兹，UAE退出OPEC让供给纪律也变成变量；您能源、黄金或AT1敞口要不要先按油价高位持续的情景看一遍？',
-            pitch_line: '油价今天不能只聊霍尔木兹，UAE退出OPEC让供给纪律也变成变量；您能源、黄金或AT1敞口要不要先按油价高位持续的情景看一遍？',
+            talking_point: opecTalkingPoint,
+            pitch_line: opecTalkingPoint,
             client_type: '能源黄金或AT1客户',
             watchpoints: ['UAE退出执行', 'Brent高位', 'AT1利差'],
             related_assets: ['Brent', 'Energy', 'Gold', 'AT1', 'US 10Y'],
@@ -4747,14 +4808,16 @@ async function buildDeterministicDailyPitchTriggers(
         )
     ) {
         const context = `${formatPitchCandidateChange(oil)}。能源风险溢价仍在重定价，传导链落在通胀预期、降息路径、黄金和AT1信用利差。`;
+        const oilAnchor = formatPitchDataAnchor(oil);
+        const oilTalkingPoint = `油价${oilAnchor || '今天明显变动'}。能源风险溢价重定价，传导链落在通胀预期、降息路径、黄金与AT1信用利差，跨资产组合受影响。`;
         triggers.push({
             id: triggers.length + 1,
             headline: '油价震荡，通胀预期升温',
             hook: '油价震荡，通胀预期升温',
             context,
             why_now: context,
-            talking_point: '油价这次更重要的是传导链，不只是能源股本身；如果通胀风险溢价重新抬头，久期、黄金和AT1利差都会被客户问到，我们可以先把情景拆清楚。',
-            pitch_line: '油价这次更重要的是传导链，不只是能源股本身；如果通胀风险溢价重新抬头，久期、黄金和AT1利差都会被客户问到，我们可以先把情景拆清楚。',
+            talking_point: oilTalkingPoint,
+            pitch_line: oilTalkingPoint,
             client_type: '能源黄金或AT1客户',
             watchpoints: ['油价能否回吐', '通胀预期', 'AT1利差'],
             related_assets: ['Crude Oil', 'Inflation', 'Gold', 'AT1'],
@@ -4775,14 +4838,17 @@ async function buildDeterministicDailyPitchTriggers(
         )
     ) {
         const context = `${formatPitchCandidateChange(tnx)}。长端利率重新定价，长久期债券价格和IG债券基金净值承压，AT1信用利差走阔风险上升。`;
+        const tnxLatestClause = typeof tnx.latest === 'number' ? `已上至${tnx.latest.toFixed(2)}%` : '继续上行';
+        const tnxAnchor = formatPitchDataAnchor(tnx);
+        const tnxTalkingPoint = `10Y${tnxLatestClause}（${tnxAnchor || '近日加速'}）。长久期债券、IG债基与资本保护票据账面承压，需区分是term premium回升还是降息路径被重新定价。`;
         triggers.push({
             id: triggers.length + 1,
             headline: '长端利率上行，债基净值受压',
             hook: '长端利率上行，债基净值受压',
             context,
             why_now: context,
-            talking_point: '长端利率还没停，持有长久期敞口的客户账面会先受压；IG债基、AT1和资本保护票据的久期部分，都要先看这是term premium回升，还是降息路径被重新定价。',
-            pitch_line: '长端利率还没停，持有长久期敞口的客户账面会先受压；IG债基、AT1和资本保护票据的久期部分，都要先看这是term premium回升，还是降息路径被重新定价。',
+            talking_point: tnxTalkingPoint,
+            pitch_line: tnxTalkingPoint,
             client_type: '长久期债券、IG债基或AT1客户',
             watchpoints: ['10Y能否守住4.5%以下', 'term premium走势', 'AT1信用利差'],
             related_assets: ['US Treasuries', 'Duration', 'AT1'],
@@ -4806,14 +4872,18 @@ async function buildDeterministicDailyPitchTriggers(
         )
     ) {
         const context = `${formatPitchCandidateChange(hsi)}；${formatPitchCandidateChange(hstech)}。港股需要区分指数方向、恒科弹性与南向流动性。`;
+        const hsiPct = typeof hsi.change_pct === 'number' ? `${hsi.change_pct >= 0 ? '+' : ''}${hsi.change_pct.toFixed(2)}%` : '';
+        const hstechPct = typeof hstech.change_pct === 'number' ? `${hstech.change_pct >= 0 ? '+' : ''}${hstech.change_pct.toFixed(2)}%` : '';
+        const hkAnchor = hsiPct && hstechPct ? `恒指${hsiPct}、恒科${hstechPct}` : '恒指与恒科表现分化';
+        const hkTalkingPoint = `${hkAnchor}。指数方向无法概括港股全貌，重点在恒科弹性、南向资金与板块轮动，结构分化是当前定价主线。`;
         triggers.push({
             id: triggers.length + 1,
             headline: '港股结构分化升温',
             hook: '港股结构分化升温',
             context,
             why_now: context,
-            talking_point: '港股今天不能只看恒指方向，恒科和资金流可能给出不同信号；如果客户低配中国资产，这更适合聊结构分化而不是简单追指数。',
-            pitch_line: '港股今天不能只看恒指方向，恒科和资金流可能给出不同信号；如果客户低配中国资产，这更适合聊结构分化而不是简单追指数。',
+            talking_point: hkTalkingPoint,
+            pitch_line: hkTalkingPoint,
             client_type: '港股低配客户',
             watchpoints: ['恒指与恒科差异', '南向资金', '成交能否扩散'],
             related_assets: ['Hong Kong Equities', 'HSI', 'HSTECH'],
@@ -4835,14 +4905,19 @@ async function buildDeterministicDailyPitchTriggers(
         )
     ) {
         const context = `${formatPitchCandidateChange(gold)}。黄金近期走势应聚焦实际利率、美元与地缘风险溢价作为驱动，而不是单日涨跌本身。`;
+        const goldAnchor = formatPitchDataAnchor(gold);
+        const goldYtdClause = typeof gold.change_ytd_pct === 'number' && Math.abs(gold.change_ytd_pct) >= 10
+            ? `（YTD${gold.change_ytd_pct >= 0 ? '+' : ''}${gold.change_ytd_pct.toFixed(1)}%）`
+            : '';
+        const goldTalkingPoint = `黄金${goldAnchor || '近日有变化'}${goldYtdClause}。驱动关键在避险溢价与实际利率主导权切换，单日涨跌不足以判断主线，需观察美元方向与地缘演进。`;
         triggers.push({
             id: triggers.length + 1,
             headline: '黄金避险溢价或回落',
             hook: '黄金避险溢价或回落',
             context,
             why_now: context,
-            talking_point: '黄金这几天的变化不只是价格波动，关键是避险溢价和实际利率谁在主导；您黄金票据或配置仓位要不要先拆一下驱动？',
-            pitch_line: '黄金这几天的变化不只是价格波动，关键是避险溢价和实际利率谁在主导；您黄金票据或配置仓位要不要先拆一下驱动？',
+            talking_point: goldTalkingPoint,
+            pitch_line: goldTalkingPoint,
             client_type: '黄金票据或配置客户',
             watchpoints: ['实际利率', '美元方向', '避险溢价'],
             related_assets: ['Gold', 'Real Yield', 'USD'],
@@ -5088,6 +5163,25 @@ async function getYesterdayDailyPitchTriggers(): Promise<DailyPitchTrigger[]> {
     }
 }
 
+async function getDayBeforeYesterdayDailyPitchTriggers(): Promise<DailyPitchTrigger[]> {
+    try {
+        const result = await pool.query<{ narrative_json: unknown }>(
+            `
+            SELECT narrative_json
+            FROM daily_market_narratives
+            WHERE run_date = (CURRENT_DATE - INTERVAL '2 days')::date
+            ORDER BY created_at DESC
+            LIMIT 1
+            `
+        );
+        const row = result.rows[0];
+        if (!row) return [];
+        return normalizeDailyPitchTriggers((row.narrative_json as any)?.daily_pitch_triggers);
+    } catch {
+        return [];
+    }
+}
+
 function buildPitchTriggersFromBuckets(
     assetBuckets: DailyMarketNarrative['asset_buckets']
 ): NonNullable<DailyMarketNarrative['daily_pitch_triggers']> {
@@ -5212,10 +5306,12 @@ function scorePitchTriggerForRm(
     trigger: DailyPitchTrigger,
     previousHeadlines: Set<string>,
     previousLanes: Set<PitchAssetLane>,
-    yesterdayHeadlines: Set<string> = new Set()
+    yesterdayHeadlines: Set<string> = new Set(),
+    multiDayStreakKeys: Set<string> = new Set()
 ): number {
     let score = materialityWeight(trigger) + openerQualityWeight(trigger) + timeSensitivityWeight(trigger);
     const headline = normalizePitchHeadline(trigger);
+    const themeKey = normalizePitchThemeKey(trigger);
     const lane = classifyPitchAssetLane(trigger);
     const isRepetitionExempt = trigger.risk_flag === true
         || (trigger.watchpoints?.length ?? 0) > 0
@@ -5232,6 +5328,13 @@ function scorePitchTriggerForRm(
     }
     if (!isRepetitionExempt && yesterdayHeadlines.has(headline)) {
         score -= 1.2;
+    }
+    // Multi-day streak: same theme appeared yesterday AND day-before-yesterday.
+    // This penalty applies even to CRITICAL/risk_flag triggers — RM fatigue trumps materiality
+    // once a topic has been on the pitch list for 3+ consecutive days. Only one event class
+    // (FOMC/财报落地) should ever stay multi-day in a row, and it must rotate angle.
+    if (themeKey && multiDayStreakKeys.has(themeKey)) {
+        score -= 3.5;
     }
     if (previousLanes.has(lane)) {
         score -= 0.35;
@@ -5282,15 +5385,24 @@ function applyRmConversationRanking(
     const candidates = dedupePitchTriggers(triggers);
     const previousHeadlines = new Set(previousTriggers.map((trigger) => normalizePitchHeadline(trigger)).filter(Boolean));
     const yesterdayHeadlines = new Set(yesterdayDailyPitchTriggers.map((trigger) => normalizePitchHeadline(trigger)).filter(Boolean));
+    const yesterdayKeys = new Set(yesterdayDailyPitchTriggers.map((trigger) => normalizePitchThemeKey(trigger)).filter(Boolean));
+    const dayBeforeKeys = new Set(dayBeforeYesterdayDailyPitchTriggers.map((trigger) => normalizePitchThemeKey(trigger)).filter(Boolean));
+    const multiDayStreakKeys = new Set([...yesterdayKeys].filter((key) => dayBeforeKeys.has(key)));
     const previousLanes = new Set(previousTriggers.map((trigger) => classifyPitchAssetLane(trigger)));
     const selected: NonNullable<DailyMarketNarrative['daily_pitch_triggers']> = [];
     const selectedLanes = new Set<PitchAssetLane>();
     const criticalCandidates = candidates
         .filter(isCriticalPitchTrigger)
+        // Drop CRITICAL events that have already run for 2+ consecutive days; they get
+        // demoted to ordinary candidates so RM does not see the same headline 3 days running.
+        .filter((trigger) => {
+            const themeKey = normalizePitchThemeKey(trigger);
+            return !themeKey || !multiDayStreakKeys.has(themeKey);
+        })
         .sort((left, right) => (
             criticalPitchPriority(right) - criticalPitchPriority(left)
-            || scorePitchTriggerForRm(right, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>())
-            - scorePitchTriggerForRm(left, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>())
+            || scorePitchTriggerForRm(right, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>(), multiDayStreakKeys)
+            - scorePitchTriggerForRm(left, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>(), multiDayStreakKeys)
         ));
     const reservedCriticalCount = criticalCandidates.length > 1 ? 2 : criticalCandidates.length;
 
@@ -5309,7 +5421,7 @@ function applyRmConversationRanking(
             }
 
             const lane = classifyPitchAssetLane(candidate);
-            let score = scorePitchTriggerForRm(candidate, previousHeadlines, previousLanes, yesterdayHeadlines);
+            let score = scorePitchTriggerForRm(candidate, previousHeadlines, previousLanes, yesterdayHeadlines, multiDayStreakKeys);
             if (selectedLanes.has(lane)) {
                 score -= selected.length === 0 ? 0 : 1.15;
             }
@@ -5340,7 +5452,7 @@ function applyRmConversationRanking(
             if (selected.includes(candidate) || !lastMileLanes.includes(classifyPitchAssetLane(candidate))) {
                 continue;
             }
-            const score = scorePitchTriggerForRm(candidate, previousHeadlines, previousLanes, yesterdayHeadlines);
+            const score = scorePitchTriggerForRm(candidate, previousHeadlines, previousLanes, yesterdayHeadlines, multiDayStreakKeys);
             if (score > bestLastMileScore) {
                 bestLastMileCandidate = candidate;
                 bestLastMileScore = score;
@@ -5354,7 +5466,7 @@ function applyRmConversationRanking(
                 if (isCriticalPitchTrigger(selected[index])) {
                     continue;
                 }
-                const score = scorePitchTriggerForRm(selected[index], previousHeadlines, previousLanes, yesterdayHeadlines);
+                const score = scorePitchTriggerForRm(selected[index], previousHeadlines, previousLanes, yesterdayHeadlines, multiDayStreakKeys);
                 if (score < weakestScore) {
                     weakestScore = score;
                     replaceIndex = index;
@@ -5511,10 +5623,7 @@ function buildTreasuryBucket(
         bucket: '美债',
         thesis_check: thesisCheck,
         today_signal: todaySignal,
-        portfolio_implication: portfolioImplication,
-        trigger: '10Y收益率重新定价',
-        client_type: '债券或AT1客户',
-        pitch_line: '今天可以和债券客户聊利率波动对久期和AT1的影响。'
+        portfolio_implication: portfolioImplication
     };
 }
 
@@ -5584,10 +5693,7 @@ function buildFxBucket(
         bucket: '汇率',
         thesis_check: thesisCheck,
         today_signal: todaySignal,
-        portfolio_implication: portfolioImplication,
-        trigger: '美元与融资货币异动',
-        client_type: 'FX或非美资产客户',
-        pitch_line: '今天可以提醒客户看美元变化有没有传导到非美资产。'
+        portfolio_implication: portfolioImplication
     };
 }
 
@@ -5745,9 +5851,10 @@ ${narrativeHistorySection}
    - 三条必须满足多样性约束：至少覆盖2个资产类别；纯宏观/央行不超过1条；单一股票不超过1条，除非它有明确跨资产传导；同等重要时优先最近12小时与更清晰的PB客户组合含义
    - 每条必须包含：
      - id：1、2、3
-     - headline：≤20个中文字符，写法参考香港财经晨报或Wind中文摘要；要通顺自然的中文，不要英文直译语序；禁止使用"进入验证/牵动/重新校准/证伪点/传导待确认"这类翻译腔词汇；好的示例："${isHktWeekend() ? '下周财报验证AI叙事' : '今晚财报验证AI叙事'}"、"阿联酋退出OPEC，油市震荡加剧"、"美债收益率重新定价"
-     - context：80-120个中文字符，写给RM理解为什么重要；必须包含具体数字/事件、传导机制和组合含义方向
-     - talking_point：60-100个中文字符，写成RM对高净值客户开口的话；专业、自然、可开启对话，不给直接买卖建议；禁止在开头加客户称谓（如"陈太"、"李先生"等），直接从事件或判断切入
+     - headline：≤20个中文字符，写法参考香港财经晨报或Wind中文摘要；要通顺自然的中文，不要英文直译语序；禁止使用"进入验证/牵动/重新校准/证伪点/传导待确认"这类翻译腔词汇；好的示例："明晚财报验证AI叙事"、"阿联酋退出OPEC，油市震荡加剧"、"美债收益率重新定价"
+     - 时间词使用规则（HKT POV）：days_until=0 用"今晚"（US当日盘后≈HKT今晚→明早），days_until=1 用"明晚"，days_until=2 用"后天"，days_until≥3 用"本周"，HKT周末用"下周"。绝不能在 days_until=1 的财报上写"今晚"。
+     - context：80-120个中文字符，信息密集，写给RM快速读懂；结构=事件/数据 + 传导机制 + 组合含义方向。必须有具体数字/事件名/标的代码。禁止开口式话术（"您...要不要"、"我们可以先看一下"、"建议讨论一下"），这是信息卡片不是销售脚本。
+     - talking_point：60-100个中文字符，与 context 配合的关键判断或风险点提示，info-dense；不要写成对客户开口的脚本，不要"您..."句式，不要疑问句结尾。RM 自己会决定怎么开口。
      - client_type：≤20字，最适合主动触达的客户类型，必须落到敞口
      - watchpoints：1-3个具体观察点，每个≤20字
      - asset_tags：资产类别和具体工具/指数，最多5个
@@ -9877,7 +9984,10 @@ async function refreshDailyMarketNarrative(
         if (previousNarrative?.daily_pitch_triggers?.length) {
             previousDailyPitchTriggers = [...previousNarrative.daily_pitch_triggers];
         }
-        yesterdayDailyPitchTriggers = await getYesterdayDailyPitchTriggers();
+        [yesterdayDailyPitchTriggers, dayBeforeYesterdayDailyPitchTriggers] = await Promise.all([
+            getYesterdayDailyPitchTriggers(),
+            getDayBeforeYesterdayDailyPitchTriggers()
+        ]);
 
         try {
             const result = await generateDailyMarketNarrative();
