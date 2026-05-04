@@ -51,7 +51,9 @@ const MANUAL_EARNINGS_DATE_OVERRIDES: Record<string, string> = {
     GOOG: '2026-04-29',
     GOOGL: '2026-04-29',
     META: '2026-04-29',
-    MSFT: '2026-04-29'
+    MSFT: '2026-04-29',
+    LITE: '2026-05-05',
+    NVDA: '2026-05-20'
 };
 
 function currentIsoDate(): string {

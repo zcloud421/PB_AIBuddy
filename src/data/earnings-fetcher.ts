@@ -37,7 +37,7 @@ export async function fetchEarningsCalendar(symbols: string[]): Promise<Earnings
     const from = new Date(Date.now() - (3 * 24 * 60 * 60 * 1000))
         .toISOString()
         .split('T')[0];
-    const future = new Date(Date.now() + (14 * 24 * 60 * 60 * 1000))
+    const future = new Date(Date.now() + (45 * 24 * 60 * 60 * 1000))
         .toISOString()
         .split('T')[0];
 
