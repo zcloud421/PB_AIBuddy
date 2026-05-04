@@ -1542,7 +1542,7 @@ export async function runDailyScreener(
             }
         }
 
-        let bestChoice = best90;
+        let bestChoice = best90 ?? best180;
         if (
             best90 !== null &&
             best180 !== null &&
@@ -1567,7 +1567,7 @@ export async function runDailyScreener(
                 {
                     type: 'NO_APPROVED_TENOR',
                     severity: 'WARN',
-                    message: 'No 90-day tenor baseline passed current screening constraints'
+                    message: 'No tenor passed the screening constraints'
                 }
             ];
 

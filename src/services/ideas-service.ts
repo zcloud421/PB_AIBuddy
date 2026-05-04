@@ -5073,7 +5073,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
         }
     }
 
-    let bestChoice = best90;
+    let bestChoice = best90 ?? best180;
     if (
         best90 !== null &&
         best180 !== null &&
