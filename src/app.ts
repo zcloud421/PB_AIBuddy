@@ -11,6 +11,7 @@ import {
     deleteTodayIdeaCandidate,
     ensureDailyBestHistoryTable,
     ensureDailyMarketNarrativesTable,
+    ensureDailyPitchDecisionsTable,
     ensureDailyRecommendationHistoryTable,
     ensureEarningsCalendarColumns,
     ensureIdeaCandidatePriceColumns,
@@ -100,6 +101,7 @@ export function createApp() {
 async function ensureSchemaGuards(): Promise<void> {
     await ensureDailyBestHistoryTable();
     await ensureDailyMarketNarrativesTable();
+    await ensureDailyPitchDecisionsTable();
     await ensureDailyRecommendationHistoryTable();
     await ensureIdeaCandidatePriceColumns();
     await ensureEarningsCalendarColumns();

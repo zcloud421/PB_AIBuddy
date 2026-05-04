@@ -9,6 +9,7 @@ import {
     createIdeaRun,
     ensureDailyBestHistoryTable,
     ensureDailyMarketNarrativesTable,
+    ensureDailyPitchDecisionsTable,
     ensureDailyRecommendationHistoryTable,
     ensureEarningsCalendarColumns,
     ensureIdeaCandidatePriceColumns,
@@ -122,6 +123,7 @@ async function main(): Promise<void> {
 
         await ensureDailyBestHistoryTable();
         await ensureDailyMarketNarrativesTable();
+        await ensureDailyPitchDecisionsTable();
         await ensureDailyRecommendationHistoryTable();
         await ensureIdeaCandidatePriceColumns();
         await ensureEarningsCalendarColumns();

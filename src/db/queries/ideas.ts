@@ -1944,6 +1944,70 @@ export async function ensureDailyMarketNarrativesTable(): Promise<void> {
     `);
 }
 
+/**
+ * Decision-log table for the daily pitch trigger ranking pipeline.
+ * One row per pipeline run, capturing: candidate pool, scores per candidate,
+ * final selection, fact-check rejections, and rank metadata. Powers
+ * observability, post-hoc weight tuning and (eventually) feedback-driven A/B.
+ */
+export interface DailyPitchDecisionLog {
+    run_at: string;
+    run_source: 'scheduled-refresh' | 'on-demand' | 'fallback';
+    llm_called: boolean;
+    llm_succeeded: boolean;
+    candidate_pool: Array<{
+        headline: string;
+        theme_key: string;
+        lane: string;
+        materiality_trigger?: string;
+        source: 'llm' | 'deterministic' | 'bucket-derived';
+        score: number;
+        is_critical: boolean;
+    }>;
+    fact_check_rejections: Array<{
+        headline: string;
+        reasons: string[];
+    }>;
+    final_selection: Array<{
+        headline: string;
+        theme_key: string;
+        rank: number;
+        score: number;
+    }>;
+    multi_day_streak_keys: string[];
+    week_frequency_top: Array<{ theme_key: string; count: number }>;
+    duration_ms: number;
+}
+
+export async function ensureDailyPitchDecisionsTable(): Promise<void> {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS daily_pitch_decisions (
+            id          BIGSERIAL PRIMARY KEY,
+            run_date    DATE NOT NULL,
+            run_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            decision_json JSONB NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    `);
+    await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_daily_pitch_decisions_run_date
+        ON daily_pitch_decisions (run_date DESC, run_at DESC)
+    `);
+}
+
+export async function recordDailyPitchDecision(
+    runDate: string,
+    decision: DailyPitchDecisionLog
+): Promise<void> {
+    await pool.query(
+        `
+        INSERT INTO daily_pitch_decisions (run_date, decision_json)
+        VALUES ($1::date, $2::jsonb)
+        `,
+        [runDate, JSON.stringify(decision)]
+    );
+}
+
 export async function ensureDrawdownAttributionsTable(): Promise<void> {
     await pool.query(`
         CREATE TABLE IF NOT EXISTS drawdown_attributions (

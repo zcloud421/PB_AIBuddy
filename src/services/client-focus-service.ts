@@ -373,6 +373,8 @@ let previousRankedSlugs: string[] = [];
 let previousDailyPitchTriggers: DailyPitchTrigger[] = [];
 let yesterdayDailyPitchTriggers: DailyPitchTrigger[] = [];
 let dayBeforeYesterdayDailyPitchTriggers: DailyPitchTrigger[] = [];
+// 7-day rolling history of every theme key that ran on the pitch list, with day count
+let pitchThemeFrequencyLast7Days: Map<string, number> = new Map();
 let narrativeHistory: Array<{ date: string; primary_slug: string }> = [];
 const DAILY_NARRATIVE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
@@ -5182,6 +5184,158 @@ async function getDayBeforeYesterdayDailyPitchTriggers(): Promise<DailyPitchTrig
     }
 }
 
+/**
+ * Builds a frequency map of pitch theme keys from the past 7 days (per run_date).
+ * Each unique date counts as 1 occurrence per theme key — multiple intraday runs on
+ * the same date are deduped before counting. Used to detect topic fatigue beyond
+ * the simple 2-day streak check (e.g. a theme that hit 4 of last 7 days).
+ */
+async function getPitchThemeFrequencyLast7Days(): Promise<Map<string, number>> {
+    const frequency = new Map<string, number>();
+    try {
+        const result = await pool.query<{ run_date: string; narrative_json: unknown }>(
+            `
+            SELECT DISTINCT ON (run_date) run_date::text AS run_date, narrative_json
+            FROM daily_market_narratives
+            WHERE run_date >= (CURRENT_DATE - INTERVAL '7 days')::date
+              AND run_date < CURRENT_DATE
+            ORDER BY run_date DESC, created_at DESC
+            `
+        );
+        for (const row of result.rows) {
+            const triggers = normalizeDailyPitchTriggers((row.narrative_json as any)?.daily_pitch_triggers);
+            const dailyKeys = new Set<string>();
+            for (const trigger of triggers) {
+                const key = normalizePitchThemeKey(trigger);
+                if (key) dailyKeys.add(key);
+            }
+            for (const key of dailyKeys) {
+                frequency.set(key, (frequency.get(key) ?? 0) + 1);
+            }
+        }
+    } catch {
+        // history is best-effort — never block pipeline on it
+    }
+    return frequency;
+}
+
+/**
+ * Validates LLM-generated pitch triggers against ground-truth market data.
+ * Reasons we reject a trigger:
+ *   - Quoted percentage / bps numbers don't match marketSnapshot within tolerance
+ *   - Symbol code mentioned isn't in our recognized universe (likely hallucination)
+ *   - Timing word ("今晚/明晚") inconsistent with available earnings days_until
+ *
+ * Rejected triggers fall through to the deterministic candidate pool so the
+ * pipeline degrades gracefully — never to a blank page.
+ *
+ * Returns { valid, rejected } so the caller can log rejections for observability.
+ */
+interface FactValidationContext {
+    marketSnapshot: ClientFocusMarketStateResponse | null;
+    upcomingMegaEarnings: Array<{ symbol: string; days_until: number }>;
+    recentlyReportedSymbols: Set<string>;
+}
+
+interface FactValidationResult {
+    valid: NonNullable<DailyMarketNarrative['daily_pitch_triggers']>;
+    rejected: Array<{ trigger: DailyPitchTrigger; reasons: string[] }>;
+}
+
+const KNOWN_PITCH_SYMBOLS = new Set([
+    // Equities & FCN underlyings
+    'AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOG', 'GOOGL', 'META', 'TSLA',
+    'AVGO', 'TSM', 'BABA', 'AMD', 'NFLX', 'ORCL', 'INTC', 'UNH',
+    'COIN', 'MSTR', 'COST', 'WMT',
+    // Indices / instruments
+    'SPX', 'NDX', 'SOX', 'HSI', 'HSTECH', 'TNX', 'DXY',
+    'GOLD', 'SILVER', 'OIL', 'BRENT', 'WTI', 'NATGAS',
+    'USDCNH', 'USDJPY', 'USDCHF', 'EURUSD',
+    // Asset class tags
+    'AT1', 'IG', 'HY', 'FCN'
+]);
+
+function validatePitchTriggerFacts(
+    triggers: NonNullable<DailyMarketNarrative['daily_pitch_triggers']>,
+    context: FactValidationContext
+): FactValidationResult {
+    const valid: NonNullable<DailyMarketNarrative['daily_pitch_triggers']> = [];
+    const rejected: Array<{ trigger: DailyPitchTrigger; reasons: string[] }> = [];
+
+    const marketByCode = new Map(
+        (context.marketSnapshot?.indices ?? []).map((item) => [item.code, item])
+    );
+
+    for (const trigger of triggers) {
+        const reasons: string[] = [];
+        const fullText = `${trigger.headline ?? ''} ${trigger.context ?? trigger.why_now ?? ''} ${trigger.talking_point ?? trigger.pitch_line ?? ''}`;
+
+        // 1) Numeric consistency: extract percentage / bps mentions and check against snapshot.
+        // We only check for major macro instruments where we have ground truth.
+        const validateInstrument = (code: string, regex: RegExp, tolerance: number, unit: 'pct' | 'bps') => {
+            const item = marketByCode.get(code);
+            if (!item) return;
+            const matches = [...fullText.matchAll(regex)];
+            if (matches.length === 0) return;
+            for (const match of matches) {
+                const claimed = parseFloat(match[1]);
+                if (!Number.isFinite(claimed)) continue;
+                const ground = unit === 'pct' ? item.change_pct : item.change_pct;
+                if (ground === null || ground === undefined || Number.isNaN(ground)) continue;
+                if (Math.abs(claimed - Math.abs(ground)) > tolerance && Math.abs(claimed - ground) > tolerance) {
+                    reasons.push(`${code}数字偏差: 文本=${claimed}${unit === 'pct' ? '%' : 'bps'}, 实际=${ground.toFixed(2)}${unit === 'pct' ? '%' : 'bps'}`);
+                }
+            }
+        };
+        // Only validate instruments explicitly named with a numeric anchor in close proximity.
+        if (/SOX/.test(fullText)) validateInstrument('SOX', /SOX[^。\n]{0,15}?([+-]?\d+\.?\d*)\s*%/g, 0.6, 'pct');
+        if (/恒指|HSI/.test(fullText)) validateInstrument('HSI', /(?:恒指|HSI)[^。\n]{0,15}?([+-]?\d+\.?\d*)\s*%/g, 0.5, 'pct');
+        if (/恒科|HSTECH/.test(fullText)) validateInstrument('HSTECH', /(?:恒科|HSTECH)[^。\n]{0,15}?([+-]?\d+\.?\d*)\s*%/g, 0.5, 'pct');
+        if (/Brent/i.test(fullText)) validateInstrument('BRENT', /Brent[^。\n]{0,15}?([+-]?\d+\.?\d*)\s*%/gi, 0.8, 'pct');
+        if (/黄金|GOLD/i.test(fullText)) validateInstrument('GOLD', /(?:黄金|GOLD)[^。\n]{0,15}?([+-]?\d+\.?\d*)\s*%/gi, 0.6, 'pct');
+
+        // 2) Symbol hallucination check: any uppercase 3-5 letter code mentioned must be known.
+        const symbolMatches = fullText.match(/\b[A-Z]{2,5}\b/g) ?? [];
+        const unknownSymbols = symbolMatches.filter((s) => !KNOWN_PITCH_SYMBOLS.has(s) && !['US', 'PB', 'IC', 'RM', 'AI', 'EM', 'GDP', 'NFP', 'CPI', 'PCE', 'FOMC', 'BOJ', 'OPEC', 'UAE', 'ETF', 'IPO', 'YTD', 'MA', 'IV', 'OI', 'MI', 'GS', 'ML', 'HK', 'JP', 'CN', 'EU', 'UK', 'JSON', 'API'].includes(s));
+        const distinctUnknown = [...new Set(unknownSymbols)];
+        if (distinctUnknown.length > 0) {
+            reasons.push(`未知标的代码: ${distinctUnknown.join(', ')}`);
+        }
+
+        // 3) Earnings timing word consistency: if "今晚/明晚 XXX 盘后" appears, validate against
+        // upcomingMegaEarnings days_until mapping. days_until=0→今晚, =1→明晚, =2→后天.
+        const timingPattern = /(今晚|明晚|后天|本周|下周)\s*([A-Z]{2,5})\s*盘后|([A-Z]{2,5})\s*(今晚|明晚|后天|本周|下周)\s*盘后/g;
+        for (const match of fullText.matchAll(timingPattern)) {
+            const timingWord = match[1] ?? match[4] ?? '';
+            const symbol = match[2] ?? match[3] ?? '';
+            if (!symbol || !timingWord) continue;
+            const earnings = context.upcomingMegaEarnings.find((e) => e.symbol === symbol);
+            if (!earnings) {
+                if (!context.recentlyReportedSymbols.has(symbol)) {
+                    reasons.push(`财报时间无法验证: ${symbol}（不在未来 7 日财报日历）`);
+                }
+                continue;
+            }
+            const expected =
+                earnings.days_until <= 0 ? '今晚'
+                : earnings.days_until === 1 ? '明晚'
+                : earnings.days_until === 2 ? '后天'
+                : '本周';
+            if (timingWord !== expected) {
+                reasons.push(`${symbol} 财报时间词错: 文本="${timingWord}", days_until=${earnings.days_until} → 应为"${expected}"`);
+            }
+        }
+
+        if (reasons.length > 0) {
+            rejected.push({ trigger, reasons });
+        } else {
+            valid.push(trigger);
+        }
+    }
+
+    return { valid, rejected };
+}
+
 function buildPitchTriggersFromBuckets(
     assetBuckets: DailyMarketNarrative['asset_buckets']
 ): NonNullable<DailyMarketNarrative['daily_pitch_triggers']> {
@@ -5253,32 +5407,104 @@ function classifyPitchAssetLane(trigger: DailyPitchTrigger): PitchAssetLane {
     return 'us_equity';
 }
 
+/**
+ * Ranking weights — extracted to a single config block so they can be
+ * tuned (and eventually A/B'd) without code edits scattered across files.
+ * Override at runtime via env vars PITCH_RANK_WEIGHTS_JSON if needed.
+ */
+export const PITCH_RANKING_WEIGHTS = {
+    materiality: {
+        '3E': 3.2,  // PB-specific (FCN底层 / AT1 / GSIB / HK SFC)
+        '3B': 2.8,  // 财报与高影响数据日历
+        '3A': 2.6,  // 统计极值（连涨、5日±极端、YTD极端）
+        '3D': 2.4,  // 地缘二元事件
+        '3C': 2.2,  // regime change（板块反转、相关性切换）
+        default: 1.4,
+        statisticalBoost: 0.5  // bonus when materiality mentions extremes
+    },
+    timeSensitivity: {
+        immediate: 0.8,
+        this_week: 0.5,
+        watch: 0.2
+    },
+    repetition: {
+        sameDayPenalty: -1.7,         // appeared in this morning's run
+        yesterdayPenalty: -1.2,       // appeared yesterday
+        multiDayStreakPenalty: -3.5,  // appeared 2+ consecutive days (overrides CRITICAL)
+        weekWindowPenalty: -2.5,      // appeared >=3 times in last 7 days
+        weekWindowHardCap: 5,         // appeared >=5 times in last 7 days → hard suppress
+        sameLanePenalty: -0.35
+    },
+    bonus: {
+        riskFlag: 0.25,
+        clientTypeAnchor: 0.45        // client_type mentions specific exposure type
+    }
+} as const;
+
+function loadPitchWeightsOverride() {
+    const raw = process.env.PITCH_RANK_WEIGHTS_JSON;
+    if (!raw) return null;
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+}
+
+const PITCH_WEIGHTS_OVERRIDE = loadPitchWeightsOverride();
+function getMaterialityWeight(category: '3A' | '3B' | '3C' | '3D' | '3E'): number {
+    return PITCH_WEIGHTS_OVERRIDE?.materiality?.[category] ?? PITCH_RANKING_WEIGHTS.materiality[category];
+}
+
 function materialityWeight(trigger: DailyPitchTrigger): number {
     const materiality = `${trigger.materiality_trigger ?? ''} ${trigger.source_summary ?? ''}`.toLowerCase();
     let score = 0;
-    if (materiality.includes('3e')) score += 3.2;
-    if (materiality.includes('3b')) score += 2.8;
-    if (materiality.includes('3a')) score += 2.6;
-    if (materiality.includes('3d')) score += 2.4;
-    if (materiality.includes('3c')) score += 2.2;
-    if (/consecutive|streak|极值|ytd|>|>=/.test(materiality)) score += 0.5;
-    return score || 1.4;
+    if (materiality.includes('3e')) score += getMaterialityWeight('3E');
+    if (materiality.includes('3b')) score += getMaterialityWeight('3B');
+    if (materiality.includes('3a')) score += getMaterialityWeight('3A');
+    if (materiality.includes('3d')) score += getMaterialityWeight('3D');
+    if (materiality.includes('3c')) score += getMaterialityWeight('3C');
+    if (/consecutive|streak|极值|ytd|>|>=/.test(materiality)) {
+        score += PITCH_WEIGHTS_OVERRIDE?.materiality?.statisticalBoost ?? PITCH_RANKING_WEIGHTS.materiality.statisticalBoost;
+    }
+    return score || (PITCH_WEIGHTS_OVERRIDE?.materiality?.default ?? PITCH_RANKING_WEIGHTS.materiality.default);
 }
 
+/**
+ * Scores pitch text quality from RM's actual usage perspective.
+ * Product direction: info-dense data sentences, NOT scripted talking points.
+ *
+ * Reward (info-dense): contains specific numbers, asset codes, mechanism words
+ * Penalize (scripted): "您...要不要", question-mark endings, sales-script phrasing
+ */
 function openerQualityWeight(trigger: DailyPitchTrigger): number {
     const pitch = (trigger.talking_point ?? trigger.pitch_line ?? '').trim();
+    if (!pitch) return 0;
     let score = 0;
-    if (pitch.length >= 32) score += 0.7;
-    if (/[？?]$/.test(pitch) || /要不要|是否|我们可以|先看|先聊|拆一下/.test(pitch)) score += 0.8;
-    if (/客户|您|仓位|敞口|组合|票据|fcn|at1/i.test(pitch)) score += 0.7;
-    if (/关注|观察|变化|市场波动/.test(pitch) && !/先看|要不要|拆/.test(pitch)) score -= 0.4;
+
+    // Reward concrete data anchors: numbers, percentages, bps, asset codes
+    if (/[+-]?\d+\.?\d*\s*(%|bps|个百分点)/.test(pitch)) score += 0.6;
+    if (/\b(SPX|NDX|SOX|HSI|HSTECH|TNX|DXY|GOLD|BRENT|WTI|USDCNH|USDJPY|USDCHF|AT1|AAPL|MSFT|NVDA|AMZN|GOOG|GOOGL|META|TSLA|AMD|TSM|AVGO|INTC|ORCL|NFLX|UNH|BABA)\b/i.test(pitch)) score += 0.4;
+    // Reward mechanism / transmission language (info-dense markers)
+    if (/(传导|定价|溢价|利差|久期|term premium|carry|beta|轮动|分化|拥挤|estimation|capex)/i.test(pitch)) score += 0.4;
+    // Reward proper length window — too short = no info, too long = bloated
+    if (pitch.length >= 40 && pitch.length <= 110) score += 0.3;
+
+    // PENALIZE scripted talking-script forms (the original bug — these were +0.8 before)
+    if (/[？?]$/.test(pitch)) score -= 0.9;
+    if (/要不要|是否要|我们可以|先看一下|先聊一下|拆一下|讨论一下|按.*情景看一遍|先按.*看/.test(pitch)) score -= 1.2;
+    if (/^(您|你)|.{0,8}(您|你)的(组合|仓位|敞口|配置|持仓)/.test(pitch)) score -= 0.7;
+    // Penalize fluffy filler that adds no info
+    if (/(关注|观察|变化|市场波动|值得留意|需要留意|建议关注)/.test(pitch) && !/(传导|利差|久期|capex|分化|拥挤|定价)/.test(pitch)) score -= 0.5;
+
     return score;
 }
 
 function timeSensitivityWeight(trigger: DailyPitchTrigger): number {
-    if (trigger.time_sensitivity === 'immediate') return 0.8;
-    if (trigger.time_sensitivity === 'this_week') return 0.5;
-    return 0.2;
+    const w = PITCH_WEIGHTS_OVERRIDE?.timeSensitivity ?? PITCH_RANKING_WEIGHTS.timeSensitivity;
+    if (trigger.time_sensitivity === 'immediate') return w.immediate;
+    if (trigger.time_sensitivity === 'this_week') return w.this_week;
+    return w.watch;
 }
 
 function isCriticalPitchTrigger(trigger: DailyPitchTrigger): boolean {
@@ -5307,8 +5533,12 @@ function scorePitchTriggerForRm(
     previousHeadlines: Set<string>,
     previousLanes: Set<PitchAssetLane>,
     yesterdayHeadlines: Set<string> = new Set(),
-    multiDayStreakKeys: Set<string> = new Set()
+    multiDayStreakKeys: Set<string> = new Set(),
+    weekFrequency: Map<string, number> = new Map()
 ): number {
+    const w = PITCH_WEIGHTS_OVERRIDE?.repetition ?? PITCH_RANKING_WEIGHTS.repetition;
+    const b = PITCH_WEIGHTS_OVERRIDE?.bonus ?? PITCH_RANKING_WEIGHTS.bonus;
+
     let score = materialityWeight(trigger) + openerQualityWeight(trigger) + timeSensitivityWeight(trigger);
     const headline = normalizePitchHeadline(trigger);
     const themeKey = normalizePitchThemeKey(trigger);
@@ -5318,26 +5548,32 @@ function scorePitchTriggerForRm(
         || /CRITICAL/i.test(trigger.context ?? '');
 
     if (trigger.risk_flag) {
-        score += 0.25;
+        score += b.riskFlag;
     }
     if (trigger.client_type && /客户|仓位|敞口|票据|fcn|at1/i.test(trigger.client_type)) {
-        score += 0.45;
+        score += b.clientTypeAnchor;
     }
     if (!isRepetitionExempt && previousHeadlines.has(headline)) {
-        score -= 1.7;
+        score += w.sameDayPenalty;
     }
     if (!isRepetitionExempt && yesterdayHeadlines.has(headline)) {
-        score -= 1.2;
+        score += w.yesterdayPenalty;
     }
-    // Multi-day streak: same theme appeared yesterday AND day-before-yesterday.
-    // This penalty applies even to CRITICAL/risk_flag triggers — RM fatigue trumps materiality
-    // once a topic has been on the pitch list for 3+ consecutive days. Only one event class
-    // (FOMC/财报落地) should ever stay multi-day in a row, and it must rotate angle.
+    // Multi-day streak: same theme on yesterday AND day-before-yesterday.
+    // Overrides CRITICAL exemption — RM fatigue trumps materiality after 3 consecutive days.
     if (themeKey && multiDayStreakKeys.has(themeKey)) {
-        score -= 3.5;
+        score += w.multiDayStreakPenalty;
+    }
+    // 7-day rolling frequency: a theme that ran ≥3 of last 7 days is fatigued; ≥5 is hard-suppressed
+    // even if not on consecutive days (the 2-day streak check misses this pattern).
+    const weekCount = themeKey ? (weekFrequency.get(themeKey) ?? 0) : 0;
+    if (weekCount >= w.weekWindowHardCap) {
+        score -= 100; // effectively block — RM saw this 5+ of last 7 days
+    } else if (weekCount >= 3) {
+        score += w.weekWindowPenalty;
     }
     if (previousLanes.has(lane)) {
-        score -= 0.35;
+        score += w.sameLanePenalty;
     }
 
     return score;
@@ -5363,8 +5599,8 @@ function dedupePitchTriggers(
                 triggerPriority > existingPriority
                 || (
                     triggerPriority === existingPriority
-                    && scorePitchTriggerForRm(trigger, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>())
-                    > scorePitchTriggerForRm(existing, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>())
+                    && scorePitchTriggerForRm(trigger, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>(), new Set<string>(), pitchThemeFrequencyLast7Days)
+                    > scorePitchTriggerForRm(existing, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>(), new Set<string>(), pitchThemeFrequencyLast7Days)
                 )
             ) {
                 deduped[existingIndex] = trigger;
@@ -5401,8 +5637,8 @@ function applyRmConversationRanking(
         })
         .sort((left, right) => (
             criticalPitchPriority(right) - criticalPitchPriority(left)
-            || scorePitchTriggerForRm(right, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>(), multiDayStreakKeys)
-            - scorePitchTriggerForRm(left, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>(), multiDayStreakKeys)
+            || scorePitchTriggerForRm(right, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>(), multiDayStreakKeys, pitchThemeFrequencyLast7Days)
+            - scorePitchTriggerForRm(left, new Set<string>(), new Set<PitchAssetLane>(), new Set<string>(), multiDayStreakKeys, pitchThemeFrequencyLast7Days)
         ));
     const reservedCriticalCount = criticalCandidates.length > 1 ? 2 : criticalCandidates.length;
 
@@ -5421,7 +5657,7 @@ function applyRmConversationRanking(
             }
 
             const lane = classifyPitchAssetLane(candidate);
-            let score = scorePitchTriggerForRm(candidate, previousHeadlines, previousLanes, yesterdayHeadlines, multiDayStreakKeys);
+            let score = scorePitchTriggerForRm(candidate, previousHeadlines, previousLanes, yesterdayHeadlines, multiDayStreakKeys, pitchThemeFrequencyLast7Days);
             if (selectedLanes.has(lane)) {
                 score -= selected.length === 0 ? 0 : 1.15;
             }
@@ -5452,7 +5688,7 @@ function applyRmConversationRanking(
             if (selected.includes(candidate) || !lastMileLanes.includes(classifyPitchAssetLane(candidate))) {
                 continue;
             }
-            const score = scorePitchTriggerForRm(candidate, previousHeadlines, previousLanes, yesterdayHeadlines, multiDayStreakKeys);
+            const score = scorePitchTriggerForRm(candidate, previousHeadlines, previousLanes, yesterdayHeadlines, multiDayStreakKeys, pitchThemeFrequencyLast7Days);
             if (score > bestLastMileScore) {
                 bestLastMileCandidate = candidate;
                 bestLastMileScore = score;
@@ -5466,7 +5702,7 @@ function applyRmConversationRanking(
                 if (isCriticalPitchTrigger(selected[index])) {
                     continue;
                 }
-                const score = scorePitchTriggerForRm(selected[index], previousHeadlines, previousLanes, yesterdayHeadlines, multiDayStreakKeys);
+                const score = scorePitchTriggerForRm(selected[index], previousHeadlines, previousLanes, yesterdayHeadlines, multiDayStreakKeys, pitchThemeFrequencyLast7Days);
                 if (score < weakestScore) {
                     weakestScore = score;
                     replaceIndex = index;
@@ -5481,6 +5717,94 @@ function applyRmConversationRanking(
     }
 
     return selected.map((item, index) => ({ ...item, id: index + 1 }));
+}
+
+/**
+ * Builds a decision-log entry capturing how the ranking pipeline selected the
+ * final 3 pitch triggers. Used purely for observability and offline weight tuning.
+ * Never throws — log failures are swallowed.
+ */
+function buildPitchDecisionLog(args: {
+    runSource: 'scheduled-refresh' | 'on-demand' | 'fallback';
+    llmCalled: boolean;
+    llmSucceeded: boolean;
+    candidatePool: NonNullable<DailyMarketNarrative['daily_pitch_triggers']>;
+    candidateSourceMap: Map<string, 'llm' | 'deterministic' | 'bucket-derived'>;
+    factCheckRejections: Array<{ trigger: DailyPitchTrigger; reasons: string[] }>;
+    finalSelection: NonNullable<DailyMarketNarrative['daily_pitch_triggers']>;
+    durationMs: number;
+}): import('../db/queries/ideas').DailyPitchDecisionLog {
+    const yesterdayKeys = new Set(yesterdayDailyPitchTriggers.map((trigger) => normalizePitchThemeKey(trigger)).filter(Boolean));
+    const dayBeforeKeys = new Set(dayBeforeYesterdayDailyPitchTriggers.map((trigger) => normalizePitchThemeKey(trigger)).filter(Boolean));
+    const multiDayStreakKeys = [...yesterdayKeys].filter((key) => dayBeforeKeys.has(key));
+
+    const candidatePool = args.candidatePool.map((trigger) => {
+        const themeKey = normalizePitchThemeKey(trigger);
+        const headline = (trigger.headline ?? trigger.hook ?? '').trim();
+        return {
+            headline,
+            theme_key: themeKey,
+            lane: classifyPitchAssetLane(trigger),
+            materiality_trigger: trigger.materiality_trigger,
+            source: args.candidateSourceMap.get(themeKey || headline) ?? 'llm',
+            score: scorePitchTriggerForRm(
+                trigger,
+                new Set<string>(),
+                new Set<PitchAssetLane>(),
+                new Set<string>(),
+                new Set(multiDayStreakKeys),
+                pitchThemeFrequencyLast7Days
+            ),
+            is_critical: isCriticalPitchTrigger(trigger)
+        };
+    });
+
+    const finalSelection = args.finalSelection.map((trigger, index) => ({
+        headline: (trigger.headline ?? trigger.hook ?? '').trim(),
+        theme_key: normalizePitchThemeKey(trigger),
+        rank: index + 1,
+        score: scorePitchTriggerForRm(
+            trigger,
+            new Set<string>(),
+            new Set<PitchAssetLane>(),
+            new Set<string>(),
+            new Set(multiDayStreakKeys),
+            pitchThemeFrequencyLast7Days
+        )
+    }));
+
+    const weekFrequencyTop = [...pitchThemeFrequencyLast7Days.entries()]
+        .sort((left, right) => right[1] - left[1])
+        .slice(0, 8)
+        .map(([theme_key, count]) => ({ theme_key, count }));
+
+    return {
+        run_at: new Date().toISOString(),
+        run_source: args.runSource,
+        llm_called: args.llmCalled,
+        llm_succeeded: args.llmSucceeded,
+        candidate_pool: candidatePool,
+        fact_check_rejections: args.factCheckRejections.map((entry) => ({
+            headline: (entry.trigger.headline ?? entry.trigger.hook ?? '').trim(),
+            reasons: entry.reasons
+        })),
+        final_selection: finalSelection,
+        multi_day_streak_keys: multiDayStreakKeys,
+        week_frequency_top: weekFrequencyTop,
+        duration_ms: args.durationMs
+    };
+}
+
+async function safeRecordPitchDecision(
+    runDate: string,
+    decision: import('../db/queries/ideas').DailyPitchDecisionLog
+): Promise<void> {
+    try {
+        const { recordDailyPitchDecision } = await import('../db/queries/ideas');
+        await recordDailyPitchDecision(runDate, decision);
+    } catch (error) {
+        console.warn('[daily-pitch] failed to record decision log:', error);
+    }
 }
 
 const SINGLE_STOCK_TICKER_PATTERN =
@@ -5735,7 +6059,128 @@ function ensurePriorityAssetBuckets(
         .slice(0, 5);
 }
 
+/**
+ * Focused LLM call dedicated to generating the 3 daily_pitch_triggers.
+ *
+ * Why split from generateDailyMarketNarrative:
+ *   - Original prompt was 6000+ chars with 9 simultaneous tasks (narrative + regime_label
+ *     + primary_slug + ranked_slugs + rank_changes + buckets + pitch_triggers + ...).
+ *     LLM attention diluted, output ended up format-correct but content-bland.
+ *   - Pitch triggers benefit from higher temperature (0.6) for varied phrasing,
+ *     while narrative/regime_label benefit from lower temperature (0.3) for stability.
+ *   - Smaller prompt = faster + cheaper + lets us iterate on pitch quality independently.
+ *
+ * Runs in parallel with the main narrative call. Output replaces (not augments) the
+ * pitch_triggers slot in the final response. Failures fall through to the main call's
+ * own pitch_triggers, then to deterministic fallback.
+ */
+async function generatePitchTriggersFocused(
+    marketSnapshot: ClientFocusMarketStateResponse | null,
+    headlineSignals: DailyPitchHeadlineSignals,
+    pitchCandidateSection: string,
+    nowHkt: { hktTimeLabel: string; hkMarketClosed: boolean }
+): Promise<NonNullable<DailyMarketNarrative['daily_pitch_triggers']>> {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) return [];
+
+    const marketSignalsSection = buildDailyNarrativeMarketSignalsSection(marketSnapshot);
+    const earningsSection = await buildEarningsCalendarSection();
+
+    const systemPrompt = `你是为香港私行RM准备"今日可聊"3条触达话题的策略师。专注一件事：从输入的候选信号里挑出 3 条，每条产出可直接展示的卡片字段。
+
+你只输出 JSON，不输出任何额外文字。
+
+【写作边界 — 这是最重要参照】
+
+GOOD 示例（财报落地）：
+{
+  "headline": "AMD明晚盘后财报",
+  "context": "AMD周二（5/5）美股盘后发布Q1财报，市场聚焦MI300数据中心收入与全年AI芯片指引；隔夜ORCL、CoreWeave等AI算力链已下跌。若不及预期，高估值AI/半导体仓位面临重新定价。",
+  "talking_point": "AMD财报是本轮AI capex叙事的关键证伪节点；MI300数据中心收入指引若不及预期，半导体仓位与AI主题FCN的估值锚点都会被重新调整。",
+  "client_type": "美股科技或AI半导体FCN客户",
+  "watchpoints": ["MI300数据中心收入", "全年AI芯片指引", "盘后股价与IV"],
+  "asset_tags": ["US Equities", "AMD", "AI Theme", "FCN"],
+  "materiality_trigger": "3B: major earnings within 1 trading day",
+  "risk_flag": true,
+  "time_sensitivity": "immediate",
+  "source_summary": "来自财报日历未来1日"
+}
+
+BAD 示例（不要这样写）：
+- "今晚AMD盘后财报"（时间词错；HKT POV days_until=1 应为"明晚"）
+- "您组合里的科技仓位..."（"您..."话术，禁止）
+- "我们可以先按好中差三种情景看一遍？"（销售脚本+疑问句，禁止）
+- "美债收益率重新校准"（翻译腔，禁止"重新校准/进入验证/牵动/证伪点"）
+- "建议讨论一下久期配置"（销售脚本+空话）
+- "债券客户"（client_type 太泛，要落到"持有AT1"/"长久期债基"等具体敞口）
+
+【字段规则】
+- headline：≤20 中文字符。要通顺自然中文，不要英文直译语序
+- 时间词（HKT POV）：days_until=0→今晚，=1→明晚，=2→后天，≥3→本周，HKT周末→下周。绝不能在 days_until=1 的财报上写"今晚"
+- context：80-120 字。结构=事件/数据 + 传导机制 + 组合含义。必须含具体数字（价格/涨跌幅/bps/日期）+ 具体标的代码。禁止"您..."、"我们可以"、"建议..."
+- talking_point：60-100 字。与 context 互补，给出关键判断或风险点。不要话术，不要"您..."，不要疑问句结尾
+- client_type：≤20 字，必须落到具体敞口类型
+- watchpoints：≥2 条具体观察点，每条 ≤20 字
+- asset_tags：资产类别 + 标的代码，最多 5 个
+- materiality_trigger：触发标准，例如 "3B: major earnings"
+- risk_flag：尾部/下行/地缘升级则 true
+- time_sensitivity："immediate" | "this_week" | "watch"
+- source_summary：一句话说明来自上方哪条输入
+
+【选择规则】
+- 必须从候选池选 3 条；HIGH 优先于 MEDIUM；POST-EARNINGS 优于 PRE-EARNINGS（同标的重叠时合并）
+- 至少覆盖 2 个资产类别；纯宏观/央行不超过 1 条；单一股票不超过 1 条
+- 每张卡片只允许一条主线事件；禁止"叠加/接力"两个事件并列写在同一张
+
+输出 JSON：
+{
+  "daily_pitch_triggers": [
+    { "id": 1, "headline": "...", "context": "...", "talking_point": "...", "client_type": "...", "watchpoints": [...], "asset_tags": [...], "materiality_trigger": "...", "risk_flag": true, "time_sensitivity": "immediate", "source_summary": "...", "hook": "<同headline>", "why_now": "<同context>", "pitch_line": "<同talking_point>", "related_assets": "<同asset_tags>" }
+  ]
+}`;
+
+    const userPrompt = `当前香港时间：${nowHkt.hktTimeLabel}（港股${nowHkt.hkMarketClosed ? '已收盘' : '盘中/未开盘'}）
+${earningsSection ? `\n${earningsSection}\n` : ''}
+${marketSignalsSection}
+
+${pitchCandidateSection}
+
+任务：从上方候选信号中挑 3 条，按【字段规则】产出 daily_pitch_triggers。严格 JSON 输出。`.trim();
+
+    try {
+        const response = await fetch(`${process.env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: 'deepseek-chat',
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt }
+                ],
+                max_tokens: 1500,
+                temperature: 0.6
+            }),
+            signal: AbortSignal.timeout(20000)
+        });
+        if (!response.ok) return [];
+        const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+        const parsed = safeParseJson(payload.choices?.[0]?.message?.content ?? '') as
+            | { daily_pitch_triggers?: unknown }
+            | null;
+        if (!parsed) return [];
+        return normalizeDailyPitchTriggers(parsed.daily_pitch_triggers);
+    } catch (error) {
+        console.warn('[daily-pitch] focused pitch call failed:', error instanceof Error ? error.message : error);
+        return [];
+    }
+}
+
 async function generateDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
+    const pipelineStart = Date.now();
+    const todayDate = new Date().toISOString().slice(0, 10);
     let cachedTopics = collectNarrativeTopics();
 
     if (cachedTopics.length < 2) {
@@ -5867,7 +6312,62 @@ ${narrativeHistorySection}
    - 每张卡片只允许一条主线事件。禁止用'叠加'/'接力'/'同时'将两个不同事件并列为主线写入同一张卡。若第二个事件客观上有关联，只允许作为传导结果出现（一句话，≤15字），不能占据独立段落或成为该卡的第二个核心论点。
    - context 和 source_summary 必须绑定来自上方输入的具体证据：数字（价格/涨跌幅/bps/收益率）或命名来源（机构名/报告发布方/公司名）。严禁出现'某报告'/'分析显示'/'市场预计'/'据悉'等无法追溯的模糊表述。若输入未提供具体数据，该事件不应生成独立卡片。
    - 若候选中存在 [POST-EARNINGS] 标签的已落地财报事件，该卡片的 context 和 watchpoints 必须聚焦于已公布的结果和市场反应，禁止在同一张卡里将其他公司'今晚盘后财报'作为'接力'或留意点。待发财报如有必要，应在独立卡片中处理。
-   - talking_point 必须像资深IC打开对话，结尾可以是问题或隐含邀请客户回应
+   - talking_point 不写成对客户开口的脚本；不要"您..."句式，不要疑问句结尾；和 context 互补，给出关键判断或风险点
+
+【Few-shot 示例：好 vs 坏】（这是写作边界的最重要参照，遇到歧义按这个标准判断）
+
+GOOD 示例 1（财报落地）：
+{
+  "headline": "AMD明晚盘后财报",
+  "context": "AMD周二（5/5）美股盘后发布Q1财报，市场聚焦MI300数据中心收入与全年AI芯片指引；隔夜ORCL、CoreWeave等AI算力链已下跌，OpenAI收入目标争议加重AI capex回报疑虑。若不及预期，高估值AI/半导体仓位面临重新定价。",
+  "talking_point": "AMD财报是本轮AI capex叙事的关键证伪节点；MI300数据中心收入指引若不及预期，半导体仓位与AI主题FCN的估值锚点都会被重新调整。",
+  "client_type": "美股科技或AI半导体FCN客户",
+  "watchpoints": ["MI300数据中心收入", "全年AI芯片指引", "盘后股价与IV"]
+}
+
+BAD 示例 1（同主题写差）：
+{
+  "headline": "今晚AMD盘后财报",                  // ← 时间词错（HKT POV 应为"明晚"）
+  "context": "OpenAI被曝收入目标未达成，今晚AMD盘后财报，市场焦点从增长多少升级为能否证实AI资本开支回报。若财报不及预期，您组合里的高估值AI仓位面临重新定价压力。",   // ← "您组合里"是话术
+  "talking_point": "AI capex回报受质疑，今晚财报会给答案；您科技仓位要不要先按好中差三种情景看一遍？",   // ← "您...要不要"销售脚本，疑问句结尾
+  "client_type": "美股科技或FCN客户",
+  "watchpoints": ["权重股财报", "AI capex指引", "科技期权波动率"]   // ← "权重股"泛泛，不是 AMD 特定观察点
+}
+
+GOOD 示例 2（利率/久期）：
+{
+  "headline": "10Y破4.6%，长债承压",
+  "context": "10Y收益率今日上行8bps至4.62%，5日累计+15bps；定价从term premium修复升级为对降息路径的重新评估，IG债基净值与AT1利差同步走阔，长久期敞口面临账面回撤压力。",
+  "talking_point": "区分这是term premium结构性回升还是美联储路径的二次定价是接下来的关键；信用利差与AT1分项分化将先于现券收益率给出方向信号。",
+  "client_type": "持有长久期债、IG债基或AT1客户",
+  "watchpoints": ["10Y能否守住4.5%", "AT1信用利差", "term premium走势"]
+}
+
+BAD 示例 2：
+{
+  "headline": "美债收益率重新校准",               // ← 翻译腔，禁止"重新校准"
+  "context": "长端利率走高对债券价格不利，市场情绪有变化，需要持续观察。",   // ← 无数字，无具体机制
+  "talking_point": "建议讨论一下久期配置，看看是否需要调整。",   // ← 销售脚本+空话
+  "client_type": "债券客户",                       // ← 太泛
+  "watchpoints": ["利率走势"]                      // ← 只 1 条且太泛
+}
+
+GOOD 示例 3（地缘/商品）：
+{
+  "headline": "阿联酋退出OPEC，油市动荡",
+  "context": "Brent今日+2.8%至89.5美元，5日+6.1%；阿联酋宣布退出OPEC/OPEC+，油价逻辑从霍尔木兹单一封锁升级为供给纪律与OPEC凝聚力再定价；通胀预期、AT1信用利差、长久期债同步面临传导压力。",
+  "talking_point": "供给侧从地缘风险转向制度性失序，原油高位持续概率上升；通胀预期回升将冲击降息路径定价与久期资产估值。",
+  "client_type": "能源敞口、黄金或AT1客户",
+  "watchpoints": ["Brent能否守住90美元", "OPEC后续会议表态", "AT1信用利差"]
+}
+
+【边界规则总结】
+- 标题：避免翻译腔（"重新校准/进入验证/牵动/证伪点/传导待确认"）
+- context：必须有具体数字（价格/涨跌幅/bps/日期）+ 具体标的代码（不是"权重股"/"科技股"这种泛词）
+- talking_point：信息密集，不写成对客户开口；不"您..."、不疑问句结尾、不"建议..."、不"我们可以..."
+- client_type：必须落到具体敞口类型（"持有AT1"/"长久期债基"/"AI主题FCN"），不能是"科技客户"/"债券客户"
+- watchpoints：≥2 条且每条具体（"10Y能否守住4.5%"），不能"利率走势"这种泛词
+
 4. asset_buckets 是旧版兼容字段，前端不再展示；优先返回空数组 []
    - 不要为了填 asset_buckets 牺牲 daily_pitch_triggers 的质量
    - 如果确实需要兼容旧客户端，bucket 只能从：美股、港股、黄金、美债、汇率 中选择；大宗商品不生成独立bucket（原油只作为传导因子，体现在相关bucket的portfolio_implication里）
@@ -5928,6 +6428,16 @@ ${narrativeHistorySection}
   "asset_buckets": []
 }
 `.trim();
+
+    // Parallel pitch-focused call for higher-quality 3-card output. Runs concurrently with
+    // the main narrative call below. If it produces valid triggers, they replace the main
+    // call's pitch_triggers slot. See generatePitchTriggersFocused docstring for rationale.
+    const focusedPitchPromise = generatePitchTriggersFocused(
+        marketSnapshot,
+        headlineSignals,
+        pitchCandidateSection,
+        { hktTimeLabel, hkMarketClosed }
+    );
 
     try {
         const response = await fetch(`${process.env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL}/chat/completions`, {
@@ -6190,10 +6700,41 @@ ${narrativeHistorySection}
         const default_expanded_bucket = isValidDailyNarrativeBucket(parsed.default_expanded_bucket)
             ? parsed.default_expanded_bucket
             : asset_buckets[0]?.bucket ?? '美股';
-        const daily_pitch_triggers = normalizeDailyPitchTriggers((parsed as any).daily_pitch_triggers);
+        // Prefer focused pitch call output when available; fall back to main call's pitch slot.
+        const focusedPitchTriggers = await focusedPitchPromise;
+        const mainCallPitchTriggers = normalizeDailyPitchTriggers((parsed as any).daily_pitch_triggers);
+        const rawLlmPitchTriggers = focusedPitchTriggers.length > 0
+            ? focusedPitchTriggers
+            : mainCallPitchTriggers;
+        // Fact validation: reject LLM triggers with hallucinated numbers, unknown symbols,
+        // or wrong earnings timing words. Failures fall through to deterministic backup.
+        const upcomingMegaEarningsForValidation = await getUpcomingEarningsNextNDays(7).catch(() => []);
+        const recentlyReportedForValidation = new Set(
+            await getRecentlyReportedMajorEarningsSymbols().catch(() => [])
+        );
+        const factValidationContext: FactValidationContext = {
+            marketSnapshot,
+            upcomingMegaEarnings: upcomingMegaEarningsForValidation,
+            recentlyReportedSymbols: recentlyReportedForValidation
+        };
+        const factCheck = validatePitchTriggerFacts(rawLlmPitchTriggers, factValidationContext);
+        if (factCheck.rejected.length > 0) {
+            console.warn('[daily-pitch] LLM trigger fact-check rejections:', JSON.stringify(
+                factCheck.rejected.map((r) => ({
+                    headline: r.trigger.headline,
+                    reasons: r.reasons
+                })),
+                null,
+                2
+            ));
+        }
+        const daily_pitch_triggers = factCheck.valid;
         const deterministicPitchTriggers = await buildDeterministicDailyPitchTriggers(marketSnapshot, headlineSignals);
+        // LLM-generated triggers come FIRST so dedupePitchTriggers (which preserves first-seen
+        // theme key on equal priority) keeps the higher-quality LLM version. Deterministic
+        // triggers serve as backup signal sources and recall safety net only.
         const pitchCandidatePool = daily_pitch_triggers.length > 0
-            ? [...deterministicPitchTriggers, ...daily_pitch_triggers]
+            ? [...daily_pitch_triggers, ...deterministicPitchTriggers]
             : deterministicPitchTriggers.length > 0
                 ? deterministicPitchTriggers
                 : buildPitchTriggersFromBuckets(asset_buckets);
@@ -6205,6 +6746,28 @@ ${narrativeHistorySection}
         if (resolvedPitchTriggers.length < 1) {
             throw new Error('Missing daily pitch triggers');
         }
+
+        // Decision log — fire-and-forget, never blocks pipeline.
+        const candidateSourceMap = new Map<string, 'llm' | 'deterministic' | 'bucket-derived'>();
+        for (const trigger of daily_pitch_triggers) {
+            const key = normalizePitchThemeKey(trigger) || (trigger.headline ?? trigger.hook ?? '').trim();
+            if (key) candidateSourceMap.set(key, 'llm');
+        }
+        for (const trigger of deterministicPitchTriggers) {
+            const key = normalizePitchThemeKey(trigger) || (trigger.headline ?? trigger.hook ?? '').trim();
+            if (key && !candidateSourceMap.has(key)) candidateSourceMap.set(key, 'deterministic');
+        }
+        const decisionLog = buildPitchDecisionLog({
+            runSource: 'scheduled-refresh',
+            llmCalled: true,
+            llmSucceeded: true,
+            candidatePool: pitchCandidatePool,
+            candidateSourceMap,
+            factCheckRejections: factCheck.rejected,
+            finalSelection: resolvedPitchTriggers,
+            durationMs: Date.now() - pipelineStart
+        });
+        void safeRecordPitchDecision(todayDate, decisionLog);
 
         const rank_changes: Record<string, 'up' | 'down' | 'stable'> = {};
         if (previousRankedSlugs.length > 0) {
@@ -6236,6 +6799,7 @@ ${narrativeHistorySection}
             generated_at: new Date().toISOString(),
         };
     } catch (error) {
+        console.warn('[daily-pitch] LLM path failed, falling back to deterministic:', error instanceof Error ? error.message : error);
         const deterministicPitchTriggers = await buildDeterministicDailyPitchTriggers(marketSnapshot, headlineSignals);
         if (deterministicPitchTriggers.length > 0) {
             const rankedPitchTriggers = ensureMandatoryHeadlineTriggers(
@@ -6243,6 +6807,25 @@ ${narrativeHistorySection}
                 deterministicPitchTriggers,
                 headlineSignals
             );
+
+            // Decision log for fallback path.
+            const fallbackSourceMap = new Map<string, 'llm' | 'deterministic' | 'bucket-derived'>();
+            for (const trigger of deterministicPitchTriggers) {
+                const key = normalizePitchThemeKey(trigger) || (trigger.headline ?? trigger.hook ?? '').trim();
+                if (key) fallbackSourceMap.set(key, 'deterministic');
+            }
+            const fallbackDecisionLog = buildPitchDecisionLog({
+                runSource: 'fallback',
+                llmCalled: true,
+                llmSucceeded: false,
+                candidatePool: deterministicPitchTriggers,
+                candidateSourceMap: fallbackSourceMap,
+                factCheckRejections: [],
+                finalSelection: rankedPitchTriggers,
+                durationMs: Date.now() - pipelineStart
+            });
+            void safeRecordPitchDecision(todayDate, fallbackDecisionLog);
+
             const fallbackPrimarySlug =
                 fallbackNarrative?.primary_slug && FOCUS_TOPICS.some((topic) => topic.slug === fallbackNarrative.primary_slug)
                     ? fallbackNarrative.primary_slug
@@ -9984,9 +10567,10 @@ async function refreshDailyMarketNarrative(
         if (previousNarrative?.daily_pitch_triggers?.length) {
             previousDailyPitchTriggers = [...previousNarrative.daily_pitch_triggers];
         }
-        [yesterdayDailyPitchTriggers, dayBeforeYesterdayDailyPitchTriggers] = await Promise.all([
+        [yesterdayDailyPitchTriggers, dayBeforeYesterdayDailyPitchTriggers, pitchThemeFrequencyLast7Days] = await Promise.all([
             getYesterdayDailyPitchTriggers(),
-            getDayBeforeYesterdayDailyPitchTriggers()
+            getDayBeforeYesterdayDailyPitchTriggers(),
+            getPitchThemeFrequencyLast7Days()
         ]);
 
         try {
