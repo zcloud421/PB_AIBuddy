@@ -13,6 +13,7 @@
     "narrative:refresh": "ts-node src/scripts/run-daily-narrative-refresh.ts",
     "tracker": "ts-node src/scripts/run-price-tracker.ts",
     "tracker:review:telegram": "ts-node src/scripts/send-tracker-review-telegram.ts",
+    "attrib:health:telegram": "ts-node src/scripts/check-attribution-health.ts",
     "migrate": "ts-node src/scripts/migrate-add-narrative-columns.ts",
     "migrate:price": "ts-node src/scripts/migrate-price-context.ts",
     "backfill:risk-reward": "ts-node src/scripts/backfill-risk-reward-score.ts",
