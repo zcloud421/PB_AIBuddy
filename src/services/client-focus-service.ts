@@ -3793,9 +3793,21 @@ async function getRecentlyReportedMajorEarningsSymbols(): Promise<string[]> {
     return Array.from(new Set([...recentSymbols, ...sameDaySymbols]));
 }
 
-function compactHeadlineList(items: NewsItem[], predicate: (title: string) => boolean): string[] {
+// Default freshness window for event headline detectors. 36 hours covers a typical
+// HK news cycle while avoiding stale narratives from prior trading sessions.
+const DEFAULT_HEADLINE_MAX_AGE_HOURS = 36;
+
+function compactHeadlineList(
+    items: NewsItem[],
+    predicate: (title: string) => boolean,
+    options: { maxAgeHours?: number } = {}
+): string[] {
     const seen = new Set<string>();
     return items
+        .filter((item) => {
+            const maxAgeHours = options.maxAgeHours ?? DEFAULT_HEADLINE_MAX_AGE_HOURS;
+            return isWithinHours(item.published_at, maxAgeHours);
+        })
         .filter((item) => predicate(item.title))
         .map((item) => cleanDailyNarrativeSentence(item.title).slice(0, 110))
         .filter((title) => {
@@ -3998,11 +4010,11 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
         .filter((title, index, arr) => arr.indexOf(title) === index)
         .slice(0, 20);
     const breakingNewsCandidates = await scoreBreakingNewsHeadlines(unseenTitles);
-    let majorEarningsResultTitles = compactHeadlineList(majorEarningsItems, isMajorEarningsResultHeadline);
-    let fomcMeetingResultTitles = compactHeadlineList(fomcItems, isFomcDecisionHeadline);
-    let bojMeetingResultTitles = compactHeadlineList(bojItems, isBojDecisionHeadline);
+    let majorEarningsResultTitles = compactHeadlineList(majorEarningsItems, isMajorEarningsResultHeadline, { maxAgeHours: 24 });
+    let fomcMeetingResultTitles = compactHeadlineList(fomcItems, isFomcDecisionHeadline, { maxAgeHours: 48 });
+    let bojMeetingResultTitles = compactHeadlineList(bojItems, isBojDecisionHeadline, { maxAgeHours: 48 });
     let macroDataResultTitles = nearestMacroEvent
-        ? compactHeadlineList(macroItems, (title) => isMacroDataHeadline(title, nearestMacroEvent.type))
+        ? compactHeadlineList(macroItems, (title) => isMacroDataHeadline(title, nearestMacroEvent.type), { maxAgeHours: 24 })
         : [];
 
     const fallbackPromises: Promise<NewsItem[]>[] = [];
@@ -4039,16 +4051,16 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
     const fallbackResults = await Promise.allSettled(fallbackPromises);
     const fallbackItems = fallbackResults.flatMap((result) => result.status === 'fulfilled' ? result.value : []);
     if (fomcMeetingResultTitles.length === 0) {
-        fomcMeetingResultTitles = compactHeadlineList(fallbackItems, isFomcDecisionHeadline);
+        fomcMeetingResultTitles = compactHeadlineList(fallbackItems, isFomcDecisionHeadline, { maxAgeHours: 48 });
     }
     if (bojMeetingResultTitles.length === 0) {
-        bojMeetingResultTitles = compactHeadlineList(fallbackItems, isBojDecisionHeadline);
+        bojMeetingResultTitles = compactHeadlineList(fallbackItems, isBojDecisionHeadline, { maxAgeHours: 48 });
     }
     if (macroDataResultTitles.length === 0 && nearestMacroEvent) {
-        macroDataResultTitles = compactHeadlineList(fallbackItems, (title) => isMacroDataHeadline(title, nearestMacroEvent.type));
+        macroDataResultTitles = compactHeadlineList(fallbackItems, (title) => isMacroDataHeadline(title, nearestMacroEvent.type), { maxAgeHours: 24 });
     }
     if (majorEarningsResultTitles.length === 0) {
-        majorEarningsResultTitles = compactHeadlineList(fallbackItems, isMajorEarningsResultHeadline);
+        majorEarningsResultTitles = compactHeadlineList(fallbackItems, isMajorEarningsResultHeadline, { maxAgeHours: 24 });
     }
 
     if (fallbackPromises.length > 0) {
@@ -4080,7 +4092,7 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
         macroDataResultTitles.push(`美国${macroLabel}已公布，市场评估对美联储政策路径的影响`);
     }
     const macroDataEventType = nearestMacroEvent?.type ?? null;
-    const chinaMacroTitles = compactHeadlineList(chinaItems, isChinaMacroSurpriseHeadline);
+    const chinaMacroTitles = compactHeadlineList(chinaItems, isChinaMacroSurpriseHeadline, { maxAgeHours: 24 });
 
     return {
         openAiTargetMissTitles: compactHeadlineList(openAiItems, isOpenAiTargetMissHeadline),
