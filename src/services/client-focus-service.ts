@@ -24,6 +24,7 @@ import type {
     WhatChangedGroup
 } from '../types/api';
 import { fetchNewsItemsByQuery, fetchNewsItemsFromNewsData } from '../data/news-fetcher';
+import { fetchRssNewsFallback } from '../data/rss-news-fetcher';
 import { MassiveDataFetcher } from '../data/massive-fetcher';
 import { MassiveClient } from '../data/massive-client';
 import { pool } from '../db/client';
@@ -3997,23 +3998,83 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
         .filter((title, index, arr) => arr.indexOf(title) === index)
         .slice(0, 20);
     const breakingNewsCandidates = await scoreBreakingNewsHeadlines(unseenTitles);
-    const majorEarningsResultTitles = compactHeadlineList(majorEarningsItems, isMajorEarningsResultHeadline);
+    let majorEarningsResultTitles = compactHeadlineList(majorEarningsItems, isMajorEarningsResultHeadline);
+    let fomcMeetingResultTitles = compactHeadlineList(fomcItems, isFomcDecisionHeadline);
+    let bojMeetingResultTitles = compactHeadlineList(bojItems, isBojDecisionHeadline);
+    let macroDataResultTitles = nearestMacroEvent
+        ? compactHeadlineList(macroItems, (title) => isMacroDataHeadline(title, nearestMacroEvent.type))
+        : [];
+
+    const fallbackPromises: Promise<NewsItem[]>[] = [];
+    if (onFomcWindow && fomcItems.length === 0 && fomcMeetingResultTitles.length === 0) {
+        fallbackPromises.push(fetchRssNewsFallback({
+            categories: ['central-bank'],
+            keywords: 'FOMC Fed rate decision',
+        }));
+    }
+    if (onBojWindow && bojItems.length === 0 && bojMeetingResultTitles.length === 0) {
+        fallbackPromises.push(fetchRssNewsFallback({
+            categories: ['central-bank'],
+            keywords: 'Bank of Japan BOJ rate decision',
+        }));
+    }
+    if (nearestMacroEvent && macroItems.length === 0 && macroDataResultTitles.length === 0) {
+        fallbackPromises.push(fetchRssNewsFallback({
+            categories: ['macro'],
+            keywords:
+                nearestMacroEvent.type === 'NFP'
+                    ? 'nonfarm payrolls jobs'
+                    : nearestMacroEvent.type === 'CPI'
+                        ? 'CPI inflation'
+                        : 'PCE inflation',
+        }));
+    }
+    if (majorEarningsItems.length === 0 && majorEarningsResultTitles.length === 0 && recentlyReportedMajor.length > 0) {
+        fallbackPromises.push(fetchRssNewsFallback({
+            categories: ['us-equity'],
+            keywords: 'earnings results AI capex guidance',
+        }));
+    }
+
+    const fallbackResults = await Promise.allSettled(fallbackPromises);
+    const fallbackItems = fallbackResults.flatMap((result) => result.status === 'fulfilled' ? result.value : []);
+    if (fomcMeetingResultTitles.length === 0) {
+        fomcMeetingResultTitles = compactHeadlineList(fallbackItems, isFomcDecisionHeadline);
+    }
+    if (bojMeetingResultTitles.length === 0) {
+        bojMeetingResultTitles = compactHeadlineList(fallbackItems, isBojDecisionHeadline);
+    }
+    if (macroDataResultTitles.length === 0 && nearestMacroEvent) {
+        macroDataResultTitles = compactHeadlineList(fallbackItems, (title) => isMacroDataHeadline(title, nearestMacroEvent.type));
+    }
+    if (majorEarningsResultTitles.length === 0) {
+        majorEarningsResultTitles = compactHeadlineList(fallbackItems, isMajorEarningsResultHeadline);
+    }
+
+    if (fallbackPromises.length > 0) {
+        console.log('[daily-pitch] RSS fallback fired:', JSON.stringify({
+            fallbackCalls: fallbackPromises.length,
+            fallbackItemCount: fallbackItems.length,
+            bucketsFilled: {
+                fomc: fomcMeetingResultTitles.length,
+                boj: bojMeetingResultTitles.length,
+                macro: macroDataResultTitles.length,
+                earnings: majorEarningsResultTitles.length,
+            },
+        }));
+    }
+
     if (recentlyReportedMajor.length >= 1 && majorEarningsResultTitles.length === 0) {
         majorEarningsResultTitles.push(`${recentlyReportedMajor.join('、')}已发布财报，AI云和广告收入进入结果验证`);
     }
-    const fomcMeetingResultTitles = compactHeadlineList(fomcItems, isFomcDecisionHeadline);
     if (onFomcWindow && fomcMeetingResultTitles.length === 0) {
         fomcMeetingResultTitles.push('美联储本次会议利率决议已公布，市场关注声明措辞与点阵图变化');
     }
 
-    const bojMeetingResultTitles = compactHeadlineList(bojItems, isBojDecisionHeadline);
     if (onBojWindow && bojMeetingResultTitles.length === 0) {
         bojMeetingResultTitles.push('日本央行本次会议利率决议已公布，市场关注加息路径与汇率信号');
     }
 
-    const macroDataResultTitles = nearestMacroEvent
-        ? compactHeadlineList(macroItems, (title) => isMacroDataHeadline(title, nearestMacroEvent.type))
-        : [];
     if (nearestMacroEvent && macroDataResultTitles.length === 0) {
         const macroLabel = nearestMacroEvent.type === 'NFP' ? '非农就业数据' : nearestMacroEvent.type === 'CPI' ? 'CPI通胀数据' : 'PCE核心通胀数据';
         macroDataResultTitles.push(`美国${macroLabel}已公布，市场评估对美联储政策路径的影响`);
