@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import axios from 'axios';
 
 import { pool } from '../db/client';
+import { ensureDrawdownAttributionDecisionsTable } from '../db/queries/ideas';
 
 dotenv.config();
 
@@ -247,6 +248,13 @@ async function main(): Promise<void> {
     if (!botToken || !chatId) {
         throw new Error('TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required');
     }
+
+    // Ensure table exists before querying. The table is normally created lazily by
+    // recordDrawdownAttributionDecision() when the first episode is attributed in
+    // production, but if the cron fires before any attribution has run (e.g. fresh
+    // deploy or low-traffic window), the SELECT below would crash with "relation
+    // does not exist". Idempotent — CREATE TABLE IF NOT EXISTS is a noop after first run.
+    await ensureDrawdownAttributionDecisionsTable();
 
     const metrics = await fetchHealthMetrics();
     const issues = evaluateAlerts(metrics);
