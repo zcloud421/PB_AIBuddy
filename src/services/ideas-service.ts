@@ -34,6 +34,7 @@ import {
     getUpcomingEarningsBySymbol,
     getUnderlyingBySymbol,
     mapTodayIdeasResponse,
+    recordDrawdownAttributionDecision,
     saveIdeaCandidate,
     updateIdeaCandidateNarrative,
     saveRiskFlags,
@@ -127,7 +128,7 @@ const DRAWDOWN_ATTRIBUTION_TIMEOUT_MS = 1500;
 const DRAWDOWN_ATTRIBUTION_WARM_TIMEOUT_MS = 3200;
 const DRAWDOWN_NEWS_ENRICH_TIMEOUT_MS = 900;
 const DRAWDOWN_NEWS_ENRICH_WARM_TIMEOUT_MS = 2800;
-const DRAWDOWN_LLM_ENRICH_TIMEOUT_MS = 450;
+const DRAWDOWN_LLM_ENRICH_TIMEOUT_MS = 3000;
 const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
 const DRAWDOWN_PREWARM_COOLDOWN_MS = 30 * 60 * 1000;
@@ -264,6 +265,33 @@ interface StructuredAttributionReason {
     reason_zh: string;
     primary_rule_id: string | null;
     background_rule_id: string | null;
+}
+
+interface AttributionBuckets {
+    fundamental: number;
+    valuation: number;
+    macro: number;
+    positioning: number;
+    idiosyncratic: number;
+}
+
+interface LlmAttributionResult {
+    reason_zh: string;
+    buckets: AttributionBuckets;
+    confidence: number;
+}
+
+interface DrawdownMarketStructureFeatures {
+    real_rate_change_bps: number | null;
+    sector_drawdown_pct: number | null;
+    sector_etf_code: string | null;
+    sector_relative_pct: number | null;
+    peer_avg_drawdown_pct: number | null;
+    peer_sync_ratio: number | null;
+    market_drawdown_pct: number | null;
+    vix_change: number | null;
+    duration_days: number;
+    drawdown_velocity: number | null;
 }
 
 const CHINA_TECH_ATTRIBUTION_SYMBOLS = new Set([
@@ -6466,7 +6494,7 @@ async function detectPeerSync(
     peakDate: string,
     troughDate: string,
     episodeDrawdownPct: number
-): Promise<{ hasPeerSync: boolean; syncedPeerCount: number; totalPeers: number }> {
+): Promise<{ hasPeerSync: boolean; syncedPeerCount: number; totalPeers: number; avgPeerDrawdownPct?: number }> {
     void episodeDrawdownPct;
     const peers = PEER_SYNC_GROUPS[symbol.toUpperCase()];
     if (!peers || peers.length === 0) {
@@ -6489,6 +6517,7 @@ async function detectPeerSync(
     );
 
     let syncedCount = 0;
+    const peerDrawdowns: number[] = [];
     for (const { history } of peerHistories) {
         if (history.length === 0) {
             continue;
@@ -6503,6 +6532,7 @@ async function detectPeerSync(
         }
 
         const peerDrawdown = (troughClose - peakClose) / peakClose;
+        peerDrawdowns.push(peerDrawdown * 100);
         if (peerDrawdown <= -PEER_SYNC_MIN_DRAWDOWN) {
             syncedCount += 1;
         }
@@ -6511,7 +6541,11 @@ async function detectPeerSync(
     return {
         hasPeerSync: peers.length > 0 && syncedCount / peers.length >= PEER_SYNC_THRESHOLD,
         syncedPeerCount: syncedCount,
-        totalPeers: peers.length
+        totalPeers: peers.length,
+        avgPeerDrawdownPct:
+            peerDrawdowns.length > 0
+                ? Number((peerDrawdowns.reduce((sum, value) => sum + value, 0) / peerDrawdowns.length).toFixed(1))
+                : undefined
     };
 }
 
@@ -6528,6 +6562,132 @@ function buildHistoricalNewsWindow(peakDate: string, troughDate: string): { from
     return {
         from: from.toISOString().slice(0, 10),
         to: to.toISOString().slice(0, 10)
+    };
+}
+
+function sectorEtfForArchetype(archetype: AttributionBusinessArchetype | null): string | null {
+    if (!archetype) {
+        return null;
+    }
+
+    const mapping: Partial<Record<AttributionBusinessArchetype, string>> = {
+        'enterprise-software': 'XLK',
+        'cloud-platform': 'XLK',
+        'ad-platform-internet': 'XLC',
+        'large-pharma': 'XLV',
+        'large-biotech': 'XLV',
+        'managed-care': 'XLV',
+        'memory': 'SOXX',
+        'foundry': 'SOXX',
+        'analog-chip': 'SOXX',
+        'chip-equipment': 'SOXX',
+        'broad-semiconductor': 'SOXX',
+        'ai-infrastructure': 'SOXX',
+        'consumer-brand': 'XLY',
+        'home-improvement-retail': 'XLY',
+        'restaurant-franchise': 'XLY',
+        'ev-oem': 'XLY',
+        'china-ecommerce-platform': 'KWEB',
+        'china-search-ai-platform': 'KWEB',
+        'china-online-gaming': 'KWEB',
+        'china-content-platform': 'KWEB',
+        'china-music-platform': 'KWEB',
+        'china-property-platform': 'KWEB',
+        'china-value-retail': 'KWEB',
+        'integrated-oil-major': 'XLE',
+        'exploration-production': 'XLE',
+        'oil-services': 'XLE',
+        'money-center-bank': 'XLF',
+        'investment-bank-broker': 'XLF',
+        'global-bank': 'XLF',
+        'fintech-payments': 'XLF',
+        'industrial-machinery': 'XLI',
+        aerospace: 'XLI',
+        airline: 'XLI',
+        'diversified-industrial': 'XLI',
+        'metals-mining': 'XLB',
+        'chemicals-materials': 'XLB',
+        'gold-miner': 'GDX',
+        'gold-etf': 'GLD'
+    };
+
+    return mapping[archetype] ?? null;
+}
+
+function findCloseOnOrAfter(
+    history: Array<{ date: string; close: number }>,
+    startDate: string,
+    endDate: string
+): number | null {
+    const point = history.find((row) => row.date >= startDate && row.date <= endDate);
+    return toFiniteNumber(point?.close);
+}
+
+function calculateWindowChangePct(
+    history: Array<{ date: string; close: number }>,
+    peakDate: string,
+    troughDate: string
+): number | null {
+    const start = findCloseOnOrAfter(history, shiftDate(peakDate, -3), shiftDate(peakDate, 5));
+    const end = findCloseOnOrAfter(history, peakDate, shiftDate(troughDate, 5));
+    if (start === null || end === null || start <= 0) {
+        return null;
+    }
+
+    return Number((((end - start) / start) * 100).toFixed(1));
+}
+
+async function fetchWindowChangePct(
+    fetcher: MassiveDataFetcher,
+    ticker: string,
+    peakDate: string,
+    troughDate: string
+): Promise<number | null> {
+    try {
+        const lookbackDays = Math.max(365, daysBetweenIsoDates(peakDate, todayIsoDate()) + 45);
+        const history = await fetcher.fetchPriceHistory(ticker, lookbackDays);
+        return calculateWindowChangePct(history, peakDate, troughDate);
+    } catch {
+        return null;
+    }
+}
+
+async function buildDrawdownMarketStructureFeatures(
+    symbol: string,
+    peakDate: string,
+    troughDate: string,
+    peerSync: { hasPeerSync: boolean; syncedPeerCount: number; totalPeers: number; avgPeerDrawdownPct?: number },
+    archetype: AttributionBusinessArchetype | null,
+    stockDrawdownPct: number,
+    drawdownVelocity: number | null
+): Promise<DrawdownMarketStructureFeatures> {
+    void symbol;
+    const fetcher = new MassiveDataFetcher();
+    const sectorEtf = sectorEtfForArchetype(archetype);
+    const durationDays = Math.max(1, daysBetweenIsoDates(peakDate, troughDate));
+
+    const [tnxChange, marketDrawdown, sectorDrawdown, vixChange] = await Promise.all([
+        fetchWindowChangePct(fetcher, 'I:TNX', peakDate, troughDate)
+            .then((value) => (value === null ? null : Number((value * 10).toFixed(1))))
+            .catch(() => null),
+        fetchWindowChangePct(fetcher, 'I:SPX', peakDate, troughDate).catch(() => null),
+        sectorEtf ? fetchWindowChangePct(fetcher, sectorEtf, peakDate, troughDate).catch(() => null) : Promise.resolve(null),
+        fetchWindowChangePct(fetcher, 'I:VIX', peakDate, troughDate).catch(() => null)
+    ]);
+
+    return {
+        real_rate_change_bps: tnxChange,
+        sector_drawdown_pct: sectorDrawdown,
+        sector_etf_code: sectorEtf,
+        sector_relative_pct:
+            sectorDrawdown === null ? null : Number((stockDrawdownPct - sectorDrawdown).toFixed(1)),
+        peer_avg_drawdown_pct: peerSync.avgPeerDrawdownPct ?? null,
+        peer_sync_ratio:
+            peerSync.totalPeers > 0 ? Number((peerSync.syncedPeerCount / peerSync.totalPeers).toFixed(2)) : null,
+        market_drawdown_pct: marketDrawdown,
+        vix_change: vixChange,
+        duration_days: durationDays,
+        drawdown_velocity: drawdownVelocity
     };
 }
 
@@ -7667,20 +7827,103 @@ function collectForbiddenMarkers(ruleIds: Array<string | null | undefined>): str
     return DRAWDOWN_ATTRIBUTION_RULES.filter((rule) => !allowedIds.has(rule.id)).flatMap((rule) => rule.markers ?? []);
 }
 
-function isRefinedReasonConsistent(
-    refinedReason: string,
-    reason: StructuredAttributionReason
+const ATTRIBUTION_TOKEN_STOPWORDS = new Set([
+    '公司', '市场', '回撤', '股价', '业务', '预期', '风险', 'the', 'and', 'for', 'with', 'from', 'that', 'this', 'are', 'was', 'were', 'into', 'after', 'before', 'stock', 'stocks', 'market'
+]);
+
+function extractSignificantTokens(title: string): string[] {
+    const tokens = new Set<string>();
+    for (const match of title.matchAll(/[\u4e00-\u9fff]{2,}/g)) {
+        const token = match[0];
+        if (!ATTRIBUTION_TOKEN_STOPWORDS.has(token)) {
+            tokens.add(token);
+        }
+    }
+    for (const match of title.matchAll(/[A-Za-z][A-Za-z0-9&.-]{2,}/g)) {
+        const token = match[0];
+        const normalized = token.toLowerCase();
+        if (!ATTRIBUTION_TOKEN_STOPWORDS.has(normalized)) {
+            tokens.add(token);
+        }
+    }
+    return [...tokens].slice(0, 16);
+}
+
+function normalizeAttributionBuckets(value: unknown): AttributionBuckets | null {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+
+    const record = value as Record<keyof AttributionBuckets, unknown>;
+    const buckets: AttributionBuckets = {
+        fundamental: Number(record.fundamental ?? 0),
+        valuation: Number(record.valuation ?? 0),
+        macro: Number(record.macro ?? 0),
+        positioning: Number(record.positioning ?? 0),
+        idiosyncratic: Number(record.idiosyncratic ?? 0)
+    };
+
+    if (Object.values(buckets).some((item) => !Number.isFinite(item) || item < 0)) {
+        return null;
+    }
+
+    return buckets;
+}
+
+function heuristicBuckets(reason: StructuredAttributionReason): AttributionBuckets {
+    switch (reason.primary_driver_type) {
+        case 'macro':
+        case 'policy':
+        case 'geopolitical':
+            return { fundamental: 5, valuation: 10, macro: 70, positioning: 10, idiosyncratic: 5 };
+        case 'sector':
+            return { fundamental: 30, valuation: 20, macro: 15, positioning: 30, idiosyncratic: 5 };
+        case 'company':
+            return { fundamental: 60, valuation: 10, macro: 5, positioning: 5, idiosyncratic: 20 };
+        case 'mixed':
+            return { fundamental: 30, valuation: 20, macro: 20, positioning: 20, idiosyncratic: 10 };
+        default:
+            return { fundamental: 40, valuation: 20, macro: 15, positioning: 15, idiosyncratic: 10 };
+    }
+}
+
+function isRuleHintId(ruleId: string | null | undefined): ruleId is string {
+    return Boolean(ruleId && !ruleId.startsWith('fallback:'));
+}
+
+function isRefinedReasonAcceptable(
+    refinedResult: LlmAttributionResult,
+    reason: StructuredAttributionReason,
+    newsTitles: string[]
 ): boolean {
-    if (!refinedReason || refinedReason.length > 80) {
+    if (!refinedResult.reason_zh || refinedResult.reason_zh.length > 80) {
         return false;
     }
 
-    const allowedMarkers = collectRuleMarkers([reason.primary_rule_id, reason.background_rule_id]);
-    const forbiddenMarkers = collectForbiddenMarkers([reason.primary_rule_id, reason.background_rule_id]);
-    const hasAllowedMarker = allowedMarkers.length === 0 || allowedMarkers.some((marker) => refinedReason.includes(marker));
-    const hasForbiddenMarker = forbiddenMarkers.some((marker) => refinedReason.includes(marker));
+    if (!Number.isFinite(refinedResult.confidence) || refinedResult.confidence < 0.5) {
+        return false;
+    }
 
-    return hasAllowedMarker && !hasForbiddenMarker;
+    if (newsTitles.length >= 1) {
+        const reasonHasNewsAnchor = newsTitles.some((title) =>
+            extractSignificantTokens(title).some((token) => refinedResult.reason_zh.includes(token))
+        );
+        const hasNumberAnchor = /\d+(\.\d+)?\s*(bps|%|个百分点|倍)/i.test(refinedResult.reason_zh);
+        if (!reasonHasNewsAnchor && !hasNumberAnchor) {
+            return false;
+        }
+    }
+
+    if (isRuleHintId(reason.primary_rule_id)) {
+        const forbiddenMarkers = collectForbiddenMarkers([reason.primary_rule_id, reason.background_rule_id]);
+        const hasForbiddenMarker = forbiddenMarkers.some((marker) => refinedResult.reason_zh.includes(marker));
+        if (hasForbiddenMarker) {
+            return false;
+        }
+    }
+
+    const bucketSum = Object.values(refinedResult.buckets).reduce((sum, value) => sum + value, 0);
+    return bucketSum >= 80 && bucketSum <= 120;
 }
 
 async function refineDrawdownAttributionsWithLLM(input: {
@@ -7695,47 +7938,88 @@ async function refineDrawdownAttributionsWithLLM(input: {
         primary_driver: string | null;
         secondary_driver: string | null;
         heuristic_reason: string;
+        rule_hint_id: string | null;
         allowed_markers: string[];
         news_titles: string[];
         news_count: number;
+        market_structure: DrawdownMarketStructureFeatures | null;
     }>;
-}): Promise<Map<string, string>> {
+}): Promise<Map<string, LlmAttributionResult>> {
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey || input.items.length === 0) {
         return new Map();
     }
 
     const prompt = `
-你是香港私人银行 IC，正在为个股历史回撤分析撰写归因短句。
+你是香港私人银行 IC，正在对个股回撤事件做 institutional-style 归因分析。
 
-目标：
-- 对每段回撤给出 1 句中文主因归因
-- reason_zh 严格控制在 30–50 个中文字符以内
-- 最多两个分句，只允许一层因果链
-- 禁止出现"最终使……被下修"、"进而导致……估值被系统性调整"等三层递进结构
-- 不要写成长段分析，不要给投资建议
+【你的任务】
+对每段回撤，做两件事：
+1. 把驱动力分解到 5 个标准桶（fundamental / valuation / macro / positioning / idiosyncratic），输出每个桶的权重（0–100，总和 ≈ 100）
+2. 写一句 30–50 字的中文综合归因 reason_zh，说明这次回撤"主要由什么驱动 + 关键传导"
 
-归因策略（按 news_count 优先级执行）：
-1. news_count ≥ 2：以 news_titles 中出现的事件为主因依据；heuristic 仅提供制度背景参考，不约束主因表述。从新闻标题中提取最显著的具体事件作为 reason_zh 的核心。
-2. news_count < 2：直接压缩改写 heuristic_reason，不扩展
-3. 任何情况下：reason_zh 中引用的事件名称、政策名称、公司事件 必须出现在 news_titles 或 heuristic_reason 之一中，不得凭空引入训练数据中的知识
-4. background_regime 提供宏观制度背景；除非 news_titles 与其明显矛盾，否则可保留作前置语境
+【5 桶定义】
+- fundamental：交付/财报不及预期、需求放缓、利润率压缩、产品周期下行
+- valuation：估值倍数压缩、增长 → 周期股 re-rating、未盈利公司贴现率敏感
+- macro：实际利率上行、ERP 上升、政策路径变化、美元/汇率冲击
+- positioning：拥挤多头解仓、factor rotation、同业共振抛售、流动性事件
+- idiosyncratic：管理层/品牌/监管/M&A 等一次性事件
 
-特殊规则：
-- 若 primary_driver_type 为 'company' 且 heuristic 包含 'AI预期落差' 或 'sentiment'：
-  应写"市场从X预期切换至Y验证"的结构，禁止写成"AI投入回收放慢"或"AI拖累业绩"
-- 若 markers 包含 'archegos-forced-deleveraging'：
-  应明确写出"与公司经营无关"，禁止引入广告/AI/监管
+【判断依据 — 这是关键】
+- fundamental 高：news_titles 里出现财报/交付/利润率相关具体公司事件
+- valuation 高：real_rate_change_bps > 30bps 且 sector_relative_pct 接近 0（跌幅 ≈ 同业，主要是估值压缩不是基本面差）
+- macro 高：market_drawdown_pct 占 max_drawdown_pct 一半以上 + real_rate_change 显著
+- positioning 高：peer_sync_ratio > 0.6（同业一起跌）+ vix_change 显著 + 速度快（drawdown_velocity 高）
+- idiosyncratic 高：sector_relative_pct < -10%（独立跑输 sector 10%+）+ news_titles 里有公司层面突发事件
 
-个股：${normalizeIssuerName(input.symbol, input.companyName)}
+【reason_zh 写作规则】
+- 30–50 个中文字符，最多两个分句，一层因果链
+- 必须引用 news_titles 中真实出现的事件，或 market structure 里的具体数字（如"实际利率上行 35bps"、"同业 7/10 同跌"）
+- 不引用训练数据里的知识；不写空话
+- 不写"重新校准/进入验证/牵动/证伪点"等翻译腔
+- 1-2 句话，给 RM 在 30 秒内读懂"这次回撤本质是什么"
+
+【rule_hint 处理】
+- rule_hint 是历史 rule 系统的提示（hand-coded），可参考但不强制
+- 如果 news_titles + market_structure 显示与 rule_hint 不一致，按 news_titles 实际事件归因
+- 如果 rule_hint 为 null（rule 未命中），完全基于 news_titles + market_structure 自主归因
+
+【confidence 评估】
+- 如果 news_count = 0 且 market_structure 全 null：confidence = 0.3（系统会回滚到启发式）
+- news_count ≥ 2 + market_structure 至少 2 个数字：confidence ≥ 0.7
+- 5 桶权重应能解释 max_drawdown_pct 的方向；如果你自己也不确定主因，confidence < 0.5
+
+【输入】
+个股：${input.symbol} (${input.companyName ?? normalizeIssuerName(input.symbol, input.companyName)})
 回撤清单：
 ${input.items.map((item, index) => {
     const newsBlock = item.news_titles.length > 0 ? item.news_titles.map((title) => `- ${title}`).join('\n') : '- 无明确新闻标题';
-    return `${index + 1}. peak=${item.peak_date}, trough=${item.trough_date}, drawdown=${item.max_drawdown_pct.toFixed(1)}%, background=${item.background_regime ?? '无'}, primary_type=${item.primary_driver_type ?? 'unknown'}, primary=${item.primary_driver ?? '无'}, secondary=${item.secondary_driver ?? '无'}, heuristic=${item.heuristic_reason}, markers=${item.allowed_markers.join('/') || '无'}, news_count=${item.news_count}\n${newsBlock}`;
+    const market = item.market_structure;
+    return `${index + 1}. peak=${item.peak_date}, trough=${item.trough_date}, drawdown=${item.max_drawdown_pct.toFixed(1)}%, velocity=${market?.drawdown_velocity ?? 'N/A'}, duration=${market?.duration_days ?? 'N/A'}d
+   market_structure:
+     - real_rate_change: ${market?.real_rate_change_bps ?? 'N/A'} bps
+     - market (SPX) drawdown: ${market?.market_drawdown_pct ?? 'N/A'}%
+     - sector ETF drawdown: ${market?.sector_drawdown_pct ?? 'N/A'}% (${market?.sector_etf_code ?? 'N/A'})
+     - sector_relative: ${market?.sector_relative_pct ?? 'N/A'}% (negative = underperformed sector)
+     - peer_sync: ${item.market_structure?.peer_sync_ratio !== null && item.market_structure?.peer_sync_ratio !== undefined ? `${Math.round((item.market_structure.peer_sync_ratio ?? 0) * 100)}%` : 'N/A'}, peer_avg_dd=${market?.peer_avg_drawdown_pct ?? 'N/A'}%
+     - vix_change: ${market?.vix_change ?? 'N/A'}
+   rule_hint: ${item.heuristic_reason ?? 'NONE'} (rule_id: ${item.rule_hint_id ?? 'NONE'})
+   news_titles (${item.news_count}):
+${newsBlock}`;
 }).join('\n\n')}
 
-请返回纯 JSON 数组：
-[{"peak_date":"...","trough_date":"...","reason_zh":"..."}]
+【输出】严格 JSON：
+{
+  "items": [
+    {
+      "peak_date": "...",
+      "trough_date": "...",
+      "reason_zh": "30-50字中文",
+      "buckets": { "fundamental": 0, "valuation": 0, "macro": 0, "positioning": 0, "idiosyncratic": 0 },
+      "confidence": 0.0
+    }
+  ]
+}
 `.trim();
 
     try {
@@ -7748,7 +8032,8 @@ ${input.items.map((item, index) => {
             body: JSON.stringify({
                 model: 'deepseek-chat',
                 messages: [{ role: 'user', content: prompt }],
-                temperature: 0.2,
+                temperature: 0.4,
+                max_tokens: 2000,
                 response_format: { type: 'json_object' }
             })
         });
@@ -7765,15 +8050,21 @@ ${input.items.map((item, index) => {
             return new Map();
         }
 
-        const parsed = JSON.parse(raw) as { items?: Array<{ peak_date?: string; trough_date?: string; reason_zh?: string }> } | Array<{ peak_date?: string; trough_date?: string; reason_zh?: string }>;
+        const parsed = JSON.parse(raw) as { items?: Array<{ peak_date?: string; trough_date?: string; reason_zh?: string; buckets?: unknown; confidence?: number }> };
         const items = Array.isArray(parsed) ? parsed : Array.isArray(parsed.items) ? parsed.items : [];
-        const map = new Map<string, string>();
+        const map = new Map<string, LlmAttributionResult>();
         for (const item of items) {
             const peak = item.peak_date?.trim();
             const trough = item.trough_date?.trim();
             const reason = item.reason_zh?.trim();
-            if (peak && trough && reason) {
-                map.set(`${peak}::${trough}`, reason);
+            const buckets = normalizeAttributionBuckets(item.buckets);
+            const confidence = Number(item.confidence);
+            if (peak && trough && reason && buckets && Number.isFinite(confidence)) {
+                map.set(`${peak}::${trough}`, {
+                    reason_zh: reason,
+                    buckets,
+                    confidence
+                });
             }
         }
         return map;
@@ -7786,16 +8077,19 @@ function mapDrawdownAttributionRows(
     rows: Array<{
         episode: ReturnType<typeof buildInteractiveDrawdownEpisodesForAttribution>[number];
         heuristicReason: StructuredAttributionReason;
+        newsItems: NewsItem[];
+        marketStructure: DrawdownMarketStructureFeatures | null;
     }>,
-    llmReasons = new Map<string, string>()
+    llmReasons = new Map<string, LlmAttributionResult>()
 ): DrawdownAttribution[] {
     return rows
-        .map(({ episode, heuristicReason }) => {
-            const llmReason = llmReasons.get(`${episode.peak_date}::${episode.trough_date}`);
-            const reason_zh =
-                llmReason && isRefinedReasonConsistent(llmReason, heuristicReason)
-                    ? llmReason
-                    : heuristicReason.reason_zh;
+        .map(({ episode, heuristicReason, newsItems, marketStructure }) => {
+            const llmResult = llmReasons.get(`${episode.peak_date}::${episode.trough_date}`);
+            const acceptedLlm =
+                llmResult && isRefinedReasonAcceptable(llmResult, heuristicReason, newsItems.map((news) => news.title));
+            const buckets = acceptedLlm ? llmResult.buckets : heuristicBuckets(heuristicReason);
+            const confidence = acceptedLlm ? llmResult.confidence : 0.4;
+            const reason_zh = acceptedLlm ? llmResult.reason_zh : heuristicReason.reason_zh;
 
             return {
                 ...episode,
@@ -7811,7 +8105,16 @@ function mapDrawdownAttributionRows(
                 primary_driver: heuristicReason.primary_driver,
                 secondary_driver: heuristicReason.secondary_driver,
                 primary_rule_id: heuristicReason.primary_rule_id,
-                reason_zh
+                reason_zh,
+                attribution_buckets: buckets,
+                attribution_confidence: confidence,
+                attribution_inputs_summary: {
+                    news_count: newsItems.length,
+                    has_real_rate_data: marketStructure?.real_rate_change_bps !== null && marketStructure?.real_rate_change_bps !== undefined,
+                    has_sector_relative_data: marketStructure?.sector_relative_pct !== null && marketStructure?.sector_relative_pct !== undefined,
+                    has_peer_sync_data: marketStructure?.peer_sync_ratio !== null && marketStructure?.peer_sync_ratio !== undefined,
+                    rule_hint_id: isRuleHintId(heuristicReason.primary_rule_id) ? heuristicReason.primary_rule_id : null
+                }
             };
         })
         .sort((left, right) => {
@@ -7882,16 +8185,31 @@ async function buildEnrichedDrawdownAttributions(
             return {
                 episode,
                 newsItems,
+                peerSync,
                 heuristicReason
             };
         })
+    );
+
+    const marketStructureByEpisode = await Promise.all(
+        newsByEpisode.map((item) =>
+            buildDrawdownMarketStructureFeatures(
+                symbol,
+                item.episode.peak_date,
+                item.episode.trough_date,
+                item.peerSync,
+                item.heuristicReason.business_archetype,
+                item.episode.max_drawdown_pct,
+                item.episode.drawdown_velocity ?? null
+            ).catch(() => null)
+        )
     );
 
     const llmReasons = await withSoftTimeout(
         refineDrawdownAttributionsWithLLM({
             symbol,
             companyName,
-            items: newsByEpisode.map((item) => ({
+            items: newsByEpisode.map((item, index) => ({
                 peak_date: item.episode.peak_date,
                 trough_date: item.episode.trough_date,
                 max_drawdown_pct: item.episode.max_drawdown_pct,
@@ -7900,22 +8218,47 @@ async function buildEnrichedDrawdownAttributions(
                 primary_driver: item.heuristicReason.primary_driver,
                 secondary_driver: item.heuristicReason.secondary_driver,
                 heuristic_reason: item.heuristicReason.reason_zh,
+                rule_hint_id: isRuleHintId(item.heuristicReason.primary_rule_id)
+                    ? item.heuristicReason.primary_rule_id
+                    : null,
                 allowed_markers: collectRuleMarkers([
                     item.heuristicReason.primary_rule_id,
                     item.heuristicReason.background_rule_id
                 ]),
                 news_titles: item.newsItems.map((news) => news.title),
-                news_count: item.newsItems.length
+                news_count: item.newsItems.length,
+                market_structure: marketStructureByEpisode[index]
             }))
         }),
-        new Map<string, string>(),
+        new Map<string, LlmAttributionResult>(),
         DRAWDOWN_LLM_ENRICH_TIMEOUT_MS
     );
 
+    for (const [index, item] of newsByEpisode.entries()) {
+        const key = `${item.episode.peak_date}::${item.episode.trough_date}`;
+        const llmResult = llmReasons.get(key);
+        const llmAccepted = llmResult
+            ? isRefinedReasonAcceptable(llmResult, item.heuristicReason, item.newsItems.map((news) => news.title))
+            : false;
+        const finalReason = llmAccepted ? llmResult?.reason_zh : item.heuristicReason.reason_zh;
+        void recordDrawdownAttributionDecision(symbol.toUpperCase(), item.episode.peak_date, item.episode.trough_date, {
+            rule_hint_id: isRuleHintId(item.heuristicReason.primary_rule_id) ? item.heuristicReason.primary_rule_id : null,
+            news_count: item.newsItems.length,
+            market_structure: marketStructureByEpisode[index],
+            llm_raw_output: llmResult ?? null,
+            llm_accepted: llmAccepted,
+            final_reason: finalReason,
+            buckets: llmAccepted && llmResult ? llmResult.buckets : heuristicBuckets(item.heuristicReason),
+            confidence: llmAccepted && llmResult ? llmResult.confidence : 0.4
+        }).catch(() => null);
+    }
+
     const value = mapDrawdownAttributionRows(
-        newsByEpisode.map(({ episode, heuristicReason }) => ({
+        newsByEpisode.map(({ episode, heuristicReason, newsItems }, index) => ({
             episode,
-            heuristicReason
+            heuristicReason,
+            newsItems,
+            marketStructure: marketStructureByEpisode[index]
         })),
         llmReasons
     );
@@ -7995,13 +8338,15 @@ async function buildDrawdownAttributions(
             );
             return {
                 episode,
+                newsItems: [],
                 heuristicReason: chooseHeuristicAttributionReason(
                     normalizedSymbol,
                     companyName,
                     episode,
                     [],
                     peerSync
-                )
+                ),
+                marketStructure: null
             };
         })
     );

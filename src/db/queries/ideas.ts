@@ -2030,6 +2030,39 @@ export async function ensureDrawdownAttributionsTable(): Promise<void> {
     `);
 }
 
+export async function ensureDrawdownAttributionDecisionsTable(): Promise<void> {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS drawdown_attribution_decisions (
+            id            BIGSERIAL PRIMARY KEY,
+            symbol        TEXT NOT NULL,
+            peak_date     DATE NOT NULL,
+            trough_date   DATE NOT NULL,
+            decision_json JSONB NOT NULL,
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    `);
+    await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_drawdown_attribution_decisions_symbol_dates
+        ON drawdown_attribution_decisions (symbol, peak_date DESC, trough_date DESC)
+    `);
+}
+
+export async function recordDrawdownAttributionDecision(
+    symbol: string,
+    peakDate: string,
+    troughDate: string,
+    decision: object
+): Promise<void> {
+    await ensureDrawdownAttributionDecisionsTable();
+    await pool.query(
+        `
+        INSERT INTO drawdown_attribution_decisions (symbol, peak_date, trough_date, decision_json)
+        VALUES ($1, $2::date, $3::date, $4::jsonb)
+        `,
+        [symbol, peakDate, troughDate, JSON.stringify(decision)]
+    );
+}
+
 export async function upsertDrawdownAttributions(
     symbol: string,
     dataDate: string,

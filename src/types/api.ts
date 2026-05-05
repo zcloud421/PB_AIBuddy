@@ -457,6 +457,21 @@ export interface DrawdownAttribution {
     primary_driver?: string | null;
     secondary_driver?: string | null;
     reason_zh: string | null;
+    attribution_buckets?: {
+        fundamental: number;
+        valuation: number;
+        macro: number;
+        positioning: number;
+        idiosyncratic: number;
+    } | null;
+    attribution_confidence?: number | null;
+    attribution_inputs_summary?: {
+        news_count: number;
+        has_real_rate_data: boolean;
+        has_sector_relative_data: boolean;
+        has_peer_sync_data: boolean;
+        rule_hint_id: string | null;
+    } | null;
 }
 
 export interface TailRiskStats {
