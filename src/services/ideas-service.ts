@@ -7,6 +7,7 @@ import {
     buildPostEarningsShockFlag,
     checkEligibility,
     getStrikeSelectionConfig,
+    hasObservedPostEarningsPrint,
     shouldPreferTenorCandidate,
     scoreAndGrade,
     type DataFetcherInterface,
@@ -4481,6 +4482,7 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             effectiveDaysToEarnings !== null &&
             effectiveDaysToEarnings >= 0 &&
             effectiveDaysToEarnings <= 3 &&
+            !hasObservedPostEarningsPrint(extendedTradeContext?.movePct ?? null) &&
             !cachedFlags.some((flag) => flag.type === 'EARNINGS_PROXIMITY')
                 ? {
                       type: 'EARNINGS_PROXIMITY' as const,
@@ -4518,7 +4520,8 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             recommendedStrike: toNullableNumber(cachedRow.recommended_strike),
             estimatedCouponRange: formatEstimatedCouponRange(cachedRow.ref_coupon_pct),
             tenorDays: cachedRow.recommended_tenor_days,
-            sentimentScore: toNullableNumber(cachedRow.sentiment_score)
+            sentimentScore: toNullableNumber(cachedRow.sentiment_score),
+            extendedMovePct: extendedTradeContext?.movePct ?? null
         });
 
         if (
@@ -4774,7 +4777,8 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
             daysToEarnings: symbolData.days_to_earnings ?? null,
             hasRecentEarnings: newsContext.hasRecentEarnings,
             earningsWeight: newsContext.earningsWeight,
-            daysSinceEarnings: newsContext.daysSinceEarnings
+            daysSinceEarnings: newsContext.daysSinceEarnings,
+            extendedMovePct: symbolData.extended_move_pct ?? null
         });
 
         if (runId && shouldPersist) {
@@ -4948,6 +4952,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
     const approvedTenors = approveTenors(symbolData, chainData);
     if (approvedTenors.length === 0) {
         const daysToEarnings = symbolData.days_to_earnings ?? null;
+        const earningsAlreadyReported = hasObservedPostEarningsPrint(symbolData.extended_move_pct);
         const postEarningsShockFlag = buildPostEarningsShockFlag({
             hasRecentEarnings: newsContext.hasRecentEarnings,
             daysSinceEarnings: newsContext.daysSinceEarnings,
@@ -4957,7 +4962,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
         const flags: Flag[] = [
             ...eligibility.flags,
             ...(postEarningsShockFlag ? [postEarningsShockFlag] : []),
-            ...(daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 14
+            ...(daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 14 && !earningsAlreadyReported
                 ? [
                     {
                         type: 'EARNINGS_PROXIMITY' as const,
@@ -4973,7 +4978,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 type: 'NO_APPROVED_TENOR' as const,
                 severity: 'WARN' as const,
                 message:
-                    daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 14
+                    daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 14 && !earningsAlreadyReported
                         ? 'No tenor windows passed because the earnings event falls inside the FCN tenor window'
                         : 'No tenor windows passed earnings and richness checks'
             }
@@ -4985,11 +4990,11 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
             scoring: {
                 symbol,
                 overall_grade:
-                    postEarningsShockFlag || (daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3)
+                    postEarningsShockFlag || (daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3 && !earningsAlreadyReported)
                         ? 'AVOID'
                         : 'CAUTION',
                 composite_score:
-                    postEarningsShockFlag || (daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3)
+                    postEarningsShockFlag || (daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3 && !earningsAlreadyReported)
                         ? 0.2
                         : 0.35,
                 risk_reward_score: null,
@@ -4997,7 +5002,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 trend_score: 0,
                 skew_score: 0,
                 event_risk_score:
-                    postEarningsShockFlag || (daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3)
+                    postEarningsShockFlag || (daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3 && !earningsAlreadyReported)
                         ? 0.1
                         : 0.4,
                 premium_score: null,
@@ -5168,7 +5173,9 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
         (flag) => flag.type === 'BEARISH_STRUCTURE' || flag.type === 'LOWER_HIGH_RISK'
     );
     const isHardAvoid =
-        ((symbolData.days_to_earnings ?? null) !== null && (symbolData.days_to_earnings ?? 99) <= 3) ||
+        ((symbolData.days_to_earnings ?? null) !== null &&
+            (symbolData.days_to_earnings ?? 99) <= 3 &&
+            !hasObservedPostEarningsPrint(symbolData.extended_move_pct)) ||
         bestChoice.strikeData.open_interest < 100 ||
         ((bestChoice.scoring.ref_coupon_pct ?? Number.POSITIVE_INFINITY) < 6) ||
         (
@@ -5909,7 +5916,15 @@ function hasActionableCaution(flags: Flag[]): boolean {
     return flags.some((flag) => flag.type === 'ACTIONABLE_CAUTION' || flag.type === 'QUALITY_DIP_EXCEPTION');
 }
 
-function hasEarningsWaitContext(flags: Flag[], daysToEarnings: number | null): boolean {
+function hasEarningsWaitContext(
+    flags: Flag[],
+    daysToEarnings: number | null,
+    extendedMovePct: number | null | undefined = null
+): boolean {
+    if (hasObservedPostEarningsPrint(extendedMovePct)) {
+        return false;
+    }
+
     return (
         flags.some((flag) => flag.type === 'EARNINGS_PROXIMITY') ||
         (daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3)
@@ -5941,8 +5956,9 @@ function normalizeEarningsWaitNarrative(input: {
     estimatedCouponRange: string | null;
     tenorDays: number | null;
     sentimentScore: number | null;
+    extendedMovePct?: number | null;
 }): NarrativeOutput | null {
-    if (!hasEarningsWaitContext(input.flags, input.daysToEarnings)) {
+    if (!hasEarningsWaitContext(input.flags, input.daysToEarnings, input.extendedMovePct)) {
         return input.narrative;
     }
 
@@ -6040,6 +6056,7 @@ async function refreshNarrativeInBackground(
         hasRecentEarnings: newsContext.hasRecentEarnings,
         earningsWeight: newsContext.earningsWeight,
         daysSinceEarnings: newsContext.daysSinceEarnings,
+        extendedMovePct: null,
         activeAttributionRules
     });
 
@@ -6068,6 +6085,7 @@ async function buildNarrative(input: {
     hasRecentEarnings: boolean;
     earningsWeight: number;
     daysSinceEarnings: number | null;
+    extendedMovePct?: number | null;
     activeAttributionRules?: Array<{
         id: string;
         reason_zh: string;
@@ -6082,7 +6100,7 @@ async function buildNarrative(input: {
         input.tenorDays === null ||
         input.tenorDays <= 0
     ) {
-        if (hasEarningsWaitContext(input.flags, input.daysToEarnings)) {
+        if (hasEarningsWaitContext(input.flags, input.daysToEarnings, input.extendedMovePct)) {
             return buildEarningsWaitNarrative(input.symbol, input.companyName, null, null);
         }
 
@@ -8979,7 +8997,8 @@ async function mapDailyBestCard(
               impliedVolatility: parseNullableNumber(idea.selected_implied_volatility ?? null),
               flags: flagsBySymbol.get(symbol) ?? [],
               tenorDays: recommendedTenorDays,
-              daysToEarnings: null
+              daysToEarnings: null,
+              extendedMovePct: null
           });
 
     return {

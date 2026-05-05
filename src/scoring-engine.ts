@@ -567,6 +567,25 @@ function daysUntil(dateString?: string | null): number | null {
     return Math.ceil(diff / DAY_IN_MS);
 }
 
+/**
+ * Detects whether earnings have already been reported based on observable
+ * post-market price action. When extended_move_pct is non-null and at least
+ * 1% in absolute value, we treat the earnings event as already passed even
+ * if the calendar still shows days_to_earnings <= 3. This handles the common
+ * case where vendors record "after market close" earnings under the next
+ * trading day's date.
+ */
+const POST_EARNINGS_PRINT_MOVE_THRESHOLD = 1.0;
+
+export function hasObservedPostEarningsPrint(extendedMovePct: number | null | undefined): boolean {
+    return (
+        extendedMovePct !== null &&
+        extendedMovePct !== undefined &&
+        Number.isFinite(extendedMovePct) &&
+        Math.abs(extendedMovePct) >= POST_EARNINGS_PRINT_MOVE_THRESHOLD
+    );
+}
+
 function uniqueExpiryDates(chainData: ChainData): string[] {
     return [...new Set(chainData.map((strike) => strike.expiry_date))];
 }
@@ -741,6 +760,7 @@ export function checkEligibility(symbolData: SymbolData): { eligible: boolean; f
 
 export function approveTenors(symbolData: SymbolData, chainData: ChainData): TenorWindow[] {
     const earningsInDays = daysUntil(symbolData.earnings_date);
+    const earningsAlreadyReported = hasObservedPostEarningsPrint(symbolData.extended_move_pct);
     const windows: TenorWindow[] = [];
 
     for (const expiryDate of uniqueExpiryDates(chainData)) {
@@ -751,7 +771,13 @@ export function approveTenors(symbolData: SymbolData, chainData: ChainData): Ten
             continue;
         }
 
-        if (earningsInDays !== null && earningsInDays >= 0 && earningsInDays <= 3 && earningsInDays <= tenorDays) {
+        if (
+            earningsInDays !== null &&
+            earningsInDays >= 0 &&
+            earningsInDays <= 3 &&
+            earningsInDays <= tenorDays &&
+            !earningsAlreadyReported
+        ) {
             continue;
         }
 
@@ -864,14 +890,15 @@ export function scoreAndGrade(candidate: {
 
     let eventRiskScore = 1;
     const daysToEarnings = symbolData.days_to_earnings ?? null;
-    if (daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3) {
+    const earningsAlreadyReported = hasObservedPostEarningsPrint(symbolData.extended_move_pct);
+    if (daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3 && !earningsAlreadyReported) {
         eventRiskScore = 0.1;
         flags.push({
             type: 'EARNINGS_PROXIMITY',
             severity: 'WARN',
             message: `Earnings are due in ${daysToEarnings} day(s), near-term event risk is elevated`
         });
-    } else if (daysToEarnings !== null && daysToEarnings >= 4 && daysToEarnings <= 14) {
+    } else if (daysToEarnings !== null && daysToEarnings >= 4 && daysToEarnings <= 14 && !earningsAlreadyReported) {
         eventRiskScore = 0.4;
         flags.push({
             type: 'EARNINGS_PROXIMITY',
@@ -1364,6 +1391,7 @@ export async function runDailyScreener(
 
         if (approvedTenors.length === 0) {
             const daysToEarnings = symbolData.days_to_earnings ?? null;
+            const earningsAlreadyReported = hasObservedPostEarningsPrint(symbolData.extended_move_pct);
             const postEarningsShockFlag = buildPostEarningsShockFlag({
                 hasRecentEarnings: newsContext.hasRecentEarnings,
                 daysSinceEarnings: newsContext.daysSinceEarnings,
@@ -1373,7 +1401,7 @@ export async function runDailyScreener(
             const flags = [
                 ...eligibility.flags,
                 ...(postEarningsShockFlag ? [postEarningsShockFlag] : []),
-                ...(daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 14
+                ...(daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 14 && !earningsAlreadyReported
                     ? [
                           {
                               type: 'EARNINGS_PROXIMITY' as const,
@@ -1389,7 +1417,7 @@ export async function runDailyScreener(
                     type: 'NO_APPROVED_TENOR' as const,
                     severity: 'WARN' as const,
                     message:
-                        daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 14
+                        daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 14 && !earningsAlreadyReported
                             ? 'No tenor windows passed because the earnings event falls inside the FCN tenor window'
                             : 'No tenor windows passed earnings and richness checks'
                 }
