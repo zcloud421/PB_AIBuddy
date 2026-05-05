@@ -4615,6 +4615,46 @@ async function buildDailyPitchCandidateSection(
     ].join('\n\n');
 }
 
+function isNarrativeReversedByMarket(
+    marketSnapshot: ClientFocusMarketStateResponse | null,
+    config: {
+        codes: string[];
+        recentRallyMinPct?: number;
+        ytdRallyMinPct?: number;
+        recentSelloffMinPct?: number;
+        ytdSelloffMinPct?: number;
+    }
+): boolean {
+    const indices = marketSnapshot?.indices ?? [];
+    const items = config.codes
+        .map((code) => indices.find((item) => item.code === code))
+        .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+    if (items.length === 0) {
+        return false;
+    }
+
+    return items.some((item) => {
+        const change5d = item.change_5d_pct;
+        const changeYtd = item.change_ytd_pct;
+
+        if (config.recentRallyMinPct !== undefined && typeof change5d === 'number' && change5d >= config.recentRallyMinPct) {
+            return true;
+        }
+        if (config.ytdRallyMinPct !== undefined && typeof changeYtd === 'number' && changeYtd >= config.ytdRallyMinPct) {
+            return true;
+        }
+        if (config.recentSelloffMinPct !== undefined && typeof change5d === 'number' && change5d <= config.recentSelloffMinPct) {
+            return true;
+        }
+        if (config.ytdSelloffMinPct !== undefined && typeof changeYtd === 'number' && changeYtd <= config.ytdSelloffMinPct) {
+            return true;
+        }
+
+        return false;
+    });
+}
+
 async function buildDeterministicDailyPitchTriggers(
     marketSnapshot: ClientFocusMarketStateResponse | null,
     headlineSignals: DailyPitchHeadlineSignals = EMPTY_DAILY_PITCH_HEADLINE_SIGNALS
@@ -4642,6 +4682,19 @@ async function buildDeterministicDailyPitchTriggers(
     ]);
     const recentlyReported = await getRecentlyReportedMajorEarningsSymbols().catch(() => []);
     const recentlyReportedSet = new Set(recentlyReported);
+    const aiCapexNarrativeReversed = isNarrativeReversedByMarket(marketSnapshot, {
+        codes: ['SOX'],
+        recentRallyMinPct: 3,
+        ytdRallyMinPct: 20,
+    });
+    const oilNarrativeReversed = isNarrativeReversedByMarket(marketSnapshot, {
+        codes: ['BRENT', 'OIL'],
+        recentSelloffMinPct: -3,
+    });
+    const ratesNarrativeReversed = isNarrativeReversedByMarket(marketSnapshot, {
+        codes: ['TNX'],
+        recentSelloffMinPct: -10,
+    });
 
     if (headlineSignals.majorEarningsResultTitles.length > 0) {
         const anchor = headlineSignals.majorEarningsResultTitles[0];
@@ -4683,14 +4736,18 @@ async function buildDeterministicDailyPitchTriggers(
                 .map((row) => `${row.symbol}${earningsTimingLabel(row.days_until)}`)
                 .join('、');
             const hasOpenAiStress = headlineSignals.openAiTargetMissTitles.length > 0;
+            if (hasOpenAiStress && aiCapexNarrativeReversed) {
+                console.warn('[daily-pitch] suppressing OpenAI target miss trigger: SOX market data shows narrative reversed');
+            }
+            const effectiveHasOpenAiStress = hasOpenAiStress && !aiCapexNarrativeReversed;
             const timingWord = nearestEarningsHeadlineTimingWord(earningsRows);
-            const headline = hasOpenAiStress
+            const headline = effectiveHasOpenAiStress
                 ? `${timingWord}财报验证AI叙事`
                 : '超级财报周开启';
-            const context = hasOpenAiStress
+            const context = effectiveHasOpenAiStress
                 ? `OpenAI用户/收入目标争议已压到AI算力链，${grouped}等权重/FCN常见底层将发财报，市场要验证AI capex回报能否支撑估值。`
                 : `${grouped}等权重/FCN常见底层将发财报，市场焦点从宏观headline切回盈利验证和AI capex回报。`;
-            const talkingPoint = hasOpenAiStress
+            const talkingPoint = effectiveHasOpenAiStress
                 ? `市场质疑AI capex回报，${timingWord}权重股财报给答案；高估值AI/半导体仓位面临重新定价压力。`
                 : `${grouped}陆续发布财报，焦点从宏观headline切回盈利验证；权重股若不及预期，科技/FCN底层估值承压。`;
             triggers.push({
@@ -4702,21 +4759,21 @@ async function buildDeterministicDailyPitchTriggers(
                 talking_point: talkingPoint,
                 pitch_line: talkingPoint,
                 client_type: '美股科技或FCN客户',
-                watchpoints: hasOpenAiStress
+                watchpoints: effectiveHasOpenAiStress
                     ? ['OpenAI相关表述', 'AI capex指引', '科技期权波动率']
                     : ['权重股财报', 'AI capex指引', '科技期权波动率'],
-                related_assets: hasOpenAiStress
+                related_assets: effectiveHasOpenAiStress
                     ? ['US Equities', 'ORCL', 'NVDA', 'Major Tech', 'FCN']
                     : ['US Equities', 'Major Tech', 'FCN'],
-                asset_tags: hasOpenAiStress
+                asset_tags: effectiveHasOpenAiStress
                     ? ['US Equities', 'ORCL', 'NVDA', 'Major Tech', 'FCN']
                     : ['US Equities', 'Major Tech', 'FCN'],
-                materiality_trigger: hasOpenAiStress
+                materiality_trigger: effectiveHasOpenAiStress
                     ? '3B/3C/3E: major earnings and AI capex narrative stress'
                     : '3B: major earnings within 5 trading days',
-                risk_flag: hasOpenAiStress,
+                risk_flag: effectiveHasOpenAiStress,
                 time_sensitivity: 'immediate',
-                source_summary: hasOpenAiStress
+                source_summary: effectiveHasOpenAiStress
                     ? `来自系统财报日历和新闻标题：${headlineSignals.openAiTargetMissTitles[0]}`
                     : '来自系统财报日历中的未来7日权重/FCN常见底层待发财报。'
             });
@@ -4851,7 +4908,10 @@ async function buildDeterministicDailyPitchTriggers(
     }
 
     const oil = byCode.get('BRENT') ?? byCode.get('OIL');
-    if (headlineSignals.uaeOpecExitTitles.length > 0) {
+    if (headlineSignals.uaeOpecExitTitles.length > 0 && oilNarrativeReversed) {
+        console.warn('[daily-pitch] suppressing UAE OPEC trigger: oil market data shows high-oil narrative reversed');
+    }
+    if (headlineSignals.uaeOpecExitTitles.length > 0 && !oilNarrativeReversed) {
         const marketAnchor = oil ? `${formatPitchCandidateChange(oil)}。` : '';
         const context = `${marketAnchor}UAE宣布退出OPEC/OPEC+，油价逻辑从霍尔木兹单一封锁升级为供给纪律和OPEC凝聚力再定价，影响通胀预期、黄金、AT1和长久期债。`;
         const oilAnchor = oil ? formatPitchDataAnchor(oil) : '';
@@ -4905,13 +4965,17 @@ async function buildDeterministicDailyPitchTriggers(
     }
 
     const tnx = byCode.get('TNX');
-    if (
+    const tnxRisingConditionMet = Boolean(
         tnx
         && (
-            (typeof tnx.change_pct === 'number' && Math.abs(tnx.change_pct) >= 5)
-            || (typeof tnx.change_5d_pct === 'number' && Math.abs(tnx.change_5d_pct) >= 6)
+            (typeof tnx.change_pct === 'number' && tnx.change_pct >= 5)
+            || (typeof tnx.change_5d_pct === 'number' && tnx.change_5d_pct >= 6)
         )
-    ) {
+    );
+    if (tnxRisingConditionMet && ratesNarrativeReversed) {
+        console.warn('[daily-pitch] suppressing TNX duration-pressure trigger: TNX market data shows rates narrative reversed');
+    }
+    if (tnx && tnxRisingConditionMet && !ratesNarrativeReversed) {
         const context = `${formatPitchCandidateChange(tnx)}。长端利率重新定价，长久期债券价格和IG债券基金净值承压，AT1信用利差走阔风险上升。`;
         const tnxLatestClause = typeof tnx.latest === 'number' ? `已上至${tnx.latest.toFixed(2)}%` : '继续上行';
         const tnxAnchor = formatPitchDataAnchor(tnx);
@@ -5366,6 +5430,33 @@ function validatePitchTriggerFacts(
         if (/恒科|HSTECH/.test(fullText)) validateInstrument('HSTECH', /(?:恒科|HSTECH)[^。\n]{0,15}?([+-]?\d+\.?\d*)\s*%/g, 0.5, 'pct');
         if (/Brent/i.test(fullText)) validateInstrument('BRENT', /Brent[^。\n]{0,15}?([+-]?\d+\.?\d*)\s*%/gi, 0.8, 'pct');
         if (/黄金|GOLD/i.test(fullText)) validateInstrument('GOLD', /(?:黄金|GOLD)[^。\n]{0,15}?([+-]?\d+\.?\d*)\s*%/gi, 0.6, 'pct');
+
+        // Directional consistency: reject stale framing when market direction clearly moved the other way.
+        const bearishWords = /(下跌|跌破|崩|承压|压制|拖累|高位持续|供给.*紧|证伪|重新定价压力|估值承压)/;
+        const mentionsSox = /(SOX|半导体|AI算力|AI capex|AI资本开支|AI叙事)/i.test(fullText);
+        const mentionsBrent = /(Brent|油价|原油|OPEC|UAE|阿联酋)/i.test(fullText);
+        const mentionsTnx = /(10Y|长端利率|美债|收益率|久期|债基|AT1)/i.test(fullText);
+
+        if (bearishWords.test(fullText) && mentionsSox) {
+            const sox = marketByCode.get('SOX');
+            if (sox && typeof sox.change_5d_pct === 'number' && sox.change_5d_pct >= 3) {
+                reasons.push(`方向冲突: 文本暗示AI/半导体偏空, 但SOX 5日 +${sox.change_5d_pct.toFixed(1)}%`);
+            }
+        }
+
+        if (mentionsBrent && /(高位持续|供给.*紧|凝聚力.*再定价|油价.*上行|油市.*高位)/.test(fullText)) {
+            const brent = marketByCode.get('BRENT') ?? marketByCode.get('OIL');
+            if (brent && typeof brent.change_5d_pct === 'number' && brent.change_5d_pct <= -3) {
+                reasons.push(`方向冲突: 文本暗示油价高位, 但Brent/Oil 5日 ${brent.change_5d_pct.toFixed(1)}%`);
+            }
+        }
+
+        if (mentionsTnx && /(上行|走高|收益率.*升|承压|压制|净值受压|利差走阔)/.test(fullText)) {
+            const tnx = marketByCode.get('TNX');
+            if (tnx && typeof tnx.change_5d_pct === 'number' && tnx.change_5d_pct <= -10) {
+                reasons.push(`方向冲突: 文本暗示长端利率上行, 但TNX 5日 ${tnx.change_5d_pct.toFixed(1)}bps`);
+            }
+        }
 
         // 2) Symbol hallucination check: any uppercase 3-5 letter code mentioned must be known.
         const symbolMatches = fullText.match(/\b[A-Z]{2,5}\b/g) ?? [];
@@ -6133,6 +6224,25 @@ function ensurePriorityAssetBuckets(
 }
 
 /**
+ * Directional reality check injected into both daily-pitch LLM prompts.
+ */
+const DAILY_PITCH_NARRATIVE_REVERSAL_CHECK_PROMPT = `【市场方向反向校验 — 必须执行】
+输入里的"今日可聊候选信号"可能携带 framing（例如"AI capex 证伪"、"OPEC 凝聚力崩溃"、"长端利率上行压制久期"）。但这些 framing 描述的是事件本身，不一定还反映**当前**市场方向。你必须对照下方的 market_signals（指数、SOX、TNX、Brent、HSI 等的 5日/YTD 数字）做反向校验：
+如果候选 framing 的方向与 market_signals 实际方向**显著冲突**，三选一：
+1. **完全跳过这条候选** — 选其他候选作为 3 条 pitch 之一
+2. **改写为反向 framing** — 例如从"AI capex 证伪"改写为"AI 板块对 OpenAI 担忧已消化，关注下一阶段催化"
+3. **写成 mixed framing** — 例如"市场对 X 担忧已部分消化，但 Y 仍构成尾部风险"
+冲突示例：
+- candidate "AI capex 证伪" + SOX YTD +40% / 5日 +5%  → 冲突，选 #2 或 #3
+- candidate "OPEC 凝聚力崩溃，油价高位持续" + Brent 5日 -4% → 冲突，跳过
+- candidate "长端利率上行压制 IG 债基" + TNX 5日 -8bps → 冲突，跳过
+- candidate "港股结构分化" + 恒指 +1% / 恒科 -1% → 不冲突（分化是中性 framing）
+判断标准：
+- "显著冲突" = market_signals 里相关指标 5日 涨跌幅或 YTD 涨跌幅与 candidate 隐含方向相反，幅度足以代表市场已消化
+- 模糊情况优先 **保留并改写**，而非粗暴跳过——RM 仍想知道这条话题，但需要你给出当前市场是怎么看的
+- 如果你选了改写或 mixed，**talking_point 必须明确点出市场方向已变**，不能写成"市场仍担忧 X"这种与数据冲突的句子`;
+
+/**
  * Focused LLM call dedicated to generating the 3 daily_pitch_triggers.
  *
  * Why split from generateDailyMarketNarrative:
@@ -6199,6 +6309,8 @@ BAD 示例（不要这样写）：
 - risk_flag：尾部/下行/地缘升级则 true
 - time_sensitivity："immediate" | "this_week" | "watch"
 - source_summary：一句话说明来自上方哪条输入
+
+${DAILY_PITCH_NARRATIVE_REVERSAL_CHECK_PROMPT}
 
 【选择规则】
 - 必须从候选池选 3 条；HIGH 优先于 MEDIUM；POST-EARNINGS 优于 PRE-EARNINGS（同标的重叠时合并）
@@ -6385,6 +6497,7 @@ ${narrativeHistorySection}
    - 每张卡片只允许一条主线事件。禁止用'叠加'/'接力'/'同时'将两个不同事件并列为主线写入同一张卡。若第二个事件客观上有关联，只允许作为传导结果出现（一句话，≤15字），不能占据独立段落或成为该卡的第二个核心论点。
    - context 和 source_summary 必须绑定来自上方输入的具体证据：数字（价格/涨跌幅/bps/收益率）或命名来源（机构名/报告发布方/公司名）。严禁出现'某报告'/'分析显示'/'市场预计'/'据悉'等无法追溯的模糊表述。若输入未提供具体数据，该事件不应生成独立卡片。
    - 若候选中存在 [POST-EARNINGS] 标签的已落地财报事件，该卡片的 context 和 watchpoints 必须聚焦于已公布的结果和市场反应，禁止在同一张卡里将其他公司'今晚盘后财报'作为'接力'或留意点。待发财报如有必要，应在独立卡片中处理。
+${DAILY_PITCH_NARRATIVE_REVERSAL_CHECK_PROMPT}
    - talking_point 不写成对客户开口的脚本；不要"您..."句式，不要疑问句结尾；和 context 互补，给出关键判断或风险点
 
 【Few-shot 示例：好 vs 坏】（这是写作边界的最重要参照，遇到歧义按这个标准判断）
@@ -6573,6 +6686,8 @@ GOOD 示例 3（地缘/商品）：
    - headline ≤20个中文字符；context 80-120字且必须有数字/事件/传导机制；talking_point 60-100字，像资深IC对客户开口
    - 必须填 materiality_trigger、risk_flag、time_sensitivity、source_summary、asset_tags
    - 同步填旧字段：hook=headline，why_now=context，pitch_line=talking_point，related_assets=asset_tags
+
+${DAILY_PITCH_NARRATIVE_REVERSAL_CHECK_PROMPT}
 
 4. 旧版 asset_buckets 兼容规则（前端不再展示，默认返回 []）
    - 除非需要兼容旧客户端，否则 asset_buckets 直接返回 []
