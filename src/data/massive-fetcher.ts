@@ -1,6 +1,6 @@
 import type { ChainData, DataFetcherInterface, StrikeData, SymbolData } from '../scoring-engine';
 import { MassiveClient } from './massive-client';
-import { getRecentEarningsBySymbol, getUpcomingEarningsBySymbol } from '../db/queries/ideas';
+import { getRecentEarningsBySymbol, getUpcomingEarningsBySymbol, getUpcomingEarningsForSymbolWithinDays } from '../db/queries/ideas';
 
 interface MassiveOptionChainResponse {
     next_url?: string;
@@ -89,9 +89,10 @@ export class MassiveDataFetcher implements DataFetcherInterface {
         const macd = computeMacd(closes);
         const rsi14 = computeRsi(closes, 14);
 
-        const [upcomingEarnings, recentEarnings] = await Promise.all([
+        const [upcomingEarnings, recentEarnings, earningsWithinTenorCount] = await Promise.all([
             getUpcomingEarningsBySymbol(symbol),
-            getRecentEarningsBySymbol(symbol)
+            getRecentEarningsBySymbol(symbol),
+            getUpcomingEarningsForSymbolWithinDays(symbol, 200).catch(() => null)
         ]);
 
         // Use the last bar from the range aggregate instead of /prev, because /prev can return
@@ -127,6 +128,7 @@ export class MassiveDataFetcher implements DataFetcherInterface {
             earnings_date: upcomingEarnings?.report_date ?? null,
             days_to_earnings: upcomingEarnings?.days_until ?? null,
             days_since_earnings: recentEarnings?.days_since ?? null,
+            earnings_within_tenor_count: earningsWithinTenorCount,
             extended_price: extendedTrade?.price ?? null,
             extended_move_pct: extendedTrade?.movePct ?? null
         };

@@ -30,6 +30,8 @@ export type FlagType =
     | 'NO_APPROVED_TENOR'
     | 'NO_APPROVED_STRIKE'
     | 'OVEREXTENDED_UPTREND'
+    | 'HEALTHY_PULLBACK'
+    | 'TENOR_EARNINGS_DENSITY'
     | 'QUALITY_DIP_EXCEPTION'
     | 'WEAK_RECOVERY_PROFILE';
 
@@ -76,6 +78,7 @@ export interface SymbolData {
     earnings_date: string | null;
     days_to_earnings?: number | null;
     days_since_earnings?: number | null;
+    earnings_within_tenor_count?: number | null;
     extended_price?: number | null;
     extended_move_pct?: number | null;
     house_override?: HouseOverrideType;
@@ -207,6 +210,19 @@ const COMMODITY_BETA_STRIKE_SELECTION: StrikeSelectionConfig = {
 
 const COMMODITY_BETA_SYMBOLS = new Set(['GDX', 'USO']);
 const HIGH_BETA_THEME_SYMBOLS = new Set(['PLTR', 'TSLA', 'MSTR', 'CRCL', 'COIN', 'LI', 'FUTU']);
+const HIGH_VOL_EARNINGS_SYMBOLS = new Set([
+    'NVDA',
+    'TSLA',
+    'AMD',
+    'COIN',
+    'MSTR',
+    'SMCI',
+    'PLTR',
+    'NFLX',
+    'META',
+    'BABA',
+    'PDD'
+]);
 const PB_CORE_ASSET_TIER_1 = new Set([
     'SPY',
     'IVV',
@@ -530,6 +546,23 @@ function isOverextendedUptrend(symbol: string, symbolData: SymbolData): boolean 
         symbolData.pct_from_52w_high >= PB_ASSIGNMENT_CONFIG.overextendedNearHighPct
     );
 }
+
+function isHealthyPullback(symbol: string, symbolData: SymbolData): boolean {
+    void symbol;
+    const pct = symbolData.pct_from_52w_high;
+    if (pct < -25 || pct > -10) return false;
+    if (symbolData.current_price < symbolData.ma200) return false;
+
+    const recentReturn20d = trailingReturn(symbolData, 20);
+    if (recentReturn20d !== null && recentReturn20d < -0.15) return false;
+
+    if (pct < -18 && symbolData.current_price < symbolData.ma50) return false;
+
+    return true;
+}
+
+const HEALTHY_PULLBACK_BONUS_BASE = 0.04;
+const HEALTHY_PULLBACK_BONUS_DEEP = 0.06;
 
 function getTargetCouponPct(historicalVolatility: number, symbol?: string): number {
     const normalizedSymbol = symbol?.toUpperCase();
@@ -912,6 +945,22 @@ export function scoreAndGrade(candidate: {
         }
     }
 
+    const earningsWithinTenor = symbolData.earnings_within_tenor_count ?? null;
+    if (earningsWithinTenor !== null && earningsWithinTenor >= 2) {
+        const additionalEarnings = earningsWithinTenor - 1;
+        eventRiskScore = clamp(eventRiskScore * Math.pow(0.85, additionalEarnings), 0, 1);
+
+        if (HIGH_VOL_EARNINGS_SYMBOLS.has(normalizedSymbol)) {
+            eventRiskScore = clamp(eventRiskScore - 0.03, 0, 1);
+        }
+
+        flags.push({
+            type: 'TENOR_EARNINGS_DENSITY',
+            severity: 'INFO',
+            message: `Tenor 内将发生 ${earningsWithinTenor} 次 earnings，event risk 已对应下调`
+        });
+    }
+
     const premiumScore = adjustedPremiumScore(strikeData);
 
     const baseCompositeScore = clamp(
@@ -966,6 +1015,20 @@ export function scoreAndGrade(candidate: {
             severity: 'WARN',
             message: '短期涨幅偏快且股价接近阶段高位，PB FCN更应防范高位卖出认沽的拥挤风险'
         });
+    } else if (isHealthyPullback(symbol, symbolData)) {
+        const hasBearishFlag = flags.some(
+            (flag) => flag.type === 'BEARISH_STRUCTURE' || flag.type === 'LOWER_HIGH_RISK' || flag.type === 'BROKEN_TREND'
+        );
+        if (!hasBearishFlag) {
+            const pct = symbolData.pct_from_52w_high;
+            const bonus = pct < -18 ? HEALTHY_PULLBACK_BONUS_DEEP : HEALTHY_PULLBACK_BONUS_BASE;
+            compositeScore = clamp(compositeScore + bonus, 0, 1);
+            flags.push({
+                type: 'HEALTHY_PULLBACK',
+                severity: 'INFO',
+                message: `回调 ${Math.abs(pct).toFixed(1)}% 已部分释放调整压力，执行价对应客户 entry 缓冲更宽`
+            });
+        }
     }
 
     if (assignmentQuality.narrativeStabilityScore < 0.4) {

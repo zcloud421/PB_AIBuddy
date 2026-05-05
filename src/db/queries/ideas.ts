@@ -429,6 +429,30 @@ export async function getUpcomingEarningsNextNDays(days: number): Promise<Upcomi
     );
 }
 
+export async function getUpcomingEarningsForSymbolWithinDays(
+    symbol: string,
+    days: number
+): Promise<number> {
+    const result = await pool.query<{ count: string }>(
+        `
+        SELECT COUNT(*)::text AS count
+        FROM earnings_calendar
+        WHERE symbol = ANY($1::text[])
+          AND report_date >= CURRENT_DATE
+          AND report_date <= CURRENT_DATE + $2::integer
+        `,
+        [earningsLookupSymbols(symbol), days]
+    );
+
+    const dbCount = parseInt(result.rows[0]?.count ?? '0', 10) || 0;
+    const manualRow = manualUpcomingEarnings(symbol);
+    if (manualRow && manualRow.days_until !== null && manualRow.days_until <= days) {
+        return Math.max(dbCount, 1);
+    }
+
+    return dbCount;
+}
+
 export async function getIdeasByRunId(runId: string): Promise<TodayIdeaRow[]> {
     const result = await pool.query<TodayIdeaRow>(
         `

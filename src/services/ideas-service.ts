@@ -4243,11 +4243,34 @@ export async function selectDailyRecommendationShowcase(
     const recentHistory = await getRecentDailyRecommendationHistory(5);
     const activeFocusStatuses = await getActiveMacroFocusStatuses();
     const goCandidates = candidates.filter((candidate) => candidate.overall_grade === 'GO');
+    const cooldownExempt = new Set<string>();
+    if (dailyBestSymbol) {
+        cooldownExempt.add(dailyBestSymbol);
+    }
+
+    const cooldownFilteredCandidates = goCandidates.filter((candidate) => {
+        if (cooldownExempt.has(candidate.symbol)) return true;
+        if (isUnderHardCooldown(candidate.symbol, recentHistory)) {
+            const appearances = recentHistory.filter((entry) => entry.symbol === candidate.symbol).length;
+            console.log(`[showcase] hard cooldown applied: ${candidate.symbol} appeared ${appearances}x in last ${HARD_COOLDOWN_LOOKBACK_DAYS} days`);
+            return false;
+        }
+        return true;
+    });
+
+    const minRecommendedSlots = 3;
+    const heroSlotCount = dailyBestSymbol && goCandidates.some((candidate) => candidate.symbol === dailyBestSymbol) ? 1 : 0;
+    let finalCandidates = cooldownFilteredCandidates;
+    if (finalCandidates.length < minRecommendedSlots + heroSlotCount) {
+        console.warn(`[showcase] cooldown filter left only ${finalCandidates.length} candidates (need ${minRecommendedSlots + heroSlotCount}), falling back to original pool`);
+        finalCandidates = goCandidates;
+    }
+
     const underlyingEntries = await Promise.all(
-        goCandidates.map(async (candidate) => [candidate.symbol, await getUnderlyingBySymbol(candidate.symbol)] as const)
+        finalCandidates.map(async (candidate) => [candidate.symbol, await getUnderlyingBySymbol(candidate.symbol)] as const)
     );
     const underlyingMap = new Map(underlyingEntries);
-    const rankedGo = [...goCandidates].sort((left, right) => {
+    const rankedGo = [...finalCandidates].sort((left, right) => {
         const leftScore =
             adjustedShowcaseScore(left, recentHistory, dailyBestSymbol) -
             applyMacroSensitivityPenalty(left, underlyingMap.get(left.symbol) ?? null, activeFocusStatuses);
@@ -6233,6 +6256,17 @@ function calculateFreshnessPenalty(
     if (weightedAppearances <= 5.0) return 0.08;
     if (weightedAppearances <= 7.0) return 0.12;
     return 0.16;
+}
+
+const HARD_COOLDOWN_APPEARANCE_THRESHOLD = 4;
+const HARD_COOLDOWN_LOOKBACK_DAYS = 5;
+
+function isUnderHardCooldown(
+    symbol: string,
+    history: Array<{ symbol: string; run_date: string; placement: 'HERO' | 'RECOMMENDED'; slot_rank: number }>
+): boolean {
+    const appearances = history.filter((entry) => entry.symbol === symbol).length;
+    return appearances >= HARD_COOLDOWN_APPEARANCE_THRESHOLD;
 }
 
 function getActiveMacroFocusStatuses(): Array<{ slug: string; status: string; title: string }> {
