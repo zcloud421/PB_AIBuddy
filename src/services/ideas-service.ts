@@ -7943,17 +7943,51 @@ function isRuleHintId(ruleId: string | null | undefined): ruleId is string {
     return Boolean(ruleId && !ruleId.startsWith('fallback:'));
 }
 
-function isRefinedReasonAcceptable(
+type RefinedReasonRejectReason =
+    | 'reason_missing_or_too_long'
+    | 'low_confidence'
+    | 'no_news_anchor'
+    | 'forbidden_marker'
+    | 'bucket_sum_invalid'
+    | 'no_llm_output';
+
+interface RefinedReasonCheckResult {
+    accepted: boolean;
+    reject_reason?: RefinedReasonRejectReason;
+}
+
+function rejectRefinedReason(
+    rejectReason: RefinedReasonRejectReason,
+    details: Record<string, unknown>
+): RefinedReasonCheckResult {
+    console.warn('[drawdown-attribution] LLM refined reason rejected:', JSON.stringify({
+        reject_reason: rejectReason,
+        ...details
+    }));
+    return { accepted: false, reject_reason: rejectReason };
+}
+
+function checkRefinedReasonAcceptable(
     refinedResult: LlmAttributionResult,
     reason: StructuredAttributionReason,
     newsTitles: string[]
-): boolean {
+): RefinedReasonCheckResult {
     if (!refinedResult.reason_zh || refinedResult.reason_zh.length > 80) {
-        return false;
+        return rejectRefinedReason('reason_missing_or_too_long', {
+            reason_length: refinedResult.reason_zh?.length ?? 0,
+            rule_hint_id: reason.primary_rule_id ?? null,
+            news_count: newsTitles.length
+        });
     }
 
-    if (!Number.isFinite(refinedResult.confidence) || refinedResult.confidence < 0.5) {
-        return false;
+    const minConfidence = newsTitles.length === 0 ? 0.35 : 0.5;
+    if (!Number.isFinite(refinedResult.confidence) || refinedResult.confidence < minConfidence) {
+        return rejectRefinedReason('low_confidence', {
+            confidence: refinedResult.confidence,
+            min_confidence: minConfidence,
+            rule_hint_id: reason.primary_rule_id ?? null,
+            news_count: newsTitles.length
+        });
     }
 
     if (newsTitles.length >= 1) {
@@ -7962,7 +7996,11 @@ function isRefinedReasonAcceptable(
         );
         const hasNumberAnchor = /\d+(\.\d+)?\s*(bps|%|个百分点|倍)/i.test(refinedResult.reason_zh);
         if (!reasonHasNewsAnchor && !hasNumberAnchor) {
-            return false;
+            return rejectRefinedReason('no_news_anchor', {
+                reason_zh: refinedResult.reason_zh.slice(0, 120),
+                rule_hint_id: reason.primary_rule_id ?? null,
+                news_count: newsTitles.length
+            });
         }
     }
 
@@ -7970,12 +8008,33 @@ function isRefinedReasonAcceptable(
         const forbiddenMarkers = collectForbiddenMarkers([reason.primary_rule_id, reason.background_rule_id]);
         const hasForbiddenMarker = forbiddenMarkers.some((marker) => refinedResult.reason_zh.includes(marker));
         if (hasForbiddenMarker) {
-            return false;
+            return rejectRefinedReason('forbidden_marker', {
+                reason_zh: refinedResult.reason_zh.slice(0, 120),
+                rule_hint_id: reason.primary_rule_id ?? null,
+                background_rule_id: reason.background_rule_id ?? null
+            });
         }
     }
 
     const bucketSum = Object.values(refinedResult.buckets).reduce((sum, value) => sum + value, 0);
-    return bucketSum >= 80 && bucketSum <= 120;
+    if (bucketSum < 80 || bucketSum > 120) {
+        return rejectRefinedReason('bucket_sum_invalid', {
+            bucket_sum: bucketSum,
+            buckets: refinedResult.buckets,
+            rule_hint_id: reason.primary_rule_id ?? null,
+            news_count: newsTitles.length
+        });
+    }
+
+    return { accepted: true };
+}
+
+function isRefinedReasonAcceptable(
+    refinedResult: LlmAttributionResult,
+    reason: StructuredAttributionReason,
+    newsTitles: string[]
+): boolean {
+    return checkRefinedReasonAcceptable(refinedResult, reason, newsTitles).accepted;
 }
 
 async function refineDrawdownAttributionsWithLLM(input: {
@@ -8289,9 +8348,10 @@ async function buildEnrichedDrawdownAttributions(
     for (const [index, item] of newsByEpisode.entries()) {
         const key = `${item.episode.peak_date}::${item.episode.trough_date}`;
         const llmResult = llmReasons.get(key);
-        const llmAccepted = llmResult
-            ? isRefinedReasonAcceptable(llmResult, item.heuristicReason, item.newsItems.map((news) => news.title))
-            : false;
+        const checkResult = llmResult
+            ? checkRefinedReasonAcceptable(llmResult, item.heuristicReason, item.newsItems.map((news) => news.title))
+            : { accepted: false, reject_reason: 'no_llm_output' as const };
+        const llmAccepted = checkResult.accepted;
         const finalReason = llmAccepted ? llmResult?.reason_zh : item.heuristicReason.reason_zh;
         void recordDrawdownAttributionDecision(symbol.toUpperCase(), item.episode.peak_date, item.episode.trough_date, {
             rule_hint_id: isRuleHintId(item.heuristicReason.primary_rule_id) ? item.heuristicReason.primary_rule_id : null,
@@ -8299,6 +8359,7 @@ async function buildEnrichedDrawdownAttributions(
             market_structure: marketStructureByEpisode[index],
             llm_raw_output: llmResult ?? null,
             llm_accepted: llmAccepted,
+            llm_reject_reason: checkResult.reject_reason ?? null,
             final_reason: finalReason,
             buckets: llmAccepted && llmResult ? llmResult.buckets : heuristicBuckets(item.heuristicReason),
             confidence: llmAccepted && llmResult ? llmResult.confidence : 0.4

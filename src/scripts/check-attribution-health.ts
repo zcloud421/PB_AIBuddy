@@ -30,6 +30,7 @@ interface HealthMetrics {
     acceptance_rate_pct: number;
     avg_confidence: number | null;
     bucket_averages: BucketAverages;
+    rejection_reason_breakdown: Record<string, number>;
     top_rejection_samples: RejectionSample[];
 }
 
@@ -52,6 +53,12 @@ interface RejectionRow {
     trough_date: string;
     llm_reason: string | null;
     confidence: string | null;
+    reject_reason: string | null;
+}
+
+interface RejectionBreakdownRow {
+    reject_reason: string | null;
+    count: string;
 }
 
 function parseInteger(value: string | number | null | undefined): number {
@@ -76,12 +83,16 @@ function roundPct(value: number | null): number {
     return Number(value.toFixed(1));
 }
 
-function summarizeRejection(confidence: number | null): string {
-    if (confidence !== null && confidence < 0.5) {
-        return `low confidence ${confidence.toFixed(2)}`;
+function summarizeRejection(rejectReason: string | null, confidence: number | null): string {
+    if (rejectReason) {
+        return confidence === null ? rejectReason : `${rejectReason}, confidence ${confidence.toFixed(2)}`;
     }
 
-    return 'validator rejected, likely no news anchor';
+    if (confidence !== null) {
+        return `legacy rejection, confidence ${confidence.toFixed(2)}`;
+    }
+
+    return 'legacy rejection, reason unavailable';
 }
 
 function truncateForTelegram(text: string, maxLength = 80): string {
@@ -133,13 +144,26 @@ async function fetchHealthMetrics(): Promise<HealthMetrics> {
             peak_date::text AS peak_date,
             trough_date::text AS trough_date,
             decision_json->'llm_raw_output'->>'reason_zh' AS llm_reason,
-            decision_json->'llm_raw_output'->>'confidence' AS confidence
+            decision_json->'llm_raw_output'->>'confidence' AS confidence,
+            decision_json->>'llm_reject_reason' AS reject_reason
         FROM drawdown_attribution_decisions
         WHERE created_at >= NOW() - INTERVAL '7 days'
           AND (decision_json->>'llm_accepted')::boolean = false
           AND decision_json->'llm_raw_output' IS NOT NULL
         ORDER BY created_at DESC
         LIMIT 3
+    `);
+
+    const rejectionBreakdownResult = await pool.query<RejectionBreakdownRow>(`
+        SELECT
+            COALESCE(decision_json->>'llm_reject_reason', 'legacy_unknown') AS reject_reason,
+            COUNT(*)::text AS count
+        FROM drawdown_attribution_decisions
+        WHERE created_at >= NOW() - INTERVAL '7 days'
+          AND (decision_json->>'llm_accepted')::boolean = false
+          AND decision_json->'llm_raw_output' IS NOT NULL
+        GROUP BY COALESCE(decision_json->>'llm_reject_reason', 'legacy_unknown')
+        ORDER BY COUNT(*) DESC
     `);
 
     return {
@@ -156,6 +180,9 @@ async function fetchHealthMetrics(): Promise<HealthMetrics> {
             positioning: roundPct(parseNullableNumber(row?.avg_positioning)),
             idiosyncratic: roundPct(parseNullableNumber(row?.avg_idiosyncratic))
         },
+        rejection_reason_breakdown: Object.fromEntries(
+            rejectionBreakdownResult.rows.map((item) => [item.reject_reason ?? 'legacy_unknown', parseInteger(item.count)])
+        ),
         top_rejection_samples: rejectionResult.rows.map((sample) => {
             const confidence = parseNullableNumber(sample.confidence);
             return {
@@ -163,7 +190,7 @@ async function fetchHealthMetrics(): Promise<HealthMetrics> {
                 peak_date: sample.peak_date,
                 trough_date: sample.trough_date,
                 llm_reason: truncateForTelegram(sample.llm_reason ?? 'N/A'),
-                reason_summary: summarizeRejection(confidence)
+                reason_summary: summarizeRejection(sample.reject_reason, confidence)
             };
         })
     };
@@ -225,6 +252,9 @@ function formatReport(metrics: HealthMetrics, issues: string[], forceReport: boo
             (sample, index) =>
                 `${index + 1}. SYMBOL=${sample.symbol}, peak=${sample.peak_date}: "${sample.llm_reason}" (${sample.reason_summary})`
         );
+    const rejectionBreakdown = Object.entries(metrics.rejection_reason_breakdown)
+        .map(([reason, count]) => `${reason}: ${count}`)
+        .join(', ') || 'N/A';
 
     return [
         '⚠️ Drawdown Attribution Health (last 7d)',
@@ -235,6 +265,7 @@ function formatReport(metrics: HealthMetrics, issues: string[], forceReport: boo
         `• LLM accepted: ${metrics.llm_accepted} (${metrics.acceptance_rate_pct.toFixed(1)}%)`,
         `• Avg confidence: ${avgConfidence}`,
         `• Rejected with LLM output: ${metrics.rejected_with_output}`,
+        `• Rejection reasons: ${rejectionBreakdown}`,
         `• Bucket avg (fund/val/mac/pos/idio): ${formatBucketLine(metrics.bucket_averages)}`,
         'Top 3 rejection reasons (fact-anchor failures):',
         ...rejectionLines,
