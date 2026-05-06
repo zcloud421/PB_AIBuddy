@@ -3768,14 +3768,17 @@ function isMajorGeopoliticalHeadline(title: string): boolean {
 
 function isMajorEarningsResultHeadline(title: string): boolean {
     const normalized = title.toLowerCase();
-    const hasMajorUnderlying = /(microsoft|msft|meta|alphabet|google|googl|goog|amazon|amzn|nvidia|nvda|tesla|tsla|apple|aapl|tsmc|taiwan semiconductor)/i.test(title);
+    const hasMajorUnderlying = /(microsoft|msft|meta|alphabet|google|googl|goog|amazon|amzn|nvidia|nvda|tesla|tsla|apple|aapl|tsmc|taiwan semiconductor|amd|broadcom|avgo|oracle|orcl|coinbase|coin|microstrategy|mstr|palantir|pltr|netflix|nflx|micron|mu)/i.test(title);
     const hasEarnings = /(earnings|results|quarter|revenue|profit|eps|sales|cloud|azure|aws|advertising|ai capex|capex|guidance|财报|業績|业绩|营收|營收|利润|雲|云|广告|廣告|指引)/i.test(normalized);
     const hasResult = /(beat|miss|beats|misses|surge|jump|fall|slump|rise|drop|after-hours|after hours|reports|reported|公布|发布|發布|超预期|超預期|不及预期|不及預期|上涨|上漲|下跌)/i.test(normalized);
     return hasMajorUnderlying && hasEarnings && hasResult;
 }
 
 async function getRecentlyReportedMajorEarningsSymbols(): Promise<string[]> {
-    const symbols = ['MSFT', 'META', 'GOOG', 'AMZN', 'AAPL', 'NVDA', 'TSLA', 'TSM'];
+    const symbols = [
+        'MSFT', 'META', 'GOOG', 'AMZN', 'AAPL', 'NVDA', 'TSLA', 'TSM',
+        'AMD', 'AVGO', 'ORCL', 'COIN', 'MSTR', 'PLTR', 'NFLX', 'MU'
+    ];
     const recentRows = await Promise.allSettled(symbols.map(async (symbol) => {
         const row = await getRecentEarningsBySymbol(symbol);
         return row && typeof row.days_since === 'number' && row.days_since <= 2 ? symbol : null;
@@ -6242,6 +6245,18 @@ const DAILY_PITCH_NARRATIVE_REVERSAL_CHECK_PROMPT = `【市场方向反向校验
 - 模糊情况优先 **保留并改写**，而非粗暴跳过——RM 仍想知道这条话题，但需要你给出当前市场是怎么看的
 - 如果你选了改写或 mixed，**talking_point 必须明确点出市场方向已变**，不能写成"市场仍担忧 X"这种与数据冲突的句子`;
 
+function buildDailyPitchDateConstraintPrompt(hktTimeLabel: string): string {
+    return `【关键日期约束】
+当前 HKT 时间是 ${hktTimeLabel}。任何 candidate 信号或新闻里提到的事件**日期**：
+- 如果该日期 < 今天 HKT 日期：事件已发生，必须用过去时（"已落地"/"昨晚发布"），禁止写"明晚"/"今晚"
+- 如果该日期 = 今天 HKT 日期：用"今晚"（含义是 US 当日盘后）
+- 如果该日期 > 今天 HKT 日期：按距离决定（明晚/后天/本周/下周）
+绝不输出 candidate 池里给出的具体日期（如 "5/5"）作为字面文本，除非你已经确认该日期相对今天 HKT 的关系，并且时间词与之一致。
+具体反例：
+❌ "AMD 明晚（5/5）盘后发布"——如果今天是 5/6 HKT，这是错的：5/5 已过，应写"AMD 昨晚已发布财报"或不再提此事件
+❌ "X 公司财报明晚发布" + 候选已显示该公司在 recentlyReportedMajorEarningsSymbols——说明已经发完了，必须 pivot 到 post-earnings 框架`;
+}
+
 /**
  * Focused LLM call dedicated to generating the 3 daily_pitch_triggers.
  *
@@ -6273,24 +6288,26 @@ async function generatePitchTriggersFocused(
 
 你只输出 JSON，不输出任何额外文字。
 
+${buildDailyPitchDateConstraintPrompt(nowHkt.hktTimeLabel)}
+
 【写作边界 — 这是最重要参照】
 
 GOOD 示例（财报落地）：
 {
-  "headline": "AMD明晚盘后财报",
-  "context": "AMD周二（5/5）美股盘后发布Q1财报，市场聚焦MI300数据中心收入与全年AI芯片指引；隔夜ORCL、CoreWeave等AI算力链已下跌。若不及预期，高估值AI/半导体仓位面临重新定价。",
-  "talking_point": "AMD财报是本轮AI capex叙事的关键证伪节点；MI300数据中心收入指引若不及预期，半导体仓位与AI主题FCN的估值锚点都会被重新调整。",
+  "headline": "权重科技股财报落地",
+  "context": "权重科技股美股盘后发布季报，AI capex指引超预期带动股价跳升8-12%；隔夜半导体板块+3.5%，市场焦点从capex怀疑切回盈利兑现，AI主题敞口短期估值压力缓解。",
+  "talking_point": "财报已给出第一轮答案，关键不是涨跌幅而是AI capex兑现质量；半导体仓位的估值锚点已重新校准，下一步看cloud business中长期成长性。",
   "client_type": "美股科技或AI半导体FCN客户",
-  "watchpoints": ["MI300数据中心收入", "全年AI芯片指引", "盘后股价与IV"],
-  "asset_tags": ["US Equities", "AMD", "AI Theme", "FCN"],
-  "materiality_trigger": "3B: major earnings within 1 trading day",
+  "watchpoints": ["盘后涨跌幅与IV收敛", "AI capex全年指引", "云业务环比增速"],
+  "asset_tags": ["US Equities", "Major Tech", "AI Theme", "FCN"],
+  "materiality_trigger": "3B: major earnings result",
   "risk_flag": true,
   "time_sensitivity": "immediate",
-  "source_summary": "来自财报日历未来1日"
+  "source_summary": "来自已落地财报与盘后市场反应"
 }
 
 BAD 示例（不要这样写）：
-- "今晚AMD盘后财报"（时间词错；HKT POV days_until=1 应为"明晚"）
+- "今晚某半导体股盘后财报"（时间词错；HKT POV days_until=1 应为"明晚"）
 - "您组合里的科技仓位..."（"您..."话术，禁止）
 - "我们可以先按好中差三种情景看一遍？"（销售脚本+疑问句，禁止）
 - "美债收益率重新校准"（翻译腔，禁止"重新校准/进入验证/牵动/证伪点"）
@@ -6443,6 +6460,7 @@ ${latestUpdatesSection}${transmissionChainSection}
 星期：${hktDayLabel}
 当前香港时间：${hktTimeLabel}（港股${hkMarketClosed ? '已收盘' : '盘中/未开盘'}）
 本次 briefing 时间窗口：${timeWindowLabel}
+${buildDailyPitchDateConstraintPrompt(hktTimeLabel)}
 ${earningsSection ? `\n${earningsSection}\n` : ''}
 今日客户焦点话题摘要：
 
@@ -6504,20 +6522,20 @@ ${DAILY_PITCH_NARRATIVE_REVERSAL_CHECK_PROMPT}
 
 GOOD 示例 1（财报落地）：
 {
-  "headline": "AMD明晚盘后财报",
-  "context": "AMD周二（5/5）美股盘后发布Q1财报，市场聚焦MI300数据中心收入与全年AI芯片指引；隔夜ORCL、CoreWeave等AI算力链已下跌，OpenAI收入目标争议加重AI capex回报疑虑。若不及预期，高估值AI/半导体仓位面临重新定价。",
-  "talking_point": "AMD财报是本轮AI capex叙事的关键证伪节点；MI300数据中心收入指引若不及预期，半导体仓位与AI主题FCN的估值锚点都会被重新调整。",
+  "headline": "权重科技股财报落地",
+  "context": "权重科技股美股盘后发布季报，AI capex指引超预期带动股价跳升8-12%；隔夜半导体板块+3.5%，市场焦点从capex怀疑切回盈利兑现，AI主题敞口短期估值压力缓解。",
+  "talking_point": "财报已给出第一轮答案，关键不是涨跌幅而是AI capex兑现质量；半导体仓位的估值锚点已重新校准，下一步看cloud business中长期成长性。",
   "client_type": "美股科技或AI半导体FCN客户",
-  "watchpoints": ["MI300数据中心收入", "全年AI芯片指引", "盘后股价与IV"]
+  "watchpoints": ["盘后涨跌幅与IV收敛", "AI capex全年指引", "云业务环比增速"]
 }
 
 BAD 示例 1（同主题写差）：
 {
-  "headline": "今晚AMD盘后财报",                  // ← 时间词错（HKT POV 应为"明晚"）
-  "context": "OpenAI被曝收入目标未达成，今晚AMD盘后财报，市场焦点从增长多少升级为能否证实AI资本开支回报。若财报不及预期，您组合里的高估值AI仓位面临重新定价压力。",   // ← "您组合里"是话术
+  "headline": "今晚某半导体股财报",                  // ← 时间词错（若 HKT POV days_until=1 应为"明晚"）
+  "context": "某AI公司被曝收入目标未达成，今晚某半导体股盘后财报，市场焦点从增长多少升级为能否证实AI资本开支回报。若财报不及预期，您组合里的高估值AI仓位面临重新定价压力。",   // ← "您组合里"是话术
   "talking_point": "AI capex回报受质疑，今晚财报会给答案；您科技仓位要不要先按好中差三种情景看一遍？",   // ← "您...要不要"销售脚本，疑问句结尾
   "client_type": "美股科技或FCN客户",
-  "watchpoints": ["权重股财报", "AI capex指引", "科技期权波动率"]   // ← "权重股"泛泛，不是 AMD 特定观察点
+  "watchpoints": ["权重股财报", "AI capex指引", "科技期权波动率"]   // ← "权重股"泛泛，不是具体观察点
 }
 
 GOOD 示例 2（利率/久期）：
