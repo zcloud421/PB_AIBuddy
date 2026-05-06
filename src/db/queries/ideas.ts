@@ -1137,6 +1137,8 @@ export async function saveRiskFlags(runId: string, symbol: string, flags: Flag[]
 }
 
 export async function ensureRiskFlagEnumValues(): Promise<void> {
+    await pool.query(`ALTER TYPE risk_flag_severity ADD VALUE IF NOT EXISTS 'info' BEFORE 'warn'`);
+
     const values: Flag['type'][] = [
         'EARNINGS_PROXIMITY',
         'POST_EARNINGS_SHOCK',
@@ -1159,6 +1161,8 @@ export async function ensureRiskFlagEnumValues(): Promise<void> {
         'ASSIGNMENT_QUALITY_CAP',
         'FRAGILE_NARRATIVE',
         'OVEREXTENDED_UPTREND',
+        'HEALTHY_PULLBACK',
+        'TENOR_EARNINGS_DENSITY',
         'QUALITY_DIP_EXCEPTION',
         'WEAK_RECOVERY_PROFILE'
     ];

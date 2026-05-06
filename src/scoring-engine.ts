@@ -166,7 +166,7 @@ export function buildPostEarningsShockFlag(input: {
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const PREFERRED_TENORS = [90, 180];
-const PREFERRED_TENOR_TOLERANCE_DAYS = 15;
+const PREFERRED_TENOR_TOLERANCE_DAYS = 25;
 const MAX_APPROVED_TENORS = 2;
 const MAX_APPROVED_STRIKES = 3;
 const NORMAL_TARGET_ABS_DELTA = 0.20;
@@ -795,12 +795,21 @@ export function approveTenors(symbolData: SymbolData, chainData: ChainData): Ten
     const earningsInDays = daysUntil(symbolData.earnings_date);
     const earningsAlreadyReported = hasObservedPostEarningsPrint(symbolData.extended_move_pct);
     const windows: TenorWindow[] = [];
+    const expiryDates = uniqueExpiryDates(chainData);
+    const skipReasons: Array<{ expiry: string; dte: number | null; reason: string }> = [];
 
-    for (const expiryDate of uniqueExpiryDates(chainData)) {
+    for (const expiryDate of expiryDates) {
         const tenorDays = daysUntil(expiryDate);
         const preferredTenor = nearestPreferredTenor(expiryDate);
 
         if (tenorDays === null || preferredTenor === null) {
+            skipReasons.push({
+                expiry: expiryDate,
+                dte: tenorDays,
+                reason: tenorDays === null
+                    ? 'invalid_dte'
+                    : `outside_tolerance (dte=${tenorDays}, tolerance=${PREFERRED_TENOR_TOLERANCE_DAYS}d of 90/180)`
+            });
             continue;
         }
 
@@ -811,11 +820,17 @@ export function approveTenors(symbolData: SymbolData, chainData: ChainData): Ten
             earningsInDays <= tenorDays &&
             !earningsAlreadyReported
         ) {
+            skipReasons.push({
+                expiry: expiryDate,
+                dte: tenorDays,
+                reason: `earnings_within_tenor (earnings_in=${earningsInDays}d)`
+            });
             continue;
         }
 
         const strikes = chainData.filter((strike) => strike.expiry_date === expiryDate);
         if (strikes.length === 0) {
+            skipReasons.push({ expiry: expiryDate, dte: tenorDays, reason: 'no_strikes_after_filter' });
             continue;
         }
 
@@ -837,6 +852,10 @@ export function approveTenors(symbolData: SymbolData, chainData: ChainData): Ten
         .sort((a, b) => b.ivRichness - a.ivRichness)
         .slice(0, MAX_APPROVED_TENORS)
         .map((entry) => entry.window);
+
+    if (ranked.length === 0 && expiryDates.length > 0) {
+        console.warn(`[approveTenors] no tenor approved for ${chainData.length} strikes; skips:`, JSON.stringify(skipReasons));
+    }
 
     return ranked;
 }

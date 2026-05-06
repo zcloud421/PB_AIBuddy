@@ -30,10 +30,12 @@ CREATE TYPE risk_flag_type AS ENUM (
     'ASSIGNMENT_QUALITY_CAP',
     'FRAGILE_NARRATIVE',
     'OVEREXTENDED_UPTREND',
+    'HEALTHY_PULLBACK',
+    'TENOR_EARNINGS_DENSITY',
     'QUALITY_DIP_EXCEPTION',
     'WEAK_RECOVERY_PROFILE'
 );
-CREATE TYPE risk_flag_severity AS ENUM ('warn', 'block');
+CREATE TYPE risk_flag_severity AS ENUM ('info', 'warn', 'block');
 CREATE TYPE override_type AS ENUM ('FORCE_AVOID', 'FORCE_CAUTION', 'WHITELIST_ONLY');
 
 CREATE TABLE underlyings (
