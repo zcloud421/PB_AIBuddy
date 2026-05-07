@@ -21,6 +21,9 @@ interface NarrativeInput {
     recommended_strike: number;
     estimated_coupon_range: string;
     current_price: number | null;
+    change_1d_pct?: number | null;
+    change_5d_pct?: number | null;
+    change_ytd_pct?: number | null;
     pct_from_52w_high: number | null;
     ma20: number | null;
     ma50: number | null;
@@ -144,15 +147,47 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
             input.company_name
         );
 
-        return {
+        return applyNarrativeOutputGuardrails({
             why_now: typeof parsed.why_now === 'string' ? parsed.why_now : fallback.why_now,
             risk_note: typeof parsed.risk_note === 'string' ? parsed.risk_note : fallback.risk_note,
             sentiment_score: parseSentimentScore(parsed.sentiment_score, fallback.sentiment_score),
             key_events: parsedKeyEvents
-        };
+        }, input);
     } catch {
         return fallback;
     }
+}
+
+function applyNarrativeOutputGuardrails(output: NarrativeOutput, input: NarrativeInput): NarrativeOutput {
+    const fiveDayChange = input.change_5d_pct;
+    let whyNow = output.why_now;
+    let riskNote = output.risk_note;
+
+    if (typeof fiveDayChange === 'number' && fiveDayChange > 3) {
+        const bearishDirectionPattern = /(短期趋势偏弱|趋势偏弱|短期偏弱|短期趋势未逆转|趋势未逆转|承压|被压制)/g;
+        whyNow = whyNow.replace(bearishDirectionPattern, '短期反弹后技术结构仍需确认');
+        riskNote = riskNote.replace(bearishDirectionPattern, '短期反弹后技术结构仍需确认');
+    }
+
+    if (typeof fiveDayChange === 'number' && fiveDayChange < -3) {
+        const bullishDirectionPattern = /(持续上涨|反弹延续|动能强劲|短期强势)/g;
+        whyNow = whyNow.replace(bullishDirectionPattern, '短期回落后方向仍需确认');
+        riskNote = riskNote.replace(bullishDirectionPattern, '短期回落后方向仍需确认');
+    }
+
+    if (input.grade === 'AVOID') {
+        whyNow = whyNow
+            .replace(/具吸引力/g, '并不具备足够风险回报')
+            .replace(/值得切入/g, '不适合切入')
+            .replace(/可捕捉票息收益/g, '不宜为了票息承担接股风险')
+            .replace(/提供机会/g, '不构成入场机会');
+    }
+
+    return {
+        ...output,
+        why_now: whyNow,
+        risk_note: riskNote
+    };
 }
 
 function buildFallbackNarrative(input: NarrativeInput): NarrativeOutput {
@@ -244,6 +279,19 @@ function buildUserPrompt(
         input.pct_from_52w_high !== null && input.pct_from_52w_high !== undefined
             ? `${input.pct_from_52w_high}%`
             : '数据不可用';
+    const priceDirectionText = (() => {
+        const parts: string[] = [];
+        if (typeof input.change_1d_pct === 'number') {
+            parts.push(`1日${input.change_1d_pct >= 0 ? '+' : ''}${input.change_1d_pct.toFixed(2)}%`);
+        }
+        if (typeof input.change_5d_pct === 'number') {
+            parts.push(`5日${input.change_5d_pct >= 0 ? '+' : ''}${input.change_5d_pct.toFixed(2)}%`);
+        }
+        if (typeof input.change_ytd_pct === 'number') {
+            parts.push(`YTD${input.change_ytd_pct >= 0 ? '+' : ''}${input.change_ytd_pct.toFixed(1)}%`);
+        }
+        return parts.length > 0 ? parts.join('，') : '近期价格变化数据缺失';
+    })();
     const maDescription = buildMaDescription(input.current_price, input.ma50, input.ma200);
     const conflictTradeGuardrail =
         ['GDX', 'XOM', 'USO'].includes(input.symbol)
@@ -267,6 +315,7 @@ function buildUserPrompt(
 推荐询价：3个月，执行价$${input.recommended_strike}（${moneynessText}）
 参考票息区间：${input.estimated_coupon_range}
 当前价：${currentPriceText}
+近期价格变化：${priceDirectionText}
 距52周高点：${pctFromHighText}
 均线结构：${maDescription}
 IV水平：${input.iv_level}
@@ -279,6 +328,7 @@ ${recentEarningsContext}
 1. GO：强调为什么当下值得切入，以及执行价提供的安全边际
 2. CAUTION：强调不确定性、风险点，以及如客户坚持询价应更保守处理
 3. AVOID：直接说明为什么当前不适合做FCN，不要写成推荐
+3.1 如果评级为 AVOID，即使输入里有较高分数、安全边际或票息区间，也必须以“当前不适合做FCN/暂缓”为结论；禁止写“具吸引力”“值得切入”“可捕捉票息收益”“提供机会”等接近推荐的表达
 4. why_now控制在60-80字
 4.1 第一句必须先点明公司主营业务或核心产品，不得只写“公司/标的”
 5. FCN产品术语规范（必须严格遵守）：
@@ -297,6 +347,15 @@ ${recentEarningsContext}
 8. 禁止引用无直接可比关系的其他公司股价表现作为论据
 8.1 禁止使用竞争对手、同行或其他公司的负面新闻、财报或指引作为当前标的的pitch依据
 8.2 why_now和risk_note只能基于当前标的自身业务、财报、指引、监管和技术面数据
+9. 严禁幻觉性事实引用（critical）：
+   9.1 严禁在 risk_note 或 why_now 引用任何未在输入中提供的具体数字（分析师目标价、央行行为、机构持仓变化、宏观经济数据等）。例：禁止写“机构目标喊涨至$3000”“中国停止购金”“高盛上调PT”“PMI跌至48”，除非这些表述来自上方最新相关新闻或其他显式输入字段。
+   9.2 如果需要引用一个事实但输入里没有，必须改写为更通用的判断，例如“不确定性”“近期波动”等，不要造数字。
+   9.3 任何包含具体央行政策、分析师目标价、宏观读数的句子都必须有对应的新闻标题锚点；否则改写为不含具体数字的表述。
+10. 必须使用近期价格变化做方向校验（critical）：
+   10.1 risk_note 和 why_now 的方向性判断必须与“近期价格变化”一致。
+   10.2 如果5日变化 > +3%，禁止写“短期趋势偏弱”“承压”“被压制”等下跌 framing。
+   10.3 如果5日变化 < -3%，禁止写“持续上涨”“反弹延续”“动能强劲”等上涨 framing。
+   10.4 如果数据缺失（“近期价格变化数据缺失”），禁止猜测方向，应使用“短期波动加大”或“方向仍需确认”等中性 framing。
 ${conflictTradeGuardrail}
 ${input.has_recent_earnings && (input.grade === 'CAUTION' || input.grade === 'AVOID')
     ? input.days_since_earnings !== null &&

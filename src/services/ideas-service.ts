@@ -4001,6 +4001,67 @@ function shouldRefreshCommodityBetaCache(input: {
     return violatesCommodityGuardrail && input.grade === 'GO';
 }
 
+interface NarrativePriceMomentum {
+    change1dPct: number | null;
+    change5dPct: number | null;
+    changeYtdPct: number | null;
+}
+
+function calculateNarrativePctChange(
+    history: Array<{ date: string; close: number }>,
+    currentPrice: number | null,
+    daysBack: number
+): number | null {
+    if (!currentPrice || currentPrice <= 0 || history.length < daysBack + 1) {
+        return null;
+    }
+
+    const pastClose = history[history.length - 1 - daysBack]?.close;
+    if (!pastClose || pastClose <= 0) {
+        return null;
+    }
+
+    return ((currentPrice - pastClose) / pastClose) * 100;
+}
+
+function calculateNarrativeYtdChange(
+    history: Array<{ date: string; close: number }>,
+    currentPrice: number | null
+): number | null {
+    if (!currentPrice || currentPrice <= 0 || history.length === 0) {
+        return null;
+    }
+
+    const latestDate = history[history.length - 1]?.date;
+    const latestYear = latestDate?.slice(0, 4);
+    if (!latestYear) {
+        return null;
+    }
+
+    const firstThisYear = history.find((row) => row.date?.slice(0, 4) === latestYear && row.close > 0);
+    if (!firstThisYear || firstThisYear.close <= 0) {
+        return null;
+    }
+
+    return ((currentPrice - firstThisYear.close) / firstThisYear.close) * 100;
+}
+
+function buildNarrativePriceMomentum(symbolData: SymbolData | null | undefined): NarrativePriceMomentum {
+    if (!symbolData) {
+        return {
+            change1dPct: null,
+            change5dPct: null,
+            changeYtdPct: null
+        };
+    }
+
+    return {
+        change1dPct: calculateNarrativePctChange(symbolData.price_history, symbolData.current_price, 1),
+        change5dPct: calculateNarrativePctChange(symbolData.price_history, symbolData.current_price, 5),
+        changeYtdPct: calculateNarrativeYtdChange(symbolData.price_history, symbolData.current_price)
+    };
+}
+
 class CachedDataFetcher implements DataFetcherInterface {
     private readonly inner: DataFetcherInterface;
     private readonly symbolCache = new Map<string, Promise<SymbolData>>();
@@ -4783,6 +4844,7 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
             underlying?.company_name ?? getCompanyName(symbol)
         );
         const newsItems = newsContext.displayItems;
+        const narrativePriceMomentum = buildNarrativePriceMomentum(symbolData);
         const narrative = await buildNarrative({
             symbol,
             companyName: underlying?.company_name ?? getCompanyName(symbol),
@@ -4791,6 +4853,9 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
             recommendedStrike: scoring.recommended_strike,
             estimatedCouponRange: scoring.estimated_coupon_range,
             currentPrice: symbolData.current_price,
+            change1dPct: narrativePriceMomentum.change1dPct,
+            change5dPct: narrativePriceMomentum.change5dPct,
+            changeYtdPct: narrativePriceMomentum.changeYtdPct,
             pctFrom52wHigh: symbolData.pct_from_52w_high,
             ma20: symbolData.ma20,
             ma50: symbolData.ma50,
@@ -6098,6 +6163,9 @@ async function buildNarrative(input: {
     recommendedStrike: number | null;
     estimatedCouponRange: string | null;
     currentPrice: number | null;
+    change1dPct?: number | null;
+    change5dPct?: number | null;
+    changeYtdPct?: number | null;
     pctFrom52wHigh: number | null;
     ma20: number | null;
     ma50: number | null;
@@ -6140,6 +6208,9 @@ async function buildNarrative(input: {
         recommended_strike: input.recommendedStrike,
         estimated_coupon_range: input.estimatedCouponRange,
         current_price: input.currentPrice,
+        change_1d_pct: input.change1dPct ?? null,
+        change_5d_pct: input.change5dPct ?? null,
+        change_ytd_pct: input.changeYtdPct ?? null,
         pct_from_52w_high: input.pctFrom52wHigh,
         ma20: input.ma20,
         ma50: input.ma50,
