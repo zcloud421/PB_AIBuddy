@@ -1,4 +1,5 @@
 import { fetchTickerMarketCap, fetchTickerReferenceSnapshot, MassiveDataFetcher } from '../data/massive-fetcher';
+import { getChinaGoldReserveTrend } from '../data/macro-china-fetcher';
 import { fetchHistoricalStockNewsBatch, fetchStockNews, fetchStockNewsContext, filterRelevantNewsItems, getCompanyName } from '../data/news-fetcher';
 import {
     calculateHistoricalVolatility,
@@ -3877,6 +3878,7 @@ function scheduleDrawdownAttributionPrewarm(symbols: string[]) {
 }
 
 const COMMODITY_BETA_SYMBOLS = new Set(['GDX', 'USO']);
+const GOLD_RELATED_NARRATIVE_SYMBOLS = new Set(['GLD', 'GDX', 'IAU', 'SLV', 'GOLD', 'NEM', 'AEM']);
 const MACRO_SENSITIVITY_MAP: Array<{
     focusSlug: string;
     activeStatuses: string[];
@@ -6231,7 +6233,10 @@ async function buildNarrative(input: {
         earnings_weight: input.earningsWeight,
         days_to_earnings: input.daysToEarnings,
         days_since_earnings: input.daysSinceEarnings,
-        active_attribution_rules: input.activeAttributionRules?.slice(0, 3) ?? []
+        active_attribution_rules: input.activeAttributionRules?.slice(0, 3) ?? [],
+        china_gold_reserve_trend: GOLD_RELATED_NARRATIVE_SYMBOLS.has(input.symbol.toUpperCase())
+            ? await getChinaGoldReserveTrend().catch(() => null)
+            : null
     });
 
     void fetchTickerMarketCap(input.symbol).catch(() => null);

@@ -43,6 +43,12 @@ interface NarrativeInput {
         driver_type: string;
         family: string;
     }>;
+    china_gold_reserve_trend?: {
+        latest_period: string;
+        latest_gold_reserve_tonnes: number;
+        mom_change_wan_oz: number | null;
+        consecutive_months_increase: number;
+    } | null;
 }
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
@@ -179,6 +185,9 @@ function applyNarrativeOutputGuardrails(output: NarrativeOutput, input: Narrativ
         whyNow = whyNow
             .replace(/具吸引力/g, '并不具备足够风险回报')
             .replace(/值得切入/g, '不适合切入')
+            .replace(/适合[^。；，]*客户[^。；，]*获取票息收益/g, '不适合当前切入FCN')
+            .replace(/适合[^。；，]*客户[^。；，]*做FCN/g, '不适合当前做FCN')
+            .replace(/票息[^。；，]*较为合理/g, '票息补偿不足以覆盖接股风险')
             .replace(/可捕捉票息收益/g, '不宜为了票息承担接股风险')
             .replace(/提供机会/g, '不构成入场机会');
     }
@@ -292,6 +301,14 @@ function buildUserPrompt(
         }
         return parts.length > 0 ? parts.join('，') : '近期价格变化数据缺失';
     })();
+    const chinaGoldSection = input.china_gold_reserve_trend
+        ? `\n央行黄金储备（PBOC，Sina宏观数据）：
+最新月份：${input.china_gold_reserve_trend.latest_period}（${input.china_gold_reserve_trend.latest_gold_reserve_tonnes.toFixed(0)}吨）
+环比：${input.china_gold_reserve_trend.mom_change_wan_oz !== null
+        ? `${input.china_gold_reserve_trend.mom_change_wan_oz >= 0 ? '+' : ''}${input.china_gold_reserve_trend.mom_change_wan_oz.toFixed(0)}万盎司`
+        : '数据不可用'}
+连续增持：${input.china_gold_reserve_trend.consecutive_months_increase}个月`
+        : '';
     const maDescription = buildMaDescription(input.current_price, input.ma50, input.ma200);
     const conflictTradeGuardrail =
         ['GDX', 'XOM', 'USO'].includes(input.symbol)
@@ -316,6 +333,7 @@ function buildUserPrompt(
 参考票息区间：${input.estimated_coupon_range}
 当前价：${currentPriceText}
 近期价格变化：${priceDirectionText}
+${chinaGoldSection}
 距52周高点：${pctFromHighText}
 均线结构：${maDescription}
 IV水平：${input.iv_level}
@@ -356,6 +374,11 @@ ${recentEarningsContext}
    10.2 如果5日变化 > +3%，禁止写“短期趋势偏弱”“承压”“被压制”等下跌 framing。
    10.3 如果5日变化 < -3%，禁止写“持续上涨”“反弹延续”“动能强劲”等上涨 framing。
    10.4 如果数据缺失（“近期价格变化数据缺失”），禁止猜测方向，应使用“短期波动加大”或“方向仍需确认”等中性 framing。
+11. 涉及央行购金的引用必须基于“央行黄金储备”输入字段：
+   11.1 如果该字段存在且 consecutive_months_increase > 0，可以正向引用为“PBOC第N月连续增持”作为结构性需求支撑。
+   11.2 如果该字段不存在，禁止引用任何央行购金行为，包括PBOC、各国央行、储备多元化等。
+   11.3 严禁写“央行停止购金 / 减持黄金”等表述，除非 mom_change_wan_oz < 0 且存在连续减持数据。
+   11.4 引用的吨数、环比万盎司和连续月数必须严格使用输入字段，不得自行编造数字。
 ${conflictTradeGuardrail}
 ${input.has_recent_earnings && (input.grade === 'CAUTION' || input.grade === 'AVOID')
     ? input.days_since_earnings !== null &&
