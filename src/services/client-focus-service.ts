@@ -27,6 +27,7 @@ import { fetchNewsItemsByQuery, fetchNewsItemsFromNewsData } from '../data/news-
 import { fetchRssNewsFallback } from '../data/rss-news-fetcher';
 import { MassiveDataFetcher } from '../data/massive-fetcher';
 import { MassiveClient } from '../data/massive-client';
+import { getChinaGoldReserveTrend } from '../data/macro-china-fetcher';
 import { getGldFlowTrend } from '../data/spdr-gold-flow-fetcher';
 import { getBreakevenInflationTrend } from '../data/fred-fetcher';
 import { pool } from '../db/client';
@@ -9611,87 +9612,262 @@ async function fetchFocusSecondaryPriceHistory(slug: string): Promise<ClientFocu
     return null;
 }
 
+function withDriverStatus(item: Omit<ClientFocusDriverItem, 'status'>): ClientFocusDriverItem {
+    return {
+        ...item,
+        status: [item.tag, item.detail].filter(Boolean).join(' ')
+    };
+}
+
+function formatSignedNumber(value: number, digits = 1): string {
+    return `${value >= 0 ? '+' : ''}${value.toFixed(digits)}`;
+}
+
 async function buildGoldDrivers(newsItems: NewsItem[]): Promise<ClientFocusDriverItem[]> {
     const titles = newsItems.map((item) => item.title.toLowerCase()).join(' | ');
+    const [marketSnapshot, breakeven, chinaGoldTrend, gldTrend] = await Promise.all([
+        fetchClientFocusMarketStateSnapshot().catch(() => null),
+        getBreakevenInflationTrend().catch(() => null),
+        getChinaGoldReserveTrend().catch(() => null),
+        getGldFlowTrend().catch(() => null)
+    ]);
+    const marketItem = (code: string) => marketSnapshot?.indices.find((item) => item.code === code);
 
-    const realYieldStatus =
-        /yield rise|yield climbs|yields higher|hawkish|rate hike|higher for longer|yields surge/.test(titles)
-            ? '压制'
-            : /yield fall|yield drop|yields lower|dovish|rate cut|yields decline/.test(titles)
-                ? '支撑'
-                : '待确认';
+    const tnx5d = marketItem('TNX')?.change_5d_pct;
+    const realYield = withDriverStatus(
+        typeof tnx5d !== 'number'
+            ? {
+                  label: '实际利率',
+                  tag: '数据加载中',
+                  explanation: '10Y利率数据暂缺，先保持中性观察',
+                  data_source: 'real-data'
+              }
+            : tnx5d >= 5
+                ? {
+                      label: '实际利率',
+                      tag: '压制',
+                      detail: `10Y 5日${formatSignedNumber(tnx5d)}bp`,
+                      explanation: `10Y利率近5日${formatSignedNumber(tnx5d)}bp，机会成本上行`,
+                      data_source: 'real-data'
+                  }
+                : tnx5d <= -5
+                    ? {
+                          label: '实际利率',
+                          tag: '支撑',
+                          detail: `10Y 5日${tnx5d.toFixed(1)}bp`,
+                          explanation: `10Y利率回落${Math.abs(tnx5d).toFixed(1)}bp，持金成本降低`,
+                          data_source: 'real-data'
+                      }
+                    : {
+                          label: '实际利率',
+                          tag: '中性',
+                          detail: `10Y 5日${formatSignedNumber(tnx5d)}bp`,
+                          explanation: '10Y利率窄幅波动，对黄金方向影响有限',
+                          data_source: 'real-data'
+                      }
+    );
 
-    const breakeven = await getBreakevenInflationTrend().catch(() => null);
-    const inflationStatus = (() => {
-        if (breakeven) {
-            const level = breakeven.breakeven_10y_pct !== null ? ` ${breakeven.breakeven_10y_pct.toFixed(2)}%` : '';
-            const change =
-                breakeven.change_5d_10y_pct !== null
-                    ? `，5日${breakeven.change_5d_10y_pct >= 0 ? '+' : ''}${(breakeven.change_5d_10y_pct * 100).toFixed(0)}bp`
-                    : '';
-            if (breakeven.direction_10y === 'rising') return `抬升 (10Y BE${level}${change})`;
-            if (breakeven.direction_10y === 'falling') return `回落 (10Y BE${level}${change})`;
-            return `中性 (10Y BE${level}${change || '，5日基本持平'})`;
-        }
+    const inflation = withDriverStatus(
+        breakeven
+            ? (() => {
+                  const change = breakeven.change_5d_10y_pct;
+                  const level = breakeven.breakeven_10y_pct;
+                  const detail = [
+                      level !== null ? `10Y BE ${level.toFixed(2)}%` : null,
+                      change !== null ? `5日${formatSignedNumber(change * 100, 0)}bp` : null
+                  ]
+                      .filter(Boolean)
+                      .join(', ');
+                  if (breakeven.direction_10y === 'rising') {
+                      return {
+                          label: '通胀预期',
+                          tag: '支撑' as const,
+                          detail,
+                          explanation: `10Y break-even抬升，通胀预期支撑黄金`,
+                          data_source: 'real-data' as const
+                      };
+                  }
+                  if (breakeven.direction_10y === 'falling') {
+                      return {
+                          label: '通胀预期',
+                          tag: '压制' as const,
+                          detail,
+                          explanation: `10Y break-even回落，通胀预期降温`,
+                          data_source: 'real-data' as const
+                      };
+                  }
+                  return {
+                      label: '通胀预期',
+                      tag: '中性' as const,
+                      detail,
+                      explanation: '10Y break-even基本持平，无方向性驱动',
+                      data_source: 'real-data' as const
+                  };
+              })()
+            : /inflation|cpi|pce|oil price|energy price|inflation expectation|inflation expectations/.test(titles)
+                ? {
+                      label: '通胀预期',
+                      tag: '支撑',
+                      explanation: '新闻提及通胀担忧增加，但缺乏定量数据',
+                      data_source: 'news-keyword'
+                  }
+                : /inflation cool|disinflation|deflation|inflation fall/.test(titles)
+                    ? {
+                          label: '通胀预期',
+                          tag: '中性',
+                          explanation: '新闻信号方向不一，需观察CPI读数',
+                          data_source: 'news-keyword'
+                      }
+                    : {
+                          label: '通胀预期',
+                          tag: '待确认',
+                          explanation: 'FRED数据暂缺，新闻也未给出清晰方向',
+                          data_source: 'news-keyword'
+                      }
+    );
 
-        return /inflation|cpi|pce|oil price|energy price|inflation expectation|inflation expectations/.test(titles)
-            ? '抬升 (基于新闻)'
-            : /inflation cool|disinflation|deflation|inflation fall/.test(titles)
-                ? '中性 (基于新闻)'
-                : '待确认';
-    })();
+    const dxy5d = marketItem('DXY')?.change_5d_pct;
+    const dollar = withDriverStatus(
+        typeof dxy5d !== 'number'
+            ? {
+                  label: '美元强弱',
+                  tag: '数据加载中',
+                  explanation: '美元指数数据暂缺，先保持观察',
+                  data_source: 'real-data'
+              }
+            : dxy5d >= 0.5
+                ? {
+                      label: '美元强弱',
+                      tag: '压制',
+                      detail: `DXY 5日${formatSignedNumber(dxy5d)}%`,
+                      explanation: '强美元抬高非美元投资者购金成本',
+                      data_source: 'real-data'
+                  }
+                : dxy5d <= -0.5
+                    ? {
+                          label: '美元强弱',
+                          tag: '支撑',
+                          detail: `DXY 5日${dxy5d.toFixed(1)}%`,
+                          explanation: '弱美元支撑黄金的非美元定价',
+                          data_source: 'real-data'
+                      }
+                    : {
+                          label: '美元强弱',
+                          tag: '中性',
+                          detail: `DXY 5日${formatSignedNumber(dxy5d)}%`,
+                          explanation: '美元近期波动有限，对金价影响小',
+                          data_source: 'real-data'
+                      }
+    );
 
-    const dollarStatus =
-        /dollar strength|dollar rise|dollar climbs|dxy rise|stronger dollar|dollar index rise/.test(titles)
-            ? '偏强'
-            : /dollar weak|dollar fall|dollar drop|dxy fall|dollar decline|weaker dollar/.test(titles)
-                ? '偏弱'
-                : '待确认';
+    const centralBank = withDriverStatus(
+        chinaGoldTrend
+            ? chinaGoldTrend.consecutive_months_increase > 0
+                ? {
+                      label: '央行购金',
+                      tag: '支撑',
+                      detail: `PBOC连续${chinaGoldTrend.consecutive_months_increase}月增持`,
+                      explanation: `PBOC持金${chinaGoldTrend.latest_gold_reserve_tonnes.toFixed(0)}吨，结构需求支撑`,
+                      data_source: 'real-data'
+                  }
+                : chinaGoldTrend.consecutive_months_decrease > 0
+                    ? {
+                          label: '央行购金',
+                          tag: '走弱',
+                          detail: `PBOC连续${chinaGoldTrend.consecutive_months_decrease}月减持`,
+                          explanation: 'PBOC减持显示官方需求边际降温',
+                          data_source: 'real-data'
+                      }
+                    : {
+                          label: '央行购金',
+                          tag: '中性',
+                          detail: `PBOC ${chinaGoldTrend.latest_gold_reserve_tonnes.toFixed(0)}吨`,
+                          explanation: 'PBOC持仓未变，节奏放缓但未转向',
+                          data_source: 'real-data'
+                      }
+            : {
+                  label: '央行购金',
+                  tag: '数据加载中',
+                  explanation: 'PBOC黄金储备数据暂缺',
+                  data_source: 'real-data'
+              }
+    );
 
-    const centralBankStatus =
-        /central bank|official buying|央行购金|gold purchase|sovereign buying/.test(titles)
-            ? /slows|放缓|moderate|cool|pause|减少/.test(titles)
-                ? '支撑放缓'
-                : '支撑'
-            : '数据低频';
+    const gold5d = marketItem('GOLD')?.change_5d_pct;
+    const hasGeopoliticalStress = /iran|israel|war|conflict|geopolitical|hormuz|middle east/.test(titles);
+    const haven = withDriverStatus(
+        hasGeopoliticalStress
+            ? typeof gold5d === 'number' && gold5d > 1
+                ? {
+                      label: '避险需求',
+                      tag: '支撑',
+                      detail: `黄金5日${formatSignedNumber(gold5d)}%`,
+                      explanation: '地缘扰动升温且金价同步上涨',
+                      data_source: 'news-keyword'
+                  }
+                : {
+                      label: '避险需求',
+                      tag: '有限支撑',
+                      detail: typeof gold5d === 'number' ? `黄金5日${formatSignedNumber(gold5d)}%` : undefined,
+                      explanation: '地缘事件仍在，但金价反应较钝化',
+                      data_source: 'news-keyword'
+                  }
+            : {
+                  label: '避险需求',
+                  tag: '中性',
+                  explanation: '近期无重大地缘扰动',
+                  data_source: 'news-keyword'
+              }
+    );
 
-    const havenStatus =
-        /iran|israel|war|conflict|geopolitical|hormuz|middle east/.test(titles)
-            ? /gold rally|gold surge|haven demand|flight to safety|gold jumps/.test(titles)
-                ? '支撑'
-                : '有限支撑'
-            : '中性';
+    const etfFlow = withDriverStatus(
+        gldTrend
+            ? gldTrend.direction_5d === 'inflow'
+                ? {
+                      label: 'ETF资金流',
+                      tag: '净流入',
+                      detail: gldTrend.change_5d_tonnes !== null ? `GLD 5日+${gldTrend.change_5d_tonnes.toFixed(1)}吨` : undefined,
+                      explanation: 'GLD资金回流，配置需求改善',
+                      data_source: 'real-data'
+                  }
+                : gldTrend.direction_5d === 'outflow'
+                    ? {
+                          label: 'ETF资金流',
+                          tag: '净流出',
+                          detail: gldTrend.change_5d_tonnes !== null ? `GLD 5日${gldTrend.change_5d_tonnes.toFixed(1)}吨` : undefined,
+                          explanation: 'GLD资金流出，配置需求降温',
+                          data_source: 'real-data'
+                      }
+                    : {
+                          label: 'ETF资金流',
+                          tag: '中性',
+                          detail: 'GLD 5日基本持平',
+                          explanation: 'GLD持仓近期变化有限',
+                          data_source: 'real-data'
+                      }
+            : /etf outflow|gold etf outflow|fund outflow|gold redemption/.test(titles)
+                ? {
+                      label: 'ETF资金流',
+                      tag: '净流出',
+                      explanation: '新闻提到黄金ETF流出，但缺少吨数',
+                      data_source: 'news-keyword'
+                  }
+                : /etf inflow|gold etf inflow|fund inflow|gold buying/.test(titles)
+                    ? {
+                          label: 'ETF资金流',
+                          tag: '净流入',
+                          explanation: '新闻提到黄金ETF流入，但缺少吨数',
+                          data_source: 'news-keyword'
+                      }
+                    : {
+                          label: 'ETF资金流',
+                          tag: '待确认',
+                          explanation: 'SPDR数据暂缺，新闻也未确认方向',
+                          data_source: 'news-keyword'
+                      }
+    );
 
-    let etfStatus = '数据加载中';
-    try {
-        const gldTrend = await getGldFlowTrend();
-        if (gldTrend) {
-            etfStatus =
-                gldTrend.direction_5d === 'inflow'
-                    ? `净流入 ${gldTrend.change_5d_tonnes !== null ? `+${gldTrend.change_5d_tonnes.toFixed(1)}吨` : ''}`.trim()
-                    : gldTrend.direction_5d === 'outflow'
-                        ? `净流出 ${gldTrend.change_5d_tonnes !== null ? `${gldTrend.change_5d_tonnes.toFixed(1)}吨` : ''}`.trim()
-                        : '基本持平';
-        } else {
-            etfStatus =
-                /etf outflow|gold etf outflow|fund outflow|gold redemption/.test(titles)
-                    ? '流出'
-                    : /etf inflow|gold etf inflow|fund inflow|gold buying/.test(titles)
-                        ? '流入'
-                        : '待确认';
-        }
-    } catch {
-        etfStatus = '数据获取失败';
-    }
-
-    return [
-        { label: '实际利率', status: realYieldStatus },
-        { label: '通胀预期', status: inflationStatus },
-        { label: '美元强弱', status: dollarStatus },
-        { label: '央行购金', status: centralBankStatus },
-        { label: '避险需求', status: havenStatus },
-        { label: 'ETF资金流', status: etfStatus }
-    ];
+    return [realYield, inflation, dollar, centralBank, haven, etfFlow];
 }
 
 async function fetchHongKongSpotIndices() {

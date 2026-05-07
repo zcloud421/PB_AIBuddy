@@ -364,9 +364,25 @@ export interface ClientFocusPriceHistoryPoint {
     close: number;
 }
 
+export type ClientFocusDriverTag =
+    | '支撑'
+    | '有限支撑'
+    | '净流入'
+    | '中性'
+    | '待确认'
+    | '数据加载中'
+    | '压制'
+    | '走弱'
+    | '净流出';
+
 export interface ClientFocusDriverItem {
     label: string;
-    status: string;
+    /** @deprecated use tag + detail instead */
+    status?: string;
+    tag: ClientFocusDriverTag;
+    detail?: string;
+    explanation?: string;
+    data_source?: 'real-data' | 'news-keyword';
 }
 
 export interface ClientFocusPolymarketHistoryPoint {
