@@ -146,6 +146,7 @@ interface BreakingNewsCandidate {
 interface DailyPitchHeadlineSignals {
     openAiTargetMissTitles: string[];
     uaeOpecExitTitles: string[];
+    iranCeasefireProgressTitles: string[];
     centralBankShockTitles: string[];
     majorGeopoliticalTitles: string[];
     majorEarningsResultTitles: string[];
@@ -173,6 +174,7 @@ const BLOCKED_WEEKLY_SOURCE_PATTERNS = [
 const EMPTY_DAILY_PITCH_HEADLINE_SIGNALS: DailyPitchHeadlineSignals = {
     openAiTargetMissTitles: [],
     uaeOpecExitTitles: [],
+    iranCeasefireProgressTitles: [],
     centralBankShockTitles: [],
     majorGeopoliticalTitles: [],
     majorEarningsResultTitles: [],
@@ -3513,6 +3515,14 @@ function isUaeOpecExitHeadline(title: string): boolean {
         && /(exit|quit|leave|withdraw|withdraws|leaves|quits|退出|離開|离开)/i.test(normalized);
 }
 
+function isIranCeasefireProgressHeadline(title: string): boolean {
+    const lower = title.toLowerCase();
+    const hasIranTopic = /(iran|tehran|伊朗|德黑兰)/i.test(title);
+    const hasCeasefireOrDeal = /(ceasefire|cease.fire|deal|peace|negotiation|talks|hormuz|truce|停火|协议|談判|谈判|霍尔木兹|霍爾木茲)/i.test(lower);
+    const hasProgress = /(progress|advance|near|close|agree|sign|breakthrough|reopen|safe passage|navigation|安全|通航|靠近|接近|达成|達成|签署|簽署|重启|重啟)/i.test(lower);
+    return hasIranTopic && hasCeasefireOrDeal && hasProgress;
+}
+
 const FOMC_DECISION_DATES_2026 = [
     '2026-01-29',
     '2026-03-19',
@@ -3788,12 +3798,14 @@ async function getRecentlyReportedMajorEarningsSymbols(): Promise<string[]> {
         .map((row) => row.value)
         .filter((symbol): symbol is string => Boolean(symbol));
 
-    const sameDayRows = await getUpcomingEarningsNextNDays(1).catch(() => []);
-    const sameDaySymbols = sameDayRows
-        .filter((row) => row.days_until === 0 && symbols.includes(row.symbol))
-        .map((row) => row.symbol);
+    const sameDayUpcomingRows = await getUpcomingEarningsNextNDays(1).catch(() => []);
+    const sameDayUpcomingSymbols = new Set(
+        sameDayUpcomingRows
+            .filter((row) => row.days_until === 0 && symbols.includes(row.symbol))
+            .map((row) => row.symbol)
+    );
 
-    return Array.from(new Set([...recentSymbols, ...sameDaySymbols]));
+    return Array.from(new Set(recentSymbols.filter((symbol) => !sameDayUpcomingSymbols.has(symbol))));
 }
 
 // Default freshness window for event headline detectors. 36 hours covers a typical
@@ -3926,11 +3938,14 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
     const onFomcWindow = isFomcDecisionWindow(todayIso);
     const onBojWindow = isBojDecisionWindow(todayIso);
     const nearestMacroEvent = getNearestMacroDataEvent(todayIso);
-    const [openAiResults, uaeResults, centralBankResults, geopoliticalResults, majorEarningsResults, fomcResults, bojResults, macroResults, chinaResults] = await Promise.allSettled([
+    const [openAiResults, uaeResults, iranCeasefireResults, centralBankResults, geopoliticalResults, majorEarningsResults, fomcResults, bojResults, macroResults, chinaResults] = await Promise.allSettled([
         fetchNewsItemsByQuery('OpenAI missed revenue user targets Oracle CoreWeave AI stocks WSJ', {
             excludeEtfAndFunds: false
         }),
         fetchNewsItemsByQuery('UAE exit OPEC OPEC+ May 1 oil supply Brent', {
+            excludeEtfAndFunds: false
+        }),
+        fetchNewsItemsByQuery('Iran ceasefire Hormuz navigation Trump peace talks oil', {
             excludeEtfAndFunds: false
         }),
         fetchNewsItemsByQuery('central bank BOJ Fed ECB surprise rate cut hike emergency intervention pivot', {
@@ -3969,6 +3984,7 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
 
     const openAiItems = openAiResults.status === 'fulfilled' ? openAiResults.value : [];
     const uaeItems = uaeResults.status === 'fulfilled' ? uaeResults.value : [];
+    const iranCeasefireItems = iranCeasefireResults.status === 'fulfilled' ? iranCeasefireResults.value : [];
     const centralBankItems = centralBankResults.status === 'fulfilled' ? centralBankResults.value : [];
     const geopoliticalItems = geopoliticalResults.status === 'fulfilled' ? geopoliticalResults.value : [];
     const majorEarningsItems = majorEarningsResults.status === 'fulfilled' ? majorEarningsResults.value : [];
@@ -3980,6 +3996,7 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
     const existingTitles = new Set([
         ...openAiItems.map((item) => item.title),
         ...uaeItems.map((item) => item.title),
+        ...iranCeasefireItems.map((item) => item.title),
         ...centralBankItems.map((item) => item.title),
         ...geopoliticalItems.map((item) => item.title),
         ...majorEarningsItems.map((item) => item.title),
@@ -4096,10 +4113,16 @@ async function fetchDailyPitchHeadlineSignals(): Promise<DailyPitchHeadlineSigna
     }
     const macroDataEventType = nearestMacroEvent?.type ?? null;
     const chinaMacroTitles = compactHeadlineList(chinaItems, isChinaMacroSurpriseHeadline, { maxAgeHours: 24 });
+    const iranCeasefireProgressTitles = compactHeadlineList(
+        [...iranCeasefireItems, ...uaeItems, ...geopoliticalItems, ...broadItems, ...fallbackItems],
+        isIranCeasefireProgressHeadline,
+        { maxAgeHours: 24 }
+    );
 
     return {
         openAiTargetMissTitles: compactHeadlineList(openAiItems, isOpenAiTargetMissHeadline),
         uaeOpecExitTitles: compactHeadlineList(uaeItems, isUaeOpecExitHeadline),
+        iranCeasefireProgressTitles,
         centralBankShockTitles: compactHeadlineList(centralBankItems, isCentralBankShockHeadline),
         majorGeopoliticalTitles: compactHeadlineList(geopoliticalItems, isMajorGeopoliticalHeadline),
         majorEarningsResultTitles,
@@ -4125,6 +4148,10 @@ function mergeDailyPitchHeadlineSignalsFromTopics(
         uaeOpecExitTitles: [
             ...headlineSignals.uaeOpecExitTitles,
             ...titles.filter(isUaeOpecExitHeadline)
+        ].slice(0, 3),
+        iranCeasefireProgressTitles: [
+            ...headlineSignals.iranCeasefireProgressTitles,
+            ...titles.filter(isIranCeasefireProgressHeadline)
         ].slice(0, 3),
         centralBankShockTitles: [
             ...headlineSignals.centralBankShockTitles,
@@ -4457,11 +4484,14 @@ async function buildDailyPitchCandidateSection(
             || (typeof oil.change_5d_pct === 'number' && Math.abs(oil.change_5d_pct) >= 5)
         )
     ) {
+        const oilDeclining = (oil.change_pct ?? 0) < 0 || (oil.change_5d_pct ?? 0) < 0;
         candidates.push([
             '[HIGH][3D] 能源风险溢价重新定价',
             `数据锚点：${formatPitchCandidateChange(oil)}。`,
-            '为什么可聊：油价大幅波动会沿着通胀预期、降息路径、航空/能源股、黄金和AT1信用利差传导，是PB客户跨资产组合最容易追问的地缘变量。',
-            '建议标题：油价震荡，通胀预期升温',
+            oilDeclining
+                ? '为什么可聊：油价大幅回落通常代表地缘风险溢价回吐或需求预期转弱，会重新影响通胀压力、降息路径、黄金和AT1信用利差。'
+                : '为什么可聊：油价大幅上行会沿着通胀预期、降息路径、航空/能源股、黄金和AT1信用利差传导，是PB客户跨资产组合最容易追问的地缘变量。',
+            `建议标题：${oilDeclining ? '油价急跌，风险溢价回吐' : '油价震荡，通胀预期升温'}`,
             '适合客户：能源敞口客户、黄金或AT1客户'
         ].join('\n'));
     }
@@ -4694,6 +4724,7 @@ async function buildDeterministicDailyPitchTriggers(
         codes: ['BRENT', 'OIL'],
         recentSelloffMinPct: -3,
     });
+    const competingCeasefireNarrative = headlineSignals.iranCeasefireProgressTitles.length > 0;
     const ratesNarrativeReversed = isNarrativeReversedByMarket(marketSnapshot, {
         codes: ['TNX'],
         recentSelloffMinPct: -10,
@@ -4911,10 +4942,10 @@ async function buildDeterministicDailyPitchTriggers(
     }
 
     const oil = byCode.get('BRENT') ?? byCode.get('OIL');
-    if (headlineSignals.uaeOpecExitTitles.length > 0 && oilNarrativeReversed) {
-        console.warn('[daily-pitch] suppressing UAE OPEC trigger: oil market data shows high-oil narrative reversed');
+    if (headlineSignals.uaeOpecExitTitles.length > 0 && (oilNarrativeReversed || competingCeasefireNarrative)) {
+        console.warn(`[daily-pitch] suppressing UAE OPEC trigger: oilReversed=${oilNarrativeReversed}, competingCeasefire=${competingCeasefireNarrative}`);
     }
-    if (headlineSignals.uaeOpecExitTitles.length > 0 && !oilNarrativeReversed) {
+    if (headlineSignals.uaeOpecExitTitles.length > 0 && !oilNarrativeReversed && !competingCeasefireNarrative) {
         const marketAnchor = oil ? `${formatPitchCandidateChange(oil)}。` : '';
         const context = `${marketAnchor}UAE宣布退出OPEC/OPEC+，油价逻辑从霍尔木兹单一封锁升级为供给纪律和OPEC凝聚力再定价，影响通胀预期、黄金、AT1和长久期债。`;
         const oilAnchor = oil ? formatPitchDataAnchor(oil) : '';
@@ -4945,19 +4976,26 @@ async function buildDeterministicDailyPitchTriggers(
             || (typeof oil.change_5d_pct === 'number' && Math.abs(oil.change_5d_pct) >= 5)
         )
     ) {
-        const context = `${formatPitchCandidateChange(oil)}。能源风险溢价仍在重定价，传导链落在通胀预期、降息路径、黄金和AT1信用利差。`;
+        const oilDeclining = (oil.change_pct ?? 0) < 0 || (oil.change_5d_pct ?? 0) < 0;
+        const context = oilDeclining
+            ? `${formatPitchCandidateChange(oil)}。油价快速回落显示地缘风险溢价回吐，市场会重新评估通胀压力、降息路径、黄金和AT1信用利差。`
+            : `${formatPitchCandidateChange(oil)}。能源风险溢价仍在重定价，传导链落在通胀预期、降息路径、黄金和AT1信用利差。`;
         const oilAnchor = formatPitchDataAnchor(oil);
-        const oilTalkingPoint = `油价${oilAnchor || '今天明显变动'}。能源风险溢价重定价，传导链落在通胀预期、降息路径、黄金与AT1信用利差，跨资产组合受影响。`;
+        const oilTalkingPoint = oilDeclining
+            ? `油价${oilAnchor || '今天明显回落'}。这更像风险溢价回吐而非供给紧张，通胀预期和降息路径会先被重估，黄金与AT1也会受传导影响。`
+            : `油价${oilAnchor || '今天明显变动'}。能源风险溢价重定价，传导链落在通胀预期、降息路径、黄金与AT1信用利差，跨资产组合受影响。`;
         triggers.push({
             id: triggers.length + 1,
-            headline: '油价震荡，通胀预期升温',
-            hook: '油价震荡，通胀预期升温',
+            headline: oilDeclining ? '油价急跌，风险溢价回吐' : '油价震荡，通胀预期升温',
+            hook: oilDeclining ? '油价急跌，风险溢价回吐' : '油价震荡，通胀预期升温',
             context,
             why_now: context,
             talking_point: oilTalkingPoint,
             pitch_line: oilTalkingPoint,
             client_type: '能源黄金或AT1客户',
-            watchpoints: ['油价能否回吐', '通胀预期', 'AT1利差'],
+            watchpoints: oilDeclining
+                ? ['停火谈判进展', '通胀预期回落', 'AT1利差']
+                : ['油价能否回吐', '通胀预期', 'AT1利差'],
             related_assets: ['Crude Oil', 'Inflation', 'Gold', 'AT1'],
             asset_tags: ['Crude Oil', 'Inflation', 'Gold', 'AT1'],
             materiality_trigger: '3D: geopolitical commodity risk',
@@ -5447,7 +5485,7 @@ function validatePitchTriggerFacts(
             }
         }
 
-        if (mentionsBrent && /(高位持续|供给.*紧|凝聚力.*再定价|油价.*上行|油市.*高位)/.test(fullText)) {
+        if (mentionsBrent && /(高位持续|供给.*紧|凝聚力.*再定价|油价.*上行|油市.*高位|通胀预期.*升温|通胀压力.*升温)/.test(fullText)) {
             const brent = marketByCode.get('BRENT') ?? marketByCode.get('OIL');
             if (brent && typeof brent.change_5d_pct === 'number' && brent.change_5d_pct <= -3) {
                 reasons.push(`方向冲突: 文本暗示油价高位, 但Brent/Oil 5日 ${brent.change_5d_pct.toFixed(1)}%`);
@@ -6242,6 +6280,7 @@ const DAILY_PITCH_NARRATIVE_REVERSAL_CHECK_PROMPT = `【市场方向反向校验
 - candidate "港股结构分化" + 恒指 +1% / 恒科 -1% → 不冲突（分化是中性 framing）
 判断标准：
 - "显著冲突" = market_signals 里相关指标 5日 涨跌幅或 YTD 涨跌幅与 candidate 隐含方向相反，幅度足以代表市场已消化
+- narrative replacement 校验：如果两个候选 framing 在因果关系上对立（例如 OPEC 退出 vs Iran ceasefire；财报证伪 vs 财报落地兑现），且更新的 framing 在 24 小时内有新闻支持，必须选用更新的 framing，跳过旧的 framing；不允许同时输出两条 framing 对立的卡片
 - 模糊情况优先 **保留并改写**，而非粗暴跳过——RM 仍想知道这条话题，但需要你给出当前市场是怎么看的
 - 如果你选了改写或 mixed，**talking_point 必须明确点出市场方向已变**，不能写成"市场仍担忧 X"这种与数据冲突的句子`;
 
