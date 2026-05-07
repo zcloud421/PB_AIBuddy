@@ -129,7 +129,9 @@ const DRAWDOWN_ATTRIBUTION_TIMEOUT_MS = 1500;
 const DRAWDOWN_ATTRIBUTION_WARM_TIMEOUT_MS = 3200;
 const DRAWDOWN_NEWS_ENRICH_TIMEOUT_MS = 900;
 const DRAWDOWN_NEWS_ENRICH_WARM_TIMEOUT_MS = 2800;
-const DRAWDOWN_LLM_ENRICH_TIMEOUT_MS = 3000;
+const DRAWDOWN_LLM_ENRICH_TIMEOUT_MS = Number(
+    process.env.DRAWDOWN_LLM_TIMEOUT_MS ?? '20000'
+);
 const DRAWDOWN_ATTRIBUTION_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DRAWDOWN_NEWS_ENRICH_EPISODE_LIMIT = 8;
 const DRAWDOWN_PREWARM_COOLDOWN_MS = 30 * 60 * 1000;
@@ -8057,7 +8059,13 @@ async function refineDrawdownAttributionsWithLLM(input: {
     }>;
 }): Promise<Map<string, LlmAttributionResult>> {
     const apiKey = process.env.DEEPSEEK_API_KEY;
-    if (!apiKey || input.items.length === 0) {
+    const startedAt = Date.now();
+    const itemCount = input.items.length;
+    if (!apiKey) {
+        console.warn(`[drawdown-llm] skipped: DEEPSEEK_API_KEY missing (items=${itemCount})`);
+        return new Map();
+    }
+    if (input.items.length === 0) {
         return new Map();
     }
 
@@ -8150,6 +8158,7 @@ ${newsBlock}`;
         });
 
         if (!response.ok) {
+            console.warn(`[drawdown-llm] http_error: status=${response.status} duration_ms=${Date.now() - startedAt} items=${itemCount}`);
             return new Map();
         }
 
@@ -8158,12 +8167,20 @@ ${newsBlock}`;
         };
         const raw = payload.choices?.[0]?.message?.content?.trim() ?? '';
         if (!raw) {
+            console.warn(`[drawdown-llm] empty_content: duration_ms=${Date.now() - startedAt} items=${itemCount}`);
             return new Map();
         }
 
-        const parsed = JSON.parse(raw) as { items?: Array<{ peak_date?: string; trough_date?: string; reason_zh?: string; buckets?: unknown; confidence?: number }> };
+        let parsed: { items?: Array<{ peak_date?: string; trough_date?: string; reason_zh?: string; buckets?: unknown; confidence?: number }> } | Array<{ peak_date?: string; trough_date?: string; reason_zh?: string; buckets?: unknown; confidence?: number }>;
+        try {
+            parsed = JSON.parse(raw) as typeof parsed;
+        } catch {
+            console.warn(`[drawdown-llm] parse_error: duration_ms=${Date.now() - startedAt} items=${itemCount} raw_preview=${raw.slice(0, 200)}`);
+            return new Map();
+        }
         const items = Array.isArray(parsed) ? parsed : Array.isArray(parsed.items) ? parsed.items : [];
         const map = new Map<string, LlmAttributionResult>();
+        let droppedCount = 0;
         for (const item of items) {
             const peak = item.peak_date?.trim();
             const trough = item.trough_date?.trim();
@@ -8176,10 +8193,16 @@ ${newsBlock}`;
                     buckets,
                     confidence
                 });
+            } else {
+                droppedCount += 1;
             }
         }
+        console.log(`[drawdown-llm] success: duration_ms=${Date.now() - startedAt} items_in=${itemCount} items_out=${map.size} dropped=${droppedCount}`);
         return map;
-    } catch {
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const isTimeout = /abort|timeout/i.test(message);
+        console.warn(`[drawdown-llm] ${isTimeout ? 'timeout' : 'exception'}: duration_ms=${Date.now() - startedAt} items=${itemCount} error=${message}`);
         return new Map();
     }
 }
@@ -8316,6 +8339,7 @@ async function buildEnrichedDrawdownAttributions(
         )
     );
 
+    const llmCallStart = Date.now();
     const llmReasons = await withSoftTimeout(
         refineDrawdownAttributionsWithLLM({
             symbol,
@@ -8344,6 +8368,10 @@ async function buildEnrichedDrawdownAttributions(
         new Map<string, LlmAttributionResult>(),
         DRAWDOWN_LLM_ENRICH_TIMEOUT_MS
     );
+    const llmCallDuration = Date.now() - llmCallStart;
+    if (llmReasons.size === 0) {
+        console.warn(`[drawdown-llm] outer_empty_map: duration_ms=${llmCallDuration} timeout_ms=${DRAWDOWN_LLM_ENRICH_TIMEOUT_MS} (likely soft-timeout fired before LLM completed)`);
+    }
 
     for (const [index, item] of newsByEpisode.entries()) {
         const key = `${item.episode.peak_date}::${item.episode.trough_date}`;
