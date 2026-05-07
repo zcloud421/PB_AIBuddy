@@ -27,6 +27,7 @@ import { fetchNewsItemsByQuery, fetchNewsItemsFromNewsData } from '../data/news-
 import { fetchRssNewsFallback } from '../data/rss-news-fetcher';
 import { MassiveDataFetcher } from '../data/massive-fetcher';
 import { MassiveClient } from '../data/massive-client';
+import { getGldFlowTrend } from '../data/spdr-gold-flow-fetcher';
 import { pool } from '../db/client';
 import {
     getLatestClientFocusDailyVerdict,
@@ -9609,7 +9610,7 @@ async function fetchFocusSecondaryPriceHistory(slug: string): Promise<ClientFocu
     return null;
 }
 
-function buildGoldDrivers(newsItems: NewsItem[]): ClientFocusDriverItem[] {
+async function buildGoldDrivers(newsItems: NewsItem[]): Promise<ClientFocusDriverItem[]> {
     const titles = newsItems.map((item) => item.title.toLowerCase()).join(' | ');
 
     const realYieldStatus =
@@ -9647,12 +9648,27 @@ function buildGoldDrivers(newsItems: NewsItem[]): ClientFocusDriverItem[] {
                 : '有限支撑'
             : '中性';
 
-    const etfStatus =
-        /etf outflow|gold etf outflow|fund outflow|gold redemption/.test(titles)
-            ? '流出'
-            : /etf inflow|gold etf inflow|fund inflow|gold buying/.test(titles)
-                ? '流入'
-                : '待确认';
+    let etfStatus = '数据加载中';
+    try {
+        const gldTrend = await getGldFlowTrend();
+        if (gldTrend) {
+            etfStatus =
+                gldTrend.direction_5d === 'inflow'
+                    ? `净流入 ${gldTrend.change_5d_tonnes !== null ? `+${gldTrend.change_5d_tonnes.toFixed(1)}吨` : ''}`.trim()
+                    : gldTrend.direction_5d === 'outflow'
+                        ? `净流出 ${gldTrend.change_5d_tonnes !== null ? `${gldTrend.change_5d_tonnes.toFixed(1)}吨` : ''}`.trim()
+                        : '基本持平';
+        } else {
+            etfStatus =
+                /etf outflow|gold etf outflow|fund outflow|gold redemption/.test(titles)
+                    ? '流出'
+                    : /etf inflow|gold etf inflow|fund inflow|gold buying/.test(titles)
+                        ? '流入'
+                        : '待确认';
+        }
+    } catch {
+        etfStatus = '数据获取失败';
+    }
 
     return [
         { label: '实际利率', status: realYieldStatus },
@@ -10663,7 +10679,7 @@ async function buildClientFocusDetail(topic: FocusTopicConfig): Promise<ClientFo
         focus_price_history: focusPriceHistory ?? undefined,
         focus_secondary_price_snapshot: focusSecondaryPriceSnapshot ?? undefined,
         focus_secondary_price_history: focusSecondaryPriceHistory ?? undefined,
-        gold_drivers: topic.slug === 'gold-repricing' ? buildGoldDrivers(newsItems) : undefined,
+        gold_drivers: topic.slug === 'gold-repricing' ? await buildGoldDrivers(newsItems) : undefined,
         theme_winners_losers: (themeResult?.result_json as ClientFocusDetailResponse['theme_winners_losers']) ?? null,
         daily_verdict: dailyVerdict ?? null,
         disclaimer: DEFAULT_DISCLAIMER

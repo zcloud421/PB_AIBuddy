@@ -1,5 +1,6 @@
 import { fetchTickerMarketCap, fetchTickerReferenceSnapshot, MassiveDataFetcher } from '../data/massive-fetcher';
 import { getChinaGoldReserveTrend } from '../data/macro-china-fetcher';
+import { getGldFlowTrend } from '../data/spdr-gold-flow-fetcher';
 import { fetchHistoricalStockNewsBatch, fetchStockNews, fetchStockNewsContext, filterRelevantNewsItems, getCompanyName } from '../data/news-fetcher';
 import {
     calculateHistoricalVolatility,
@@ -6202,6 +6203,13 @@ async function buildNarrative(input: {
         return null;
     }
 
+    const [chinaGoldReserveTrend, gldFlowTrend] = GOLD_RELATED_NARRATIVE_SYMBOLS.has(input.symbol.toUpperCase())
+        ? await Promise.all([
+              getChinaGoldReserveTrend().catch(() => null),
+              getGldFlowTrend().catch(() => null)
+          ])
+        : [null, null];
+
     const narrative = await generateNarrative({
         symbol: input.symbol,
         company_name: input.companyName,
@@ -6234,9 +6242,8 @@ async function buildNarrative(input: {
         days_to_earnings: input.daysToEarnings,
         days_since_earnings: input.daysSinceEarnings,
         active_attribution_rules: input.activeAttributionRules?.slice(0, 3) ?? [],
-        china_gold_reserve_trend: GOLD_RELATED_NARRATIVE_SYMBOLS.has(input.symbol.toUpperCase())
-            ? await getChinaGoldReserveTrend().catch(() => null)
-            : null
+        china_gold_reserve_trend: chinaGoldReserveTrend,
+        gld_flow_trend: gldFlowTrend
     });
 
     void fetchTickerMarketCap(input.symbol).catch(() => null);

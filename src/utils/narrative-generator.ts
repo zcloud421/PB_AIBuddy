@@ -49,6 +49,15 @@ interface NarrativeInput {
         mom_change_wan_oz: number | null;
         consecutive_months_increase: number;
     } | null;
+    gld_flow_trend?: {
+        latest_date: string;
+        latest_tonnes: number;
+        change_1d_tonnes: number | null;
+        change_5d_tonnes: number | null;
+        direction_5d: 'inflow' | 'outflow' | 'flat';
+        consecutive_inflow_days: number;
+        consecutive_outflow_days: number;
+    } | null;
 }
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
@@ -192,6 +201,19 @@ function applyNarrativeOutputGuardrails(output: NarrativeOutput, input: Narrativ
             .replace(/提供机会/g, '不构成入场机会');
     }
 
+    if (input.gld_flow_trend && input.gld_flow_trend.direction_5d !== 'flat' && input.gld_flow_trend.change_5d_tonnes !== null) {
+        const flowText =
+            input.gld_flow_trend.direction_5d === 'inflow'
+                ? `GLD ETF 5日净流入+${input.gld_flow_trend.change_5d_tonnes.toFixed(1)}吨`
+                : `GLD ETF 5日净流出${input.gld_flow_trend.change_5d_tonnes.toFixed(1)}吨`;
+        if (!whyNow.includes(flowText) && !riskNote.includes(flowText)) {
+            riskNote = `${flowText}，${riskNote}`;
+        }
+    }
+
+    whyNow = whyNow.replace(/铁价/g, '金价');
+    riskNote = riskNote.replace(/铁价/g, '金价');
+
     return {
         ...output,
         why_now: whyNow,
@@ -309,6 +331,17 @@ function buildUserPrompt(
         : '数据不可用'}
 连续增持：${input.china_gold_reserve_trend.consecutive_months_increase}个月`
         : '';
+    const gldFlowSection = input.gld_flow_trend
+        ? `\nGLD ETF资金流（SPDR Gold Trust持仓）：
+最新日期：${input.gld_flow_trend.latest_date}（${input.gld_flow_trend.latest_tonnes.toFixed(1)}吨）
+1日：${input.gld_flow_trend.change_1d_tonnes !== null
+        ? `${input.gld_flow_trend.change_1d_tonnes >= 0 ? '+' : ''}${input.gld_flow_trend.change_1d_tonnes.toFixed(1)}吨`
+        : '数据缺失'}
+5日：${input.gld_flow_trend.change_5d_tonnes !== null
+        ? `${input.gld_flow_trend.change_5d_tonnes >= 0 ? '+' : ''}${input.gld_flow_trend.change_5d_tonnes.toFixed(1)}吨（${input.gld_flow_trend.direction_5d === 'inflow' ? '净流入' : input.gld_flow_trend.direction_5d === 'outflow' ? '净流出' : '基本持平'}）`
+        : '数据缺失'}
+连续${input.gld_flow_trend.consecutive_inflow_days > 0 ? `${input.gld_flow_trend.consecutive_inflow_days}日净流入` : input.gld_flow_trend.consecutive_outflow_days > 0 ? `${input.gld_flow_trend.consecutive_outflow_days}日净流出` : '方向不明'}`
+        : '';
     const maDescription = buildMaDescription(input.current_price, input.ma50, input.ma200);
     const conflictTradeGuardrail =
         ['GDX', 'XOM', 'USO'].includes(input.symbol)
@@ -334,6 +367,7 @@ function buildUserPrompt(
 当前价：${currentPriceText}
 近期价格变化：${priceDirectionText}
 ${chinaGoldSection}
+${gldFlowSection}
 距52周高点：${pctFromHighText}
 均线结构：${maDescription}
 IV水平：${input.iv_level}
@@ -379,6 +413,13 @@ ${recentEarningsContext}
    11.2 如果该字段不存在，禁止引用任何央行购金行为，包括PBOC、各国央行、储备多元化等。
    11.3 严禁写“央行停止购金 / 减持黄金”等表述，除非 mom_change_wan_oz < 0 且存在连续减持数据。
    11.4 引用的吨数、环比万盎司和连续月数必须严格使用输入字段，不得自行编造数字。
+12. 涉及ETF资金流的引用必须基于“GLD ETF资金流”输入字段：
+   12.1 如果该字段存在且 direction_5d='inflow'，可正向引用为“GLD ETF资金5日净流入X吨，配置需求扩散”。
+   12.2 如果 direction_5d='outflow'，应写为“GLD ETF 5日净流出X吨，配置需求降温”。
+   12.3 严禁写“机构买入 / 机构抛售”等含糊表述，必须明确说“GLD ETF”。
+   12.4 引用的吨数必须严格使用输入字段，不得自行编造。
+   12.5 如果“GLD ETF资金流”字段存在，why_now或risk_note至少一处必须引用5日净流入/净流出的具体吨数。
+   12.6 PBOC数据和ETF flow数据是互补信号：央行代表结构性需求，ETF代表配置/投机需求。如果两者方向冲突，必须同时点名PBOC和GLD ETF并说明信号分化，不要只挑一边写。
 ${conflictTradeGuardrail}
 ${input.has_recent_earnings && (input.grade === 'CAUTION' || input.grade === 'AVOID')
     ? input.days_since_earnings !== null &&
