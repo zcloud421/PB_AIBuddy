@@ -4,6 +4,7 @@ import { fetchEarningsCalendar } from '../data/earnings-fetcher';
 import { fetchTickerCompanyName, MassiveDataFetcher } from '../data/massive-fetcher';
 import { getChinaGoldReserveTrend } from '../data/macro-china-fetcher';
 import { getGldFlowTrend } from '../data/spdr-gold-flow-fetcher';
+import { getBreakevenInflationTrend } from '../data/fred-fetcher';
 import { fetchStockNewsContext } from '../data/news-fetcher';
 import { pool } from '../db/client';
 import {
@@ -175,12 +176,13 @@ async function main(): Promise<void> {
                     throw new Error(`No scoring result returned for ${symbol}`);
                 }
                 const newsContext = await fetchStockNewsContext(symbol, underlying?.company_name ?? undefined);
-                const [chinaGoldReserveTrend, gldFlowTrend] = GOLD_RELATED_NARRATIVE_SYMBOLS.has(symbol.toUpperCase())
+                const [chinaGoldReserveTrend, gldFlowTrend, breakevenInflationTrend] = GOLD_RELATED_NARRATIVE_SYMBOLS.has(symbol.toUpperCase())
                     ? await Promise.all([
                           getChinaGoldReserveTrend().catch(() => null),
-                          getGldFlowTrend().catch(() => null)
+                          getGldFlowTrend().catch(() => null),
+                          getBreakevenInflationTrend().catch(() => null)
                       ])
-                    : [null, null];
+                    : [null, null, null];
                 const narrative = await generateNarrative({
                     symbol,
                     theme: underlying?.themes?.[0] ?? 'Featured',
@@ -209,7 +211,8 @@ async function main(): Promise<void> {
                     days_to_earnings: null,
                     days_since_earnings: newsContext.daysSinceEarnings,
                     china_gold_reserve_trend: chinaGoldReserveTrend,
-                    gld_flow_trend: gldFlowTrend
+                    gld_flow_trend: gldFlowTrend,
+                    breakeven_inflation_trend: breakevenInflationTrend
                 });
                 results.push(result);
                 await saveIdeaCandidate({

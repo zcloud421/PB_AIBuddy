@@ -58,6 +58,15 @@ interface NarrativeInput {
         consecutive_inflow_days: number;
         consecutive_outflow_days: number;
     } | null;
+    breakeven_inflation_trend?: {
+        latest_date: string;
+        breakeven_5y_pct: number | null;
+        breakeven_10y_pct: number | null;
+        change_5d_5y_pct: number | null;
+        change_5d_10y_pct: number | null;
+        direction_5y: 'rising' | 'falling' | 'flat';
+        direction_10y: 'rising' | 'falling' | 'flat';
+    } | null;
 }
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
@@ -342,6 +351,15 @@ function buildUserPrompt(
         : '数据缺失'}
 连续${input.gld_flow_trend.consecutive_inflow_days > 0 ? `${input.gld_flow_trend.consecutive_inflow_days}日净流入` : input.gld_flow_trend.consecutive_outflow_days > 0 ? `${input.gld_flow_trend.consecutive_outflow_days}日净流出` : '方向不明'}`
         : '';
+    const breakevenSection =
+        input.breakeven_inflation_trend &&
+        (input.breakeven_inflation_trend.breakeven_10y_pct !== null ||
+            input.breakeven_inflation_trend.breakeven_5y_pct !== null)
+            ? `\n通胀预期（FRED Break-even Inflation）：
+最新日期：${input.breakeven_inflation_trend.latest_date}
+10Y break-even：${input.breakeven_inflation_trend.breakeven_10y_pct !== null ? `${input.breakeven_inflation_trend.breakeven_10y_pct.toFixed(2)}%` : '数据缺失'}${input.breakeven_inflation_trend.change_5d_10y_pct !== null ? `（5日${input.breakeven_inflation_trend.change_5d_10y_pct >= 0 ? '+' : ''}${(input.breakeven_inflation_trend.change_5d_10y_pct * 100).toFixed(0)}bp，${input.breakeven_inflation_trend.direction_10y === 'rising' ? '抬升' : input.breakeven_inflation_trend.direction_10y === 'falling' ? '回落' : '基本持平'}）` : ''}
+5Y break-even：${input.breakeven_inflation_trend.breakeven_5y_pct !== null ? `${input.breakeven_inflation_trend.breakeven_5y_pct.toFixed(2)}%` : '数据缺失'}${input.breakeven_inflation_trend.change_5d_5y_pct !== null ? `（5日${input.breakeven_inflation_trend.change_5d_5y_pct >= 0 ? '+' : ''}${(input.breakeven_inflation_trend.change_5d_5y_pct * 100).toFixed(0)}bp，${input.breakeven_inflation_trend.direction_5y === 'rising' ? '抬升' : input.breakeven_inflation_trend.direction_5y === 'falling' ? '回落' : '基本持平'}）` : ''}`
+            : '';
     const maDescription = buildMaDescription(input.current_price, input.ma50, input.ma200);
     const conflictTradeGuardrail =
         ['GDX', 'XOM', 'USO'].includes(input.symbol)
@@ -368,6 +386,7 @@ function buildUserPrompt(
 近期价格变化：${priceDirectionText}
 ${chinaGoldSection}
 ${gldFlowSection}
+${breakevenSection}
 距52周高点：${pctFromHighText}
 均线结构：${maDescription}
 IV水平：${input.iv_level}
@@ -420,6 +439,11 @@ ${recentEarningsContext}
    12.4 引用的吨数必须严格使用输入字段，不得自行编造。
    12.5 如果“GLD ETF资金流”字段存在，why_now或risk_note至少一处必须引用5日净流入/净流出的具体吨数。
    12.6 PBOC数据和ETF flow数据是互补信号：央行代表结构性需求，ETF代表配置/投机需求。如果两者方向冲突，必须同时点名PBOC和GLD ETF并说明信号分化，不要只挑一边写。
+13. 通胀预期引用必须基于“通胀预期（FRED Break-even Inflation）”输入字段：
+   13.1 字段不存在时，禁止引用任何具体通胀预期数字，可写“市场通胀预期方向不明”。
+   13.2 必须引用具体百分比和5日bp变化，例如“10Y break-even 2.34%，5日抬升4bp”，不要只写“通胀预期升温”等含糊表述。
+   13.3 如果5Y抬升而10Y持平，写“短期通胀预期上修但长期预期仍锚定”。
+   13.4 不允许把break-even与CPI实际读数混为一谈；这是通胀预期，不是已发生通胀数据。
 ${conflictTradeGuardrail}
 ${input.has_recent_earnings && (input.grade === 'CAUTION' || input.grade === 'AVOID')
     ? input.days_since_earnings !== null &&

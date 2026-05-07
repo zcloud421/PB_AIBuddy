@@ -1,6 +1,7 @@
 import { fetchTickerMarketCap, fetchTickerReferenceSnapshot, MassiveDataFetcher } from '../data/massive-fetcher';
 import { getChinaGoldReserveTrend } from '../data/macro-china-fetcher';
 import { getGldFlowTrend } from '../data/spdr-gold-flow-fetcher';
+import { getBreakevenInflationTrend } from '../data/fred-fetcher';
 import { fetchHistoricalStockNewsBatch, fetchStockNews, fetchStockNewsContext, filterRelevantNewsItems, getCompanyName } from '../data/news-fetcher';
 import {
     calculateHistoricalVolatility,
@@ -6203,12 +6204,13 @@ async function buildNarrative(input: {
         return null;
     }
 
-    const [chinaGoldReserveTrend, gldFlowTrend] = GOLD_RELATED_NARRATIVE_SYMBOLS.has(input.symbol.toUpperCase())
+    const [chinaGoldReserveTrend, gldFlowTrend, breakevenInflationTrend] = GOLD_RELATED_NARRATIVE_SYMBOLS.has(input.symbol.toUpperCase())
         ? await Promise.all([
               getChinaGoldReserveTrend().catch(() => null),
-              getGldFlowTrend().catch(() => null)
+              getGldFlowTrend().catch(() => null),
+              getBreakevenInflationTrend().catch(() => null)
           ])
-        : [null, null];
+        : [null, null, null];
 
     const narrative = await generateNarrative({
         symbol: input.symbol,
@@ -6243,7 +6245,8 @@ async function buildNarrative(input: {
         days_since_earnings: input.daysSinceEarnings,
         active_attribution_rules: input.activeAttributionRules?.slice(0, 3) ?? [],
         china_gold_reserve_trend: chinaGoldReserveTrend,
-        gld_flow_trend: gldFlowTrend
+        gld_flow_trend: gldFlowTrend,
+        breakeven_inflation_trend: breakevenInflationTrend
     });
 
     void fetchTickerMarketCap(input.symbol).catch(() => null);

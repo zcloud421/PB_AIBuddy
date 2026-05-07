@@ -28,6 +28,7 @@ import { fetchRssNewsFallback } from '../data/rss-news-fetcher';
 import { MassiveDataFetcher } from '../data/massive-fetcher';
 import { MassiveClient } from '../data/massive-client';
 import { getGldFlowTrend } from '../data/spdr-gold-flow-fetcher';
+import { getBreakevenInflationTrend } from '../data/fred-fetcher';
 import { pool } from '../db/client';
 import {
     getLatestClientFocusDailyVerdict,
@@ -9620,12 +9621,25 @@ async function buildGoldDrivers(newsItems: NewsItem[]): Promise<ClientFocusDrive
                 ? '支撑'
                 : '待确认';
 
-    const inflationStatus =
-        /inflation|cpi|pce|oil price|energy price|inflation expectation|inflation expectations/.test(titles)
-            ? '抬升'
+    const breakeven = await getBreakevenInflationTrend().catch(() => null);
+    const inflationStatus = (() => {
+        if (breakeven) {
+            const level = breakeven.breakeven_10y_pct !== null ? ` ${breakeven.breakeven_10y_pct.toFixed(2)}%` : '';
+            const change =
+                breakeven.change_5d_10y_pct !== null
+                    ? `，5日${breakeven.change_5d_10y_pct >= 0 ? '+' : ''}${(breakeven.change_5d_10y_pct * 100).toFixed(0)}bp`
+                    : '';
+            if (breakeven.direction_10y === 'rising') return `抬升 (10Y BE${level}${change})`;
+            if (breakeven.direction_10y === 'falling') return `回落 (10Y BE${level}${change})`;
+            return `中性 (10Y BE${level}${change || '，5日基本持平'})`;
+        }
+
+        return /inflation|cpi|pce|oil price|energy price|inflation expectation|inflation expectations/.test(titles)
+            ? '抬升 (基于新闻)'
             : /inflation cool|disinflation|deflation|inflation fall/.test(titles)
-                ? '中性'
+                ? '中性 (基于新闻)'
                 : '待确认';
+    })();
 
     const dollarStatus =
         /dollar strength|dollar rise|dollar climbs|dxy rise|stronger dollar|dollar index rise/.test(titles)
