@@ -5761,11 +5761,22 @@ function applyRiskRewardOverlay(input: {
         gradeRank[input.scoring.overall_grade] > gradeRank[blendedGrade]
             ? input.scoring.overall_grade
             : blendedGrade;
+    // Keep composite_score inside the final grade's threshold band. Risk-reward
+    // can improve the setup read, but it must not make an AVOID look like 80/100.
+    const alignedComposite = (() => {
+        if (overallGrade === 'AVOID' && blendedComposite >= 0.45) {
+            return Math.min(input.scoring.composite_score, blendedComposite, 0.40);
+        }
+        if (overallGrade === 'CAUTION' && blendedComposite >= 0.65) {
+            return Math.min(input.scoring.composite_score, blendedComposite, 0.60);
+        }
+        return blendedComposite;
+    })();
 
     return {
         ...input.scoring,
         overall_grade: overallGrade,
-        composite_score: Number(blendedComposite.toFixed(4)),
+        composite_score: Number(alignedComposite.toFixed(4)),
         risk_reward_score: riskRewardScore
     };
 }
@@ -7967,6 +7978,127 @@ function collectForbiddenMarkers(ruleIds: Array<string | null | undefined>): str
     return DRAWDOWN_ATTRIBUTION_RULES.filter((rule) => !allowedIds.has(rule.id)).flatMap((rule) => rule.markers ?? []);
 }
 
+const GENERIC_FINANCIAL_VOCAB = new Set([
+    // Central banks / policy
+    'OPEC',
+    'OPEC+',
+    '央行',
+    'Fed',
+    'FOMC',
+    'BOJ',
+    'ECB',
+    '降息',
+    '加息',
+    '降息预期',
+    '加息预期',
+    '降息推迟',
+    '美联储加息',
+    '美联储降息',
+    '鹰派',
+    '鸽派',
+
+    // Rates / inflation
+    '利率',
+    '实际利率',
+    '实际利率高位',
+    '实际利率回落',
+    '美债',
+    'TIPS',
+    '收益率',
+    'tariff',
+    '关税',
+    '通胀',
+    'CPI',
+    'PCE',
+    '通胀数据',
+    '通胀超预期',
+    '通胀回落',
+
+    // Dollar / FX
+    '美元',
+    '美元走强',
+    '美元走弱',
+    'DXY',
+
+    // Commodities (generic, not company-specific)
+    'oil',
+    'Brent',
+    '原油',
+    '能源',
+    'OPEC增产',
+    'OPEC减产',
+    '油价下移',
+    '油价上行',
+    '炼油利润',
+    'AISC',
+    '矿商成本',
+    '能源通胀',
+    '全维持成本',
+
+    // Gold-specific generic vocabulary (any gold drawdown narrative uses these;
+    // forbidden_marker false-positive root cause for GLD/GDX/IAU)
+    '黄金持仓成本',
+    '软着陆预期',
+    '硬着陆预期',
+    '避险退潮',
+    '避险需求',
+    '金价回吐',
+    '金价回调',
+    '获利了结',
+    '获利回吐',
+    '历史高位',
+    '历史性抛售',
+    '央行购金',
+
+    // Sector / theme labels
+    'AI',
+    'AI capex',
+    '半导体',
+    '科技',
+    '消费',
+    '医疗',
+    '云',
+    'cloud',
+    '广告',
+
+    // Trading-desk vocabulary
+    '空头回补',
+    '低配追补',
+    '仓位拥挤',
+    '估值重估',
+    '盈利兑现',
+    '流动性',
+    '风险偏好',
+    '风险溢价',
+    '资金流出',
+    '资金流入',
+    '配置需求',
+    '结构性需求',
+
+    // Corporate event categories (generic, not specific events)
+    '财报',
+    '指引',
+    '监管',
+    '诉讼',
+    '气候提案',
+    '反垄断'
+]);
+
+const GENERIC_FINANCIAL_VOCAB_LOWER = new Set([...GENERIC_FINANCIAL_VOCAB].map((value) => value.toLowerCase()));
+
+function isGenericFinancialMarker(marker: string): boolean {
+    const normalized = marker.trim();
+    return GENERIC_FINANCIAL_VOCAB.has(normalized) || GENERIC_FINANCIAL_VOCAB_LOWER.has(normalized.toLowerCase());
+}
+
+function collectSpecificForbiddenMarkers(ruleIds: Array<string | null | undefined>): string[] {
+    const allowedIds = new Set(ruleIds.filter((value): value is string => Boolean(value)));
+    return DRAWDOWN_ATTRIBUTION_RULES
+        .filter((rule) => !allowedIds.has(rule.id))
+        .flatMap((rule) => rule.markers ?? [])
+        .filter((marker) => marker.trim().length > 0 && !isGenericFinancialMarker(marker));
+}
+
 const ATTRIBUTION_TOKEN_STOPWORDS = new Set([
     '公司', '市场', '回撤', '股价', '业务', '预期', '风险', 'the', 'and', 'for', 'with', 'from', 'that', 'this', 'are', 'was', 'were', 'into', 'after', 'before', 'stock', 'stocks', 'market'
 ]);
@@ -8093,11 +8225,15 @@ function checkRefinedReasonAcceptable(
     }
 
     if (isRuleHintId(reason.primary_rule_id)) {
-        const forbiddenMarkers = collectForbiddenMarkers([reason.primary_rule_id, reason.background_rule_id]);
-        const hasForbiddenMarker = forbiddenMarkers.some((marker) => refinedResult.reason_zh.includes(marker));
-        if (hasForbiddenMarker) {
+        const specificForbiddenMarkers = collectSpecificForbiddenMarkers([reason.primary_rule_id, reason.background_rule_id]);
+        const matchedMarker = specificForbiddenMarkers.find((marker) => refinedResult.reason_zh.includes(marker));
+        if (matchedMarker) {
+            console.warn(
+                `[drawdown-llm] forbidden_marker reject: rule=${reason.primary_rule_id}, matched="${matchedMarker}", reason="${refinedResult.reason_zh.slice(0, 80)}"`
+            );
             return rejectRefinedReason('forbidden_marker', {
                 reason_zh: refinedResult.reason_zh.slice(0, 120),
+                matched_marker: matchedMarker,
                 rule_hint_id: reason.primary_rule_id ?? null,
                 background_rule_id: reason.background_rule_id ?? null
             });
