@@ -5582,6 +5582,18 @@ function normalizePitchThemeKey(trigger: DailyPitchTrigger): string {
     if (/超级财报周结果落地|今晚财报验证AI叙事|下周财报验证AI叙事|Mag7财报落地|超级财报周开启/.test(headline)) {
         return 'major-tech-earnings';
     }
+    // Single-stock earnings landing — same symbol with different angle wording
+    // (e.g. "COIN 财报落地" vs "COIN 财报落地，AI云验证") must dedupe to one card.
+    // Match any uppercase ticker (2-5 chars) co-occurring with earnings keywords;
+    // collapse to per-symbol key so dedupePitchTriggers + multi-day streak detection
+    // both treat them as the same theme.
+    const earningsContextMatch = /(财报[已落地兑现完]+|earnings\s*(landed|out|reported|results))/i.test(headline);
+    if (earningsContextMatch) {
+        const tickerMatch = headline.match(/\b([A-Z]{2,5})\b/);
+        if (tickerMatch && !['US', 'AI', 'IV', 'OI', 'PB', 'IC', 'RM', 'EM', 'GDP', 'NFP', 'CPI', 'PCE', 'FOMC', 'BOJ', 'OPEC', 'UAE', 'ETF', 'IPO', 'YTD', 'MA', 'HK', 'JP', 'CN', 'EU', 'UK', 'API', 'JSON'].includes(tickerMatch[1])) {
+            return `single-stock-earnings:${tickerMatch[1]}`;
+        }
+    }
     return normalizePitchHeadline(trigger);
 }
 
