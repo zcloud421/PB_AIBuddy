@@ -8261,30 +8261,111 @@ function isRefinedReasonAcceptable(
     return checkRefinedReasonAcceptable(refinedResult, reason, newsTitles).accepted;
 }
 
+/**
+ * Maximum episodes per LLM call. DeepSeek with 5-bucket reasoning + JSON output
+ * scales roughly linearly at ~1.5s per episode; chunks of 8 finish in ~12-14s,
+ * well under the 30s soft-timeout. Larger batches (observed 19 episodes for some
+ * symbols) blew past 30s and got aborted mid-stream, producing parse_error /
+ * outer_empty_map. Chunking guarantees per-call bounded latency.
+ */
+const DRAWDOWN_LLM_BATCH_SIZE = 8;
+
+interface RefineDrawdownLlmItem {
+    peak_date: string;
+    trough_date: string;
+    max_drawdown_pct: number;
+    background_regime: string | null;
+    primary_driver_type: AttributionDriverType | null;
+    primary_driver: string | null;
+    secondary_driver: string | null;
+    heuristic_reason: string;
+    rule_hint_id: string | null;
+    allowed_markers: string[];
+    news_titles: string[];
+    news_count: number;
+    market_structure: DrawdownMarketStructureFeatures | null;
+}
+
+/**
+ * Public entry: splits episodes into chunks of DRAWDOWN_LLM_BATCH_SIZE and
+ * runs each chunk's LLM call in parallel. Returns the union of all chunks'
+ * result maps. Chunk failures are logged but do not block other chunks.
+ */
 async function refineDrawdownAttributionsWithLLM(input: {
     symbol: string;
     companyName: string | null;
-    items: Array<{
-        peak_date: string;
-        trough_date: string;
-        max_drawdown_pct: number;
-        background_regime: string | null;
-        primary_driver_type: AttributionDriverType | null;
-        primary_driver: string | null;
-        secondary_driver: string | null;
-        heuristic_reason: string;
-        rule_hint_id: string | null;
-        allowed_markers: string[];
-        news_titles: string[];
-        news_count: number;
-        market_structure: DrawdownMarketStructureFeatures | null;
-    }>;
+    items: RefineDrawdownLlmItem[];
+}): Promise<Map<string, LlmAttributionResult>> {
+    if (input.items.length === 0) {
+        return new Map();
+    }
+
+    // Fast path: single chunk, skip overhead
+    if (input.items.length <= DRAWDOWN_LLM_BATCH_SIZE) {
+        return refineDrawdownAttributionsWithLLMChunk({ ...input });
+    }
+
+    const chunks: RefineDrawdownLlmItem[][] = [];
+    for (let i = 0; i < input.items.length; i += DRAWDOWN_LLM_BATCH_SIZE) {
+        chunks.push(input.items.slice(i, i + DRAWDOWN_LLM_BATCH_SIZE));
+    }
+
+    console.log(
+        `[drawdown-llm] chunking: total_items=${input.items.length} chunks=${chunks.length} batch_size=${DRAWDOWN_LLM_BATCH_SIZE}`
+    );
+
+    const chunkResults = await Promise.allSettled(
+        chunks.map((chunk, index) =>
+            refineDrawdownAttributionsWithLLMChunk({
+                symbol: input.symbol,
+                companyName: input.companyName,
+                items: chunk,
+                chunkLabel: `${index + 1}/${chunks.length}`
+            })
+        )
+    );
+
+    const merged = new Map<string, LlmAttributionResult>();
+    let successCount = 0;
+    for (const [index, result] of chunkResults.entries()) {
+        if (result.status === 'fulfilled') {
+            for (const [key, value] of result.value.entries()) {
+                merged.set(key, value);
+            }
+            if (result.value.size > 0) successCount += 1;
+        } else {
+            console.warn(
+                `[drawdown-llm] chunk_${index + 1}/${chunks.length} rejected: ${
+                    result.reason instanceof Error ? result.reason.message : String(result.reason)
+                }`
+            );
+        }
+    }
+
+    console.log(
+        `[drawdown-llm] chunked_complete: total_items=${input.items.length} chunks_succeeded=${successCount}/${chunks.length} merged_size=${merged.size}`
+    );
+    return merged;
+}
+
+/**
+ * Single-chunk LLM call. Was previously the public entry but renamed when
+ * chunking wrapper landed (was: refineDrawdownAttributionsWithLLM with batches
+ * up to 19 hitting 30s timeout). Callers should use refineDrawdownAttributionsWithLLM
+ * which dispatches to this in parallel chunks.
+ */
+async function refineDrawdownAttributionsWithLLMChunk(input: {
+    symbol: string;
+    companyName: string | null;
+    items: RefineDrawdownLlmItem[];
+    chunkLabel?: string;
 }): Promise<Map<string, LlmAttributionResult>> {
     const apiKey = process.env.DEEPSEEK_API_KEY;
     const startedAt = Date.now();
     const itemCount = input.items.length;
+    const chunkSuffix = input.chunkLabel ? ` chunk=${input.chunkLabel}` : '';
     if (!apiKey) {
-        console.warn(`[drawdown-llm] skipped: DEEPSEEK_API_KEY missing (items=${itemCount})`);
+        console.warn(`[drawdown-llm] skipped: DEEPSEEK_API_KEY missing (items=${itemCount}${chunkSuffix})`);
         return new Map();
     }
     if (input.items.length === 0) {
@@ -8380,7 +8461,7 @@ ${newsBlock}`;
         });
 
         if (!response.ok) {
-            console.warn(`[drawdown-llm] http_error: status=${response.status} duration_ms=${Date.now() - startedAt} items=${itemCount}`);
+            console.warn(`[drawdown-llm] http_error: status=${response.status} duration_ms=${Date.now() - startedAt} items=${itemCount}${chunkSuffix}`);
             return new Map();
         }
 
@@ -8389,7 +8470,7 @@ ${newsBlock}`;
         };
         const raw = payload.choices?.[0]?.message?.content?.trim() ?? '';
         if (!raw) {
-            console.warn(`[drawdown-llm] empty_content: duration_ms=${Date.now() - startedAt} items=${itemCount}`);
+            console.warn(`[drawdown-llm] empty_content: duration_ms=${Date.now() - startedAt} items=${itemCount}${chunkSuffix}`);
             return new Map();
         }
 
@@ -8397,7 +8478,7 @@ ${newsBlock}`;
         try {
             parsed = JSON.parse(raw) as typeof parsed;
         } catch {
-            console.warn(`[drawdown-llm] parse_error: duration_ms=${Date.now() - startedAt} items=${itemCount} raw_preview=${raw.slice(0, 200)}`);
+            console.warn(`[drawdown-llm] parse_error: duration_ms=${Date.now() - startedAt} items=${itemCount}${chunkSuffix} raw_preview=${raw.slice(0, 200)}`);
             return new Map();
         }
         const items = Array.isArray(parsed) ? parsed : Array.isArray(parsed.items) ? parsed.items : [];
@@ -8419,12 +8500,12 @@ ${newsBlock}`;
                 droppedCount += 1;
             }
         }
-        console.log(`[drawdown-llm] success: duration_ms=${Date.now() - startedAt} items_in=${itemCount} items_out=${map.size} dropped=${droppedCount}`);
+        console.log(`[drawdown-llm] success: duration_ms=${Date.now() - startedAt} items_in=${itemCount} items_out=${map.size} dropped=${droppedCount}${chunkSuffix}`);
         return map;
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const isTimeout = /abort|timeout/i.test(message);
-        console.warn(`[drawdown-llm] ${isTimeout ? 'timeout' : 'exception'}: duration_ms=${Date.now() - startedAt} items=${itemCount} error=${message}`);
+        console.warn(`[drawdown-llm] ${isTimeout ? 'timeout' : 'exception'}: duration_ms=${Date.now() - startedAt} items=${itemCount}${chunkSuffix} error=${message}`);
         return new Map();
     }
 }
