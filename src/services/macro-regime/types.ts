@@ -14,6 +14,8 @@ export type SideMonitorStatus = 'normal' | 'watch' | 'stress' | 'crisis';
 
 export type AiCloudStressStatus = 'Normal' | 'Watch' | 'Stress' | 'Crisis';
 
+export type PillarState = 'normal' | 'elevated' | 'extreme';
+
 export interface IndicatorReading {
     name: string;
     value: number | null;
@@ -60,11 +62,36 @@ export interface FundamentalModifier {
     evidence_summary: string[];
 }
 
+export interface LateCyclePillar {
+    state: PillarState;
+    summary: string;
+    evidence: string[];
+    last_reviewed_at: string;
+    days_since_review: number;
+    stale_warning: boolean;
+}
+
+export interface LateCycleContext {
+    elevated_count: number;
+    soft_pause_active: boolean;
+    headline_suffix: string;
+    consecutive_days_active: number;
+    fatigue_warning: boolean;
+    pillars: {
+        valuation: LateCyclePillar;
+        concentration_display: LateCyclePillar;
+        oas_complacency: LateCyclePillar;
+        sentiment_manual: LateCyclePillar;
+    };
+}
+
 export interface MacroRegimeIndicators {
     HY_OAS: IndicatorReading;
     YIELD_CURVE: IndicatorReading;
     VIX: IndicatorReading;
+    DGS10_ABS_LEVEL: IndicatorReading;
     DGS10_4W_SHOCK: IndicatorReading;
+    CONCENTRATION: IndicatorReading;
     AI_BREADTH: IndicatorReading;
     BROAD_BREADTH: IndicatorReading;
     BTC_DRAWDOWN: IndicatorReading;
@@ -79,4 +106,5 @@ export interface MacroRegimeSnapshot {
     ai_cloud_stress: AiCloudStressReport;
     credit_funding_stress: CreditFundingStressReport;
     fundamental_modifier: FundamentalModifier;
+    late_cycle_context: LateCycleContext;
 }

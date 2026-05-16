@@ -28,7 +28,8 @@
     "express-rate-limit": "^7.4.1",
     "fast-xml-parser": "^4.5.0",
     "pg": "^8.13.1",
-    "uuid": "^11.0.5"
+    "uuid": "^11.0.5",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@railway/cli": "^4.33.0",

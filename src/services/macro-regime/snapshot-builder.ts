@@ -10,10 +10,13 @@
  */
 
 import { MassiveDataFetcher } from '../../data/massive-fetcher';
+import { fetchSpyHoldings } from '../../data/spy-holdings-fetcher';
 import {
     computeAiBreadth,
     computeBroadBreadth,
     computeBtcDrawdown,
+    computeConcentration,
+    computeDgs10AbsLevel,
     computeDgs10FourWeekShock,
     computeHyOas,
     computeVix,
@@ -27,6 +30,7 @@ import {
 } from './side-monitors';
 import { applyEscalations, composeHeadline, computeBaseSeverity } from './aggregate';
 import { loadFundamentalModifier } from './fundamental-modifier';
+import { buildLateCycleContext } from './late-cycle-context';
 import type { MacroRegimeIndicators, MacroRegimeSnapshot } from './types';
 
 function todayUtcDate(): string {
@@ -39,16 +43,19 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
 
     // Side monitor pre-requisites (HY OAS series in bp + Δ4w) reused for
     // indicator and Credit/Funding stress acceleration sub-signal.
-    const [hyOasSeries, hyOasDelta4w] = await Promise.all([
+    const [hyOasSeries, hyOasDelta4w, spyHoldings] = await Promise.all([
         fetchHyOasSeriesBp(),
-        computeHyOasDelta4wBp()
+        computeHyOasDelta4wBp(),
+        fetchSpyHoldings()
     ]);
 
     const [
         hyOas,
         yieldCurve,
         vix,
+        dgs10AbsLevel,
         dgs10Shock,
+        concentration,
         aiBreadth,
         broadBreadth,
         btcDrawdown,
@@ -58,7 +65,9 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         computeHyOas(),
         computeYieldCurve(),
         computeVix(fetcher),
+        computeDgs10AbsLevel(),
         computeDgs10FourWeekShock(),
+        Promise.resolve(computeConcentration(spyHoldings)),
         computeAiBreadth(fetcher),
         computeBroadBreadth(fetcher),
         computeBtcDrawdown(),
@@ -70,13 +79,16 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         HY_OAS: hyOas,
         YIELD_CURVE: yieldCurve,
         VIX: vix,
+        DGS10_ABS_LEVEL: dgs10AbsLevel,
         DGS10_4W_SHOCK: dgs10Shock,
+        CONCENTRATION: concentration,
         AI_BREADTH: aiBreadth,
         BROAD_BREADTH: broadBreadth,
         BTC_DRAWDOWN: btcDrawdown
     };
 
     const fundamentalModifier = loadFundamentalModifier();
+    const lateCycleContext = await buildLateCycleContext(spyHoldings, hyOasSeries);
     const baseOverall = computeBaseSeverity(indicators);
     const overall = applyEscalations(
         baseOverall,
@@ -89,11 +101,19 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         as_of: todayUtcDate(),
         overall,
         base_overall: baseOverall,
-        headline: composeHeadline(overall, indicators, aiCloudStress, creditFundingStress, fundamentalModifier),
+        headline: composeHeadline(
+            overall,
+            indicators,
+            aiCloudStress,
+            creditFundingStress,
+            fundamentalModifier,
+            lateCycleContext
+        ),
         indicators,
         ai_cloud_stress: aiCloudStress,
         credit_funding_stress: creditFundingStress,
-        fundamental_modifier: fundamentalModifier
+        fundamental_modifier: fundamentalModifier,
+        late_cycle_context: lateCycleContext
     };
 
     console.log(

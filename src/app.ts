@@ -23,7 +23,10 @@ import { trackerRouter } from './routes/tracker';
 import { pairAnalysisRouter } from './routes/pair-analysis';
 import { macroRegimeRouter } from './routes/macro-regime';
 import { ensureDeviceTables } from './db/queries/devices';
-import { ensureMacroRegimeSnapshotsTable } from './db/queries/macro-regime';
+import {
+    ensureLateCyclePillarHistoryTable,
+    ensureMacroRegimeSnapshotsTable
+} from './db/queries/macro-regime';
 
 dotenv.config();
 
@@ -108,6 +111,7 @@ async function ensureSchemaGuards(): Promise<void> {
     await ensureUnderlyingCompanyNameColumn();
     await ensureDeviceTables();
     await ensureMacroRegimeSnapshotsTable();
+    await ensureLateCyclePillarHistoryTable();
 }
 
 if (require.main === module) {

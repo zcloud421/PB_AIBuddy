@@ -21,6 +21,7 @@ import type {
     CreditFundingStressReport,
     FundamentalModifier,
     IndicatorReading,
+    LateCycleContext,
     MacroRegimeIndicators,
     RegimeSeverity
 } from './types';
@@ -33,8 +34,9 @@ function escalate(severity: RegimeSeverity, by: number): RegimeSeverity {
 }
 
 function isPortfolioCriticalEligible(name: string, indicator: IndicatorReading): boolean {
-    // BTC drawdown is liquidity proxy — does not solo-trigger Critical.
-    if (name === 'BTC_DRAWDOWN') return false;
+    // BTC drawdown is liquidity proxy and concentration is a structural
+    // late-cycle context/tail-risk marker — neither solo-triggers Critical.
+    if (name === 'BTC_DRAWDOWN' || name === 'CONCENTRATION') return false;
     if (indicator.is_skipped) return false;
     return true;
 }
@@ -95,7 +97,8 @@ export function composeHeadline(
     indicators: MacroRegimeIndicators,
     aiCloud: AiCloudStressReport,
     credit: CreditFundingStressReport,
-    modifier: FundamentalModifier
+    modifier: FundamentalModifier,
+    lateCycleContext?: LateCycleContext
 ): string {
     const emoji =
         overall === 'Critical' ? '🔴' :
@@ -129,10 +132,10 @@ export function composeHeadline(
             if (reading.status === 'Healthy') positives.push(reading.name);
         }
         if (positives.length > 0) {
-            return `${emoji} Macro ${overall}: ${positives.slice(0, 2).join(', ')} healthy`;
+            return `${emoji} Macro ${overall}: ${positives.slice(0, 2).join(', ')} healthy${lateCycleContext?.headline_suffix ?? ''}`;
         }
-        return `${emoji} Macro ${overall}`;
+        return `${emoji} Macro ${overall}${lateCycleContext?.headline_suffix ?? ''}`;
     }
 
-    return `${emoji} Macro ${overall}: ${reasons.slice(0, 2).join(', ')}`;
+    return `${emoji} Macro ${overall}: ${reasons.slice(0, 2).join(', ')}${lateCycleContext?.headline_suffix ?? ''}`;
 }

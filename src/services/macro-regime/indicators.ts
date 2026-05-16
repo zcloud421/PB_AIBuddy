@@ -12,6 +12,7 @@
 
 import type { IndicatorReading, RegimeSeverity } from './types';
 import { MassiveDataFetcher, type DailyPriceBar } from '../../data/massive-fetcher';
+import type { SpyHolding } from '../../data/spy-holdings-fetcher';
 import { fetchFredSeries, latestPoint, pointDaysBack } from '../../data/fred-series-fetcher';
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -241,6 +242,101 @@ export async function computeDgs10FourWeekShock(): Promise<IndicatorReading> {
         status,
         delta_4w: Math.round(deltaBp * 10) / 10,
         notes: [`Latest 10Y ${latest.value.toFixed(2)}%; 4w prior ${fourWeeksBack.value.toFixed(2)}%`],
+        is_skipped: false
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 4b. 10Y Absolute Level — DGS10 waterline
+// ─────────────────────────────────────────────────────────────────────────
+
+export async function computeDgs10AbsLevel(): Promise<IndicatorReading> {
+    const series = await fetchFredSeries('DGS10', 60);
+    if (!series || series.length === 0) {
+        return makeSkipped('10Y absolute level', 'FRED DGS10 unavailable');
+    }
+    const latest = latestPoint(series);
+    if (!latest) {
+        return makeSkipped('10Y absolute level', 'No DGS10 observations');
+    }
+    const fourWeeksBack = pointDaysBack(series, 28);
+    const delta4w = fourWeeksBack ? (latest.value - fourWeeksBack.value) * 100 : null;
+
+    // Anchors:
+    // <4.0%: long-run mean neighborhood; 4.0–4.5%: upper valuation compression band;
+    // 4.5–5.0%: P/E compression zone observed in multiple risk-asset selloffs;
+    // >5.0%: 2023-10 risk-asset break point.
+    let status: RegimeSeverity;
+    if (latest.value < 4.0) status = 'Healthy';
+    else if (latest.value < 4.5) status = 'Neutral';
+    else if (latest.value <= 5.0) status = 'Warning';
+    else status = 'Critical';
+
+    const zone =
+        status === 'Healthy' ? 'Healthy zone' :
+            status === 'Neutral' ? 'Neutral zone' :
+                status === 'Warning' ? 'Warning zone' : 'Critical zone';
+
+    return {
+        name: '10Y absolute level',
+        value: Math.round(latest.value * 100) / 100,
+        status,
+        delta_4w: delta4w !== null ? Math.round(delta4w * 10) / 10 : null,
+        notes: [
+            `absolute ${latest.value.toFixed(2)}% (${zone})`,
+            '4.5%+ marks the P/E compression zone; >5.0% echoes the 2023-10 risk-asset break'
+        ],
+        is_skipped: false
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 4c. Top-10 Concentration — S&P 500 structural tail risk
+// ─────────────────────────────────────────────────────────────────────────
+
+function topTenWeight(holdings: SpyHolding[]): number {
+    return [...holdings]
+        .filter((holding) => Number.isFinite(holding.weight_pct) && holding.weight_pct > 0)
+        .sort((left, right) => right.weight_pct - left.weight_pct)
+        .slice(0, 10)
+        .reduce((sum, holding) => sum + holding.weight_pct, 0);
+}
+
+function hhi(holdings: SpyHolding[]): number {
+    return Math.round(
+        holdings.reduce((sum, holding) => sum + holding.weight_pct * holding.weight_pct, 0)
+    );
+}
+
+export function computeConcentration(spyHoldings: SpyHolding[] | null): IndicatorReading {
+    if (!spyHoldings || spyHoldings.length === 0) {
+        return makeSkipped('Top-10 concentration', 'SPY holdings unavailable');
+    }
+    const value = topTenWeight(spyHoldings);
+    const hhiValue = hhi(spyHoldings);
+
+    // Anchors:
+    // <25% = pre-2015 historical zone; 25–32% = 2020–2022 range;
+    // 32–38% = warning band; >38% = extreme concentration. This indicator is
+    // soft-capped at Warning in v1.6 so it cannot mechanically create Critical
+    // by itself; it is a structural tail-risk context, not a timing trigger.
+    let status: RegimeSeverity;
+    if (value < 25) status = 'Healthy';
+    else if (value < 32) status = 'Neutral';
+    else status = 'Warning';
+
+    return {
+        name: 'Top-10 concentration',
+        value: Math.round(value * 10) / 10,
+        status,
+        delta_4w: null,
+        notes: [
+            `Top-10 ~${value.toFixed(1)}%`,
+            `HHI ~${hhiValue}`,
+            value > 38
+                ? 'Extreme concentration (>38%) soft-capped to Warning; does not solo-trigger Critical'
+                : 'Top-heavy market structure raises mechanical tail risk'
+        ],
         is_skipped: false
     };
 }
