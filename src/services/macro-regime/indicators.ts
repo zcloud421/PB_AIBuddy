@@ -275,7 +275,8 @@ export async function computeAiBreadth(
 ): Promise<IndicatorReading> {
     const results = await Promise.allSettled(
         AI_BREADTH_UNIVERSE.map(async ({ ticker, tier }) => {
-            const bars = await massiveFetcher.fetchPriceHistory(ticker, 75);
+            // 100 calendar days ≈ 70 trading bars (need 50 for MA50 with safety buffer)
+            const bars = await massiveFetcher.fetchPriceHistory(ticker, 100);
             return { ticker, tier, bars };
         })
     );
@@ -379,7 +380,8 @@ export async function computeBroadBreadth(
 ): Promise<IndicatorReading> {
     const results = await Promise.allSettled(
         NDX_COMPONENTS.map(async (ticker) => {
-            const bars = await massiveFetcher.fetchPriceHistory(ticker, 230);
+            // 330 calendar days ≈ 230 trading bars (need 200 for MA200 + 20 buffer for Δ4w lookback)
+            const bars = await massiveFetcher.fetchPriceHistory(ticker, 330);
             return { ticker, bars };
         })
     );

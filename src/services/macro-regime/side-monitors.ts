@@ -57,7 +57,8 @@ async function computeAiCloudTickerSignal(
 ): Promise<AiCloudStressTickerSignal> {
     let bars: DailyPriceBar[] = [];
     try {
-        bars = await massiveFetcher.fetchPriceHistory(ticker, 75);
+        // 100 calendar days ≈ 70 trading bars (need 60 trading bars for return60d)
+        bars = await massiveFetcher.fetchPriceHistory(ticker, 100);
     } catch {
         return { ticker, signal: 0, details: [`${ticker} bars unavailable`] };
     }
@@ -136,7 +137,7 @@ export async function computeAiCloudStress(
     // Reference: 60d return of NVDA for relative-weakness subsignal
     let nvdaSixtyDayReturnPct: number | null = null;
     try {
-        const nvdaBars = await massiveFetcher.fetchPriceHistory('NVDA', 70);
+        const nvdaBars = await massiveFetcher.fetchPriceHistory('NVDA', 100);
         if (nvdaBars.length >= 60) {
             const last = nvdaBars[nvdaBars.length - 1].close;
             const sixtyBack = nvdaBars[nvdaBars.length - 60].close;
@@ -174,7 +175,8 @@ async function computeKbeSubSignal(
 ): Promise<SideSubSignal> {
     let bars: DailyPriceBar[] = [];
     try {
-        bars = await massiveFetcher.fetchPriceHistory('KBE', 230);
+        // 330 calendar days ≈ 230 trading bars (need 200 for MA200 with buffer)
+        bars = await massiveFetcher.fetchPriceHistory('KBE', 330);
     } catch {
         return {
             name: 'KBE vs MA200',

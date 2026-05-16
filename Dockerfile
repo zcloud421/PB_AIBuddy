@@ -30,6 +30,12 @@ RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
 
+# Static assets:
+#   - data/ai_capex_fundamental_state.json (macro regime fundamental modifier)
+#   - schema.sql (referenced by /setup endpoint via ../schema.sql)
+COPY data ./data
+COPY schema.sql ./
+
 # Health check uses /health endpoint (matches railway.json healthcheckPath)
 EXPOSE 3000
 
