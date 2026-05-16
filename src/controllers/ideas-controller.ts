@@ -1,76 +1,16 @@
 import type { Request, Response } from 'express';
 
 import {
-    getClientFocusDetail,
-    getClientFocusList,
-    getDailyMarketNarrative,
-    refreshDailyMarketNarrativeNow,
-    getClientFocusMarketState,
-    getMiddleEastPolymarket,
     getSymbolIdea,
     getSymbolNarrative,
     getSymbolPriceHistory,
     getSymbolIdeaStatus,
     getTodayIdeas
 } from '../services/ideas-service';
-import { HttpError } from '../lib/http-error';
 
 export async function getTodayIdeasController(_req: Request, res: Response): Promise<void> {
     const payload = await getTodayIdeas();
     res.setHeader('Cache-Control', 'private, max-age=60');
-    res.status(200).json(payload);
-}
-
-export async function getClientFocusListController(_req: Request, res: Response): Promise<void> {
-    const payload = await getClientFocusList();
-    res.setHeader('Cache-Control', 'private, max-age=300');
-    res.status(200).json(payload);
-}
-
-export async function getClientFocusDetailController(req: Request, res: Response): Promise<void> {
-    const payload = await getClientFocusDetail(req.params.slug);
-    if (!payload) {
-        throw new HttpError(404, 'NOT_FOUND', 'Client focus topic not found.');
-    }
-
-    res.setHeader('Cache-Control', 'private, max-age=300');
-    res.status(200).json(payload);
-}
-
-export async function getClientFocusMarketStateController(_req: Request, res: Response): Promise<void> {
-    const payload = await getClientFocusMarketState();
-    res.setHeader('Cache-Control', 'private, max-age=300');
-    res.status(200).json(payload);
-}
-
-export async function getDailyMarketNarrativeController(_req: Request, res: Response): Promise<void> {
-    const payload = await getDailyMarketNarrative();
-    res.setHeader('Cache-Control', 'private, max-age=300');
-    res.status(200).json(payload);
-}
-
-export async function refreshDailyMarketNarrativeController(req: Request, res: Response): Promise<void> {
-    const rawSetupToken = process.env.SETUP_TOKEN;
-    const rawProvidedToken =
-        (typeof req.query.token === 'string' ? req.query.token : null) ??
-        req.header('x-setup-token') ??
-        null;
-    const setupToken = rawSetupToken?.trim() ?? null;
-    const providedToken = rawProvidedToken?.trim() ?? null;
-
-    if (!setupToken || providedToken !== setupToken) {
-        res.status(403).json({ error: 'forbidden' });
-        return;
-    }
-
-    const payload = await refreshDailyMarketNarrativeNow();
-    res.setHeader('Cache-Control', 'private, no-cache');
-    res.status(200).json(payload);
-}
-
-export async function getMiddleEastPolymarketController(_req: Request, res: Response): Promise<void> {
-    const payload = await getMiddleEastPolymarket();
-    res.setHeader('Cache-Control', 'private, max-age=300');
     res.status(200).json(payload);
 }
 

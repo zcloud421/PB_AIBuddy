@@ -49,15 +49,6 @@ import {
 } from '../db/queries/ideas';
 import { HttpError } from '../lib/http-error';
 import { buildThemeNarrative } from './theme-narrative';
-import {
-    getClientFocusDetail as getClientFocusDetailPayload,
-    getClientFocusList as getClientFocusListPayload,
-    getDailyMarketNarrative as getDailyMarketNarrativePayload,
-    refreshDailyMarketNarrativeNow as refreshDailyMarketNarrativeNowPayload,
-    getClientFocusStatusesSnapshot,
-    getClientFocusMarketState as getClientFocusMarketStatePayload,
-    getMiddleEastPolymarket as getMiddleEastPolymarketPayload
-} from './client-focus-service';
 import { generateNarrative, sanitizeNarrativeOutput } from '../utils/narrative-generator';
 import type {
     AsyncScoringAcceptedResponse,
@@ -4180,30 +4171,6 @@ function buildDataFetcher(): DataFetcherInterface {
     return sharedDataFetcher;
 }
 
-export async function getClientFocusList(): Promise<ClientFocusListItem[]> {
-    return getClientFocusListPayload();
-}
-
-export async function getClientFocusMarketState(): Promise<ClientFocusMarketStateResponse> {
-    return getClientFocusMarketStatePayload();
-}
-
-export async function getDailyMarketNarrative(): Promise<DailyMarketNarrative | null> {
-    return getDailyMarketNarrativePayload();
-}
-
-export async function refreshDailyMarketNarrativeNow(): Promise<DailyMarketNarrative | null> {
-    return refreshDailyMarketNarrativeNowPayload();
-}
-
-export async function getClientFocusDetail(slug: string): Promise<ClientFocusDetailResponse | null> {
-    return getClientFocusDetailPayload(slug);
-}
-
-export async function getMiddleEastPolymarket() {
-    return getMiddleEastPolymarketPayload();
-}
-
 export async function getTodayIdeas(): Promise<TodayIdeasResponse> {
     const latestRun = await getActiveCompletedRun();
     console.log('[debug] getActiveCompletedRun result:', latestRun);
@@ -6369,14 +6336,10 @@ function isUnderHardCooldown(
 }
 
 function getActiveMacroFocusStatuses(): Array<{ slug: string; status: string; title: string }> {
-    try {
-        return getClientFocusStatusesSnapshot().filter(
-            (item): item is typeof item & { status: string } =>
-                typeof item.status === 'string' && item.status.length > 0
-        );
-    } catch {
-        return [];
-    }
+    // FOCUS module removed — macro-sensitivity is now neutralized.
+    // Kept the wiring intact so callers don't need to change. Returns empty
+    // active-focus set, which makes downstream penalty/flag functions noop.
+    return [];
 }
 
 function getMacroSensitivityMatches(

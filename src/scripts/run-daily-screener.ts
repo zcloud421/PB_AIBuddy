@@ -8,17 +8,13 @@ import { getBreakevenInflationTrend } from '../data/fred-fetcher';
 import { fetchStockNewsContext } from '../data/news-fetcher';
 import { pool } from '../db/client';
 import {
-    ensureClientFocusDailyVerdictsTable,
     createIdeaRun,
     ensureDailyBestHistoryTable,
-    ensureDailyMarketNarrativesTable,
-    ensureDailyPitchDecisionsTable,
     ensureDailyRecommendationHistoryTable,
     ensureEarningsCalendarColumns,
     ensureIdeaCandidatePriceColumns,
     ensureRecommendationTrackerTable,
     ensureRiskFlagEnumValues,
-    ensureThemeBasketResultsTable,
     ensureUnderlyingCompanyNameColumn,
     deleteRecommendationTrackerForDate,
     getUnderlyingBySymbol,
@@ -26,7 +22,6 @@ import {
     saveDailyBest,
     saveDailyRecommendations,
     saveRiskFlags,
-    upsertClientFocusDailyVerdict,
     upsertRecommendationTracker,
     upsertUnderlyingCompanyName,
     upsertEarningsCalendar,
@@ -36,12 +31,6 @@ import type { ScoringResult } from '../scoring-engine';
 import { runDailyScreener } from '../scoring-engine';
 import { selectDailyBest, selectDailyRecommendationShowcase } from '../services/ideas-service';
 import { runPriceTracker } from '../services/tracker-service';
-import { runThemeBasketDaily } from '../services/theme-basket-service';
-import {
-    generateClientFocusDailyVerdictSnapshot,
-    getClientFocusList,
-    getDailyMarketNarrative
-} from '../services/client-focus-service';
 import { generateNarrative } from '../utils/narrative-generator';
 import { sendDowngradeNotifications } from '../utils/push-notifications';
 import { ensureDeviceTables } from '../db/queries/devices';
@@ -65,41 +54,6 @@ function todayInHongKongIsoDate(): string {
         month: '2-digit',
         day: '2-digit'
     }).format(new Date());
-}
-
-function resolveFocusRefreshBaseUrl() {
-    return (
-        process.env.FOCUS_API_REFRESH_BASE_URL?.trim() ??
-        process.env.API_BASE_URL?.trim() ??
-        process.env.PUBLIC_API_BASE_URL?.trim() ??
-        'https://backend-production-02fa.up.railway.app'
-    );
-}
-
-async function refreshApiDailyNarrativeCache(): Promise<void> {
-    const setupToken = process.env.SETUP_TOKEN?.trim();
-    if (!setupToken) {
-        console.warn('[focus-daily] api refresh skipped: missing SETUP_TOKEN');
-        return;
-    }
-
-    const baseUrl = resolveFocusRefreshBaseUrl();
-    const response = await fetch(`${baseUrl}/ideas/focus/daily-narrative/refresh`, {
-        method: 'POST',
-        headers: {
-            'x-setup-token': setupToken
-        }
-    });
-
-    if (!response.ok) {
-        const body = await response.text();
-        throw new Error(`refresh endpoint ${response.status}: ${body || 'empty body'}`);
-    }
-
-    const payload = (await response.json()) as { generated_at?: string; primary_slug?: string };
-    console.log(
-        `[focus-daily] api cache refreshed (${payload.primary_slug ?? 'unknown'} / ${payload.generated_at ?? 'no generated_at'})`
-    );
 }
 
 async function main(): Promise<void> {
@@ -126,16 +80,12 @@ async function main(): Promise<void> {
         console.log('[screener] Rate limit mode: standard (3s between symbols)');
 
         await ensureDailyBestHistoryTable();
-        await ensureDailyMarketNarrativesTable();
-        await ensureDailyPitchDecisionsTable();
         await ensureDailyRecommendationHistoryTable();
         await ensureIdeaCandidatePriceColumns();
         await ensureEarningsCalendarColumns();
         await ensureRiskFlagEnumValues();
         await ensureRecommendationTrackerTable();
         await ensureUnderlyingCompanyNameColumn();
-        await ensureThemeBasketResultsTable();
-        await ensureClientFocusDailyVerdictsTable();
         await ensureDeviceTables();
 
         const previousGradesResult = await client.query<{ symbol: string; grade: string }>(
@@ -331,58 +281,6 @@ async function main(): Promise<void> {
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             console.warn(`[screener] Recommendation tracker refresh failed (${message})`);
-        }
-
-        console.log('[theme-baskets] starting daily run...');
-        for (const slug of ['middle-east-tensions', 'gold-repricing']) {
-            try {
-                await runThemeBasketDaily(slug);
-                console.log(`[theme-baskets] ${slug} done`);
-            } catch (error) {
-                console.warn(`[theme-baskets] ${slug} failed:`, error);
-            }
-        }
-
-        try {
-            const middleEastVerdict = await generateClientFocusDailyVerdictSnapshot('middle-east-tensions');
-            if (middleEastVerdict) {
-                await upsertClientFocusDailyVerdict(
-                    'middle-east-tensions',
-                    runDate,
-                    middleEastVerdict
-                );
-                console.log('[focus-daily] middle-east-tensions saved');
-            } else {
-                console.warn('[focus-daily] middle-east-tensions skipped: no verdict generated');
-            }
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            console.warn(`[focus-daily] middle-east-tensions failed (${message})`);
-        }
-
-        try {
-            console.log('[focus-daily] prewarm started');
-            await getClientFocusList();
-            console.log('[focus-daily] focus topics cache warmed');
-            const dailyNarrative = await getDailyMarketNarrative();
-            if (dailyNarrative) {
-                console.log(
-                    `[focus-daily] daily narrative prepared (${dailyNarrative.primary_slug} / ${dailyNarrative.asset_buckets.map((item) => item.bucket).join(', ')})`
-                );
-            } else {
-                console.warn('[focus-daily] daily narrative skipped: no renderable output');
-            }
-
-            try {
-                console.log('[focus-daily] api refresh started');
-                await refreshApiDailyNarrativeCache();
-            } catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                console.warn(`[focus-daily] api refresh failed (${message})`);
-            }
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            console.warn(`[focus-daily] daily narrative failed (${message})`);
         }
 
         try {
