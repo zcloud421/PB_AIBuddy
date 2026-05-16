@@ -4,8 +4,8 @@
  *
  * Step 1: base severity from indicators alone
  *   - Any Critical (portfolio-critical-eligible + action-eligible) → Critical
- *   - ≥ 2 Warning → Warning
- *   - At least 1 Warning/Critical (but not enough for above) → Neutral
+ *   - Soft-capped / non-actionable Critical indicators are downgraded to Warning
+ *   - Base severity is the max of the effective indicator severities
  *   - Else → Healthy
  *
  * Step 2: AI Cloud Stress = 3 (Crisis) escalates one step
@@ -53,10 +53,21 @@ function isActionEligible(name: string, indicator: IndicatorReading): boolean {
     return true;
 }
 
+function effectiveIndicatorSeverity(
+    name: keyof MacroRegimeIndicators,
+    indicator: IndicatorReading
+): RegimeSeverity {
+    if (indicator.status !== 'Critical') return indicator.status;
+    if (!isPortfolioCriticalEligible(name, indicator) || !isActionEligible(name, indicator)) {
+        return 'Warning';
+    }
+    return 'Critical';
+}
+
 export function computeBaseSeverity(indicators: MacroRegimeIndicators): RegimeSeverity {
     const entries = Object.entries(indicators) as Array<[keyof MacroRegimeIndicators, IndicatorReading]>;
     const live = entries.filter(([, r]) => !r.is_skipped);
-    const statuses = live.map(([, r]) => r.status);
+    const effectiveStatuses = live.map(([name, r]) => effectiveIndicatorSeverity(name, r));
 
     const hasActionableCritical = live.some(
         ([name, r]) =>
@@ -67,10 +78,8 @@ export function computeBaseSeverity(indicators: MacroRegimeIndicators): RegimeSe
 
     if (hasActionableCritical) return 'Critical';
 
-    const warningCount = statuses.filter((s) => s === 'Warning').length;
-    if (warningCount >= 2) return 'Warning';
-
-    if (statuses.some((s) => s === 'Warning' || s === 'Critical')) return 'Neutral';
+    if (effectiveStatuses.some((s) => s === 'Warning' || s === 'Critical')) return 'Warning';
+    if (effectiveStatuses.some((s) => s === 'Neutral')) return 'Neutral';
 
     return 'Healthy';
 }
