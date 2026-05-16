@@ -14,6 +14,7 @@ import type { IndicatorReading, RegimeSeverity } from './types';
 import { MassiveDataFetcher, type DailyPriceBar } from '../../data/massive-fetcher';
 import type { SpyHolding } from '../../data/spy-holdings-fetcher';
 import { fetchFredSeries, latestPoint, pointDaysBack } from '../../data/fred-series-fetcher';
+import { fetchUsTreasuryCurve, latestY10, latestY2, y10DaysBack } from '../../data/tushare-client';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -94,16 +95,14 @@ export async function computeHyOas(): Promise<IndicatorReading> {
 // ─────────────────────────────────────────────────────────────────────────
 
 export async function computeYieldCurve(): Promise<IndicatorReading> {
-    const series = await fetchFredSeries('T10Y2Y', 120);
-    if (!series || series.length === 0) {
-        return makeSkipped('10Y-2Y', 'FRED T10Y2Y unavailable');
+    const curve = await fetchUsTreasuryCurve(120);
+    const latest10 = latestY10(curve);
+    const latest2 = latestY2(curve);
+    if (latest10 === null || latest2 === null) {
+        return makeSkipped('10Y-2Y', 'Tushare us_tycr unavailable');
     }
 
-    const latest = latestPoint(series);
-    if (!latest) return makeSkipped('10Y-2Y', 'No T10Y2Y observations');
-
-    // FRED publishes this as percentage points; convert to bp
-    const valueBp = latest.value * 100;
+    const valueBp = (latest10 - latest2) * 100;
     const notes: string[] = [];
 
     let status: RegimeSeverity;
@@ -115,8 +114,9 @@ export async function computeYieldCurve(): Promise<IndicatorReading> {
         status = 'Warning';
     } else {
         // Critical only if persistent < -50bp for last ~60 trading days (≈3 months)
-        const last60 = series.slice(-60);
-        const allInverted = last60.length >= 60 && last60.every((p) => p.value * 100 < -50);
+        const last60 = curve.filter((point) => point.y10 !== null && point.y2 !== null).slice(-60);
+        const allInverted =
+            last60.length >= 60 && last60.every((point) => (point.y10! - point.y2!) * 100 < -50);
         if (allInverted) {
             status = 'Critical';
             notes.push('< -50bp persisted ≥ 60 days');
@@ -216,18 +216,14 @@ export async function computeVix(massiveFetcher: MassiveDataFetcher): Promise<In
 // ─────────────────────────────────────────────────────────────────────────
 
 export async function computeDgs10FourWeekShock(): Promise<IndicatorReading> {
-    const series = await fetchFredSeries('DGS10', 60);
-    if (!series || series.length === 0) {
-        return makeSkipped('10Y yield 4w shock', 'FRED DGS10 unavailable');
-    }
-    const latest = latestPoint(series);
-    const fourWeeksBack = pointDaysBack(series, 28);
-    if (!latest || !fourWeeksBack) {
-        return makeSkipped('10Y yield 4w shock', 'Insufficient DGS10 history for 4w delta');
+    const curve = await fetchUsTreasuryCurve(40);
+    const latest = latestY10(curve);
+    const fourWeeksBack = y10DaysBack(curve, 28);
+    if (latest === null || fourWeeksBack === null) {
+        return makeSkipped('10Y yield 4w shock', 'Tushare us_tycr unavailable');
     }
 
-    // DGS10 published as percentage points; delta in bp.
-    const deltaBp = (latest.value - fourWeeksBack.value) * 100;
+    const deltaBp = (latest - fourWeeksBack) * 100;
     const absDelta = Math.abs(deltaBp);
 
     let status: RegimeSeverity;
@@ -241,7 +237,7 @@ export async function computeDgs10FourWeekShock(): Promise<IndicatorReading> {
         value: Math.round(deltaBp * 10) / 10,
         status,
         delta_4w: Math.round(deltaBp * 10) / 10,
-        notes: [`Latest 10Y ${latest.value.toFixed(2)}%; 4w prior ${fourWeeksBack.value.toFixed(2)}%`],
+        notes: [`Latest 10Y ${latest.toFixed(2)}%; 4w prior ${fourWeeksBack.toFixed(2)}%`],
         is_skipped: false
     };
 }
@@ -251,25 +247,22 @@ export async function computeDgs10FourWeekShock(): Promise<IndicatorReading> {
 // ─────────────────────────────────────────────────────────────────────────
 
 export async function computeDgs10AbsLevel(): Promise<IndicatorReading> {
-    const series = await fetchFredSeries('DGS10', 60);
-    if (!series || series.length === 0) {
-        return makeSkipped('10Y absolute level', 'FRED DGS10 unavailable');
+    const curve = await fetchUsTreasuryCurve(40);
+    const latest = latestY10(curve);
+    if (latest === null) {
+        return makeSkipped('10Y absolute level', 'Tushare us_tycr unavailable');
     }
-    const latest = latestPoint(series);
-    if (!latest) {
-        return makeSkipped('10Y absolute level', 'No DGS10 observations');
-    }
-    const fourWeeksBack = pointDaysBack(series, 28);
-    const delta4w = fourWeeksBack ? (latest.value - fourWeeksBack.value) * 100 : null;
+    const fourWeeksBack = y10DaysBack(curve, 28);
+    const delta4w = fourWeeksBack !== null ? (latest - fourWeeksBack) * 100 : null;
 
     // Anchors:
     // <4.0%: long-run mean neighborhood; 4.0–4.5%: upper valuation compression band;
     // 4.5–5.0%: P/E compression zone observed in multiple risk-asset selloffs;
     // >5.0%: 2023-10 risk-asset break point.
     let status: RegimeSeverity;
-    if (latest.value < 4.0) status = 'Healthy';
-    else if (latest.value < 4.5) status = 'Neutral';
-    else if (latest.value <= 5.0) status = 'Warning';
+    if (latest < 4.0) status = 'Healthy';
+    else if (latest < 4.5) status = 'Neutral';
+    else if (latest <= 5.0) status = 'Warning';
     else status = 'Critical';
 
     const zone =
@@ -279,11 +272,11 @@ export async function computeDgs10AbsLevel(): Promise<IndicatorReading> {
 
     return {
         name: '10Y absolute level',
-        value: Math.round(latest.value * 100) / 100,
+        value: Math.round(latest * 100) / 100,
         status,
         delta_4w: delta4w !== null ? Math.round(delta4w * 10) / 10 : null,
         notes: [
-            `absolute ${latest.value.toFixed(2)}% (${zone})`,
+            `absolute ${latest.toFixed(2)}% (${zone})`,
             '4.5%+ marks the P/E compression zone; >5.0% echoes the 2023-10 risk-asset break'
         ],
         is_skipped: false
