@@ -1,21 +1,12 @@
 {
   "valuation": {
-    "state": "extreme",
+    "state": "elevated",
     "summary": "Forward P/E 22.4 · CAPE 40.1",
     "evidence": [
-      "Forward P/E 22.4 — matches 2021 top, near 2000 record 24x",
-      "Shiller CAPE 40.1 — only dot-com peak comparable",
-      "Mag7 vs SPY 60d excess return >20pp"
-    ],
-    "last_reviewed_at": "2026-05-16"
-  },
-  "sentiment_manual": {
-    "state": "elevated",
-    "summary": "Burry 80% portfolio in NVDA/PLTR puts",
-    "evidence": [
-      "Burry Substack 2026-05-08: 'feeling like 1999-2000 last months'",
-      "Scion 13F: $1.1B notional NVDA/PLTR put exposure",
-      "Apollo: tech valuations back near pre-AI-boom levels — divergence with sentiment"
+      "Forward P/E 22.4 — matches 2021 top, still 7% below 2000 record 24x",
+      "Shiller CAPE 40.1 — above 2021 peak (~38), below dot-com peak (~44)",
+      "Mag7 vs SPY 60d excess return >20pp",
+      "Reserve 'extreme' for unambiguous historical tops (CAPE > 42 + Fwd P/E > 24 simultaneously, e.g. 1999/12-2000/03)"
     ],
     "last_reviewed_at": "2026-05-16"
   }

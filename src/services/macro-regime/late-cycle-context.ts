@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
+import { fetchFearGreedIndex, type FearGreedReading } from '../../data/cnn-fear-greed-fetcher';
 import type { SpyHolding } from '../../data/spy-holdings-fetcher';
 import type { LateCycleContext, LateCyclePillar, PillarState } from './types';
 
@@ -13,7 +14,6 @@ interface ManualPillarState {
 
 interface ManualStateFile {
     valuation?: ManualPillarState;
-    sentiment_manual?: ManualPillarState;
 }
 
 const MANUAL_STATE_PATH = path.resolve(process.cwd(), 'data', 'late_cycle_pillars_state.json');
@@ -135,13 +135,56 @@ function buildOasComplacencyPillar(hyOasSeries: number[] | null): LateCyclePilla
     };
 }
 
+function formatFearGreedScore(value: number): string {
+    return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1);
+}
+
+function fearGreedChineseLabel(score: number): { state: PillarState; label: string } {
+    if (score >= 75) return { state: 'extreme', label: '极度贪婪' };
+    if (score >= 60) return { state: 'elevated', label: '贪婪' };
+    if (score >= 45) return { state: 'normal', label: '中性' };
+    if (score >= 25) return { state: 'normal', label: '恐慌' };
+    return { state: 'normal', label: '极度恐慌' };
+}
+
+function buildSentimentFromFearGreed(reading: FearGreedReading): LateCyclePillar {
+    const { state, label } = fearGreedChineseLabel(reading.score);
+    const score = formatFearGreedScore(reading.score);
+    return {
+        state,
+        summary: `F&G ${score} · ${label}`,
+        evidence: [
+            `当前分值 ${score} (${reading.rating})`,
+            `上周 ${formatFearGreedScore(reading.previous_1_week)} · 上月 ${formatFearGreedScore(reading.previous_1_month)}`,
+            '来源 CNN Fear & Greed Index · 7 个 sub-indicator 加权'
+        ],
+        last_reviewed_at: todayIsoDate(),
+        days_since_review: 0,
+        stale_warning: false
+    };
+}
+
+function buildSentimentFallback(): LateCyclePillar {
+    return {
+        state: 'normal',
+        summary: 'F&G 数据暂不可用',
+        evidence: ['数据源 CNN dataviz 暂时不可达,稍后重试'],
+        last_reviewed_at: todayIsoDate(),
+        days_since_review: 0,
+        stale_warning: false
+    };
+}
+
 export async function buildLateCycleContext(
     spyHoldings: SpyHolding[] | null,
     hyOasSeries: number[] | null
 ): Promise<LateCycleContext> {
     const manualState = readManualState();
     const valuation = toPillar(manualState.valuation, 'Valuation review unavailable');
-    const sentimentManual = toPillar(manualState.sentiment_manual, 'Sentiment review unavailable');
+    const fearGreed = await fetchFearGreedIndex();
+    const sentimentManual = fearGreed
+        ? buildSentimentFromFearGreed(fearGreed)
+        : buildSentimentFallback();
     const concentrationDisplay = buildConcentrationPillar(spyHoldings);
     const oasComplacency = buildOasComplacencyPillar(hyOasSeries);
 
