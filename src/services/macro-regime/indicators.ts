@@ -335,7 +335,7 @@ export function computeConcentration(spyHoldings: SpyHolding[] | null): Indicato
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// 5. AI_BREADTH — 16 mega-cap weighted % above 50DMA
+// 5. AI_BREADTH — 16 mega-cap weighted % above 200DMA
 // ─────────────────────────────────────────────────────────────────────────
 
 const AI_BREADTH_UNIVERSE: Array<{ ticker: string; tier: 1 | 2 | 3 }> = [
@@ -364,13 +364,13 @@ export async function computeAiBreadth(
 ): Promise<IndicatorReading> {
     const results = await Promise.allSettled(
         AI_BREADTH_UNIVERSE.map(async ({ ticker, tier }) => {
-            // 100 calendar days ≈ 70 trading bars (need 50 for MA50 with safety buffer)
-            const bars = await massiveFetcher.fetchPriceHistory(ticker, 100);
+            // 330 calendar days ≈ 230 trading bars (need 200 for MA200 with safety buffer)
+            const bars = await massiveFetcher.fetchPriceHistory(ticker, 330);
             return { ticker, tier, bars };
         })
     );
 
-    const valid: Array<{ ticker: string; tier: 1 | 2 | 3; aboveMa50: boolean }> = [];
+    const valid: Array<{ ticker: string; tier: 1 | 2 | 3; aboveMa200: boolean }> = [];
     const failed: string[] = [];
 
     for (const result of results) {
@@ -379,20 +379,20 @@ export async function computeAiBreadth(
             continue;
         }
         const { ticker, tier, bars } = result.value;
-        if (bars.length < 50) {
+        if (bars.length < 200) {
             failed.push(ticker);
             continue;
         }
-        const ma50 = ma(
+        const ma200 = ma(
             bars.map((b) => b.close),
-            50
+            200
         );
         const close = bars[bars.length - 1].close;
-        if (ma50 === null) {
+        if (ma200 === null) {
             failed.push(ticker);
             continue;
         }
-        valid.push({ ticker, tier, aboveMa50: close > ma50 });
+        valid.push({ ticker, tier, aboveMa200: close > ma200 });
     }
 
     if (valid.length < AI_BREADTH_UNIVERSE.length * 0.7) {
@@ -404,7 +404,7 @@ export async function computeAiBreadth(
 
     const totalWeight = valid.reduce((sum, v) => sum + TIER_WEIGHT[v.tier], 0);
     const aboveWeight = valid
-        .filter((v) => v.aboveMa50)
+        .filter((v) => v.aboveMa200)
         .reduce((sum, v) => sum + TIER_WEIGHT[v.tier], 0);
     const weightedPct = totalWeight > 0 ? (aboveWeight / totalWeight) * 100 : 0;
 
@@ -415,21 +415,21 @@ export async function computeAiBreadth(
     else status = 'Critical';
 
     const tier1 = valid.filter((v) => v.tier === 1);
-    const tier1Below = tier1.filter((v) => !v.aboveMa50);
+    const tier1Below = tier1.filter((v) => !v.aboveMa200);
     const notes: string[] = [];
     notes.push(`${valid.length}/${AI_BREADTH_UNIVERSE.length} active`);
-    notes.push(`Tier 1: ${tier1Below.length}/${tier1.length} below 50DMA`);
+    notes.push(`Tier 1: ${tier1Below.length}/${tier1.length} below 200DMA`);
     if (failed.length > 0) {
         notes.push(`Skipped tickers: ${failed.slice(0, 4).join(',')}${failed.length > 4 ? '…' : ''}`);
     }
 
-    // Special guardrail: if ≥ 4 Tier 1 names below 50DMA, force Critical
+    // Special guardrail: if ≥ 4 Tier 1 names below 200DMA, force Critical
     // (but only escalate to actionable if weighted < 30% OR 10-day persistence).
     // For snapshot purposes here we surface Critical status but leave the
     // "action eligible" gating to the aggregation layer.
     if (tier1Below.length >= 4) {
         status = 'Critical';
-        notes.push('Tier 1 guardrail: ≥ 4 Tier 1 below 50DMA → Critical');
+        notes.push('Tier 1 guardrail: ≥ 4 Tier 1 below 200DMA → Critical');
     }
 
     return {
