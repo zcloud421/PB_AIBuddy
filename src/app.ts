@@ -21,7 +21,9 @@ import { ideasRouter } from './routes/ideas';
 import { deviceRouter } from './routes/device';
 import { trackerRouter } from './routes/tracker';
 import { pairAnalysisRouter } from './routes/pair-analysis';
+import { macroRegimeRouter } from './routes/macro-regime';
 import { ensureDeviceTables } from './db/queries/devices';
+import { ensureMacroRegimeSnapshotsTable } from './db/queries/macro-regime';
 
 dotenv.config();
 
@@ -90,6 +92,7 @@ export function createApp() {
     app.use('/device', deviceRouter);
     app.use('/tracker', trackerRouter);
     app.use('/api/pair-analysis', pairAnalysisRouter);
+    app.use('/macro-regime', macroRegimeRouter);
     app.use(errorHandler);
 
     return app;
@@ -104,6 +107,7 @@ async function ensureSchemaGuards(): Promise<void> {
     await ensureRecommendationTrackerTable();
     await ensureUnderlyingCompanyNameColumn();
     await ensureDeviceTables();
+    await ensureMacroRegimeSnapshotsTable();
 }
 
 if (require.main === module) {

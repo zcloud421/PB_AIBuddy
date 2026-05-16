@@ -1,0 +1,505 @@
+/**
+ * Macro Regime — 7 core indicators.
+ *
+ * Thresholds and rules sourced directly from the 9-round-audited Portfolio
+ * Optimization project spec. Do not introduce new indicators or modify
+ * thresholds without re-running that audit.
+ *
+ * Each indicator returns a `IndicatorReading` with status (Healthy/Neutral/
+ * Warning/Critical), the raw value, optional 4-week delta, human-readable
+ * notes, and an is_skipped flag for fail-soft when data is missing.
+ */
+
+import type { IndicatorReading, RegimeSeverity } from './types';
+import { MassiveDataFetcher, type DailyPriceBar } from '../../data/massive-fetcher';
+import { fetchFredSeries, latestPoint, pointDaysBack } from '../../data/fred-series-fetcher';
+
+// ─────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────
+
+function escalateSeverityOnce(severity: RegimeSeverity): RegimeSeverity {
+    const ladder: RegimeSeverity[] = ['Healthy', 'Neutral', 'Warning', 'Critical'];
+    const idx = ladder.indexOf(severity);
+    return ladder[Math.min(idx + 1, ladder.length - 1)];
+}
+
+function makeSkipped(name: string, reason: string): IndicatorReading {
+    return {
+        name,
+        value: null,
+        status: 'Neutral',
+        delta_4w: null,
+        notes: [reason],
+        is_skipped: true
+    };
+}
+
+function ma(values: number[], window: number): number | null {
+    if (values.length < window) return null;
+    const slice = values.slice(-window);
+    const sum = slice.reduce((acc, v) => acc + v, 0);
+    return sum / window;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 1. HY_OAS — High-Yield Credit Spread
+// ─────────────────────────────────────────────────────────────────────────
+
+export async function computeHyOas(): Promise<IndicatorReading> {
+    const series = await fetchFredSeries('BAMLH0A0HYM2', 60);
+    if (!series || series.length === 0) {
+        return makeSkipped('HY OAS', 'FRED BAMLH0A0HYM2 unavailable');
+    }
+
+    // FRED returns this as a percentage (e.g. 2.76 = 276bp). Convert to bp.
+    const latest = latestPoint(series);
+    if (!latest) {
+        return makeSkipped('HY OAS', 'No recent BAMLH0A0HYM2 observations');
+    }
+    const valueBp = latest.value * 100;
+
+    const fourWeeksBack = pointDaysBack(series, 28);
+    const delta4wBp = fourWeeksBack ? (latest.value - fourWeeksBack.value) * 100 : null;
+
+    let status: RegimeSeverity;
+    if (valueBp < 350) status = 'Healthy';
+    else if (valueBp < 450) status = 'Neutral';
+    else if (valueBp < 600) status = 'Warning';
+    else status = 'Critical';
+
+    const notes: string[] = [];
+    if (delta4wBp !== null) {
+        notes.push(`Δ4w ${delta4wBp >= 0 ? '+' : ''}${delta4wBp.toFixed(0)}bp`);
+    }
+    // Rule: if Δ4w > +75bp, force escalate 1 step (acceleration)
+    if (delta4wBp !== null && delta4wBp > 75) {
+        status = escalateSeverityOnce(status);
+        notes.push('Δ4w > +75bp triggered acceleration escalation');
+    }
+
+    return {
+        name: 'HY OAS',
+        value: Math.round(valueBp * 10) / 10,
+        status,
+        delta_4w: delta4wBp !== null ? Math.round(delta4wBp * 10) / 10 : null,
+        notes,
+        is_skipped: false
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 2. YIELD_CURVE — 10Y-2Y Spread
+// ─────────────────────────────────────────────────────────────────────────
+
+export async function computeYieldCurve(): Promise<IndicatorReading> {
+    const series = await fetchFredSeries('T10Y2Y', 120);
+    if (!series || series.length === 0) {
+        return makeSkipped('10Y-2Y', 'FRED T10Y2Y unavailable');
+    }
+
+    const latest = latestPoint(series);
+    if (!latest) return makeSkipped('10Y-2Y', 'No T10Y2Y observations');
+
+    // FRED publishes this as percentage points; convert to bp
+    const valueBp = latest.value * 100;
+    const notes: string[] = [];
+
+    let status: RegimeSeverity;
+    if (valueBp > 50) {
+        status = 'Healthy';
+    } else if (valueBp > 0) {
+        status = 'Neutral';
+    } else if (valueBp > -50) {
+        status = 'Warning';
+    } else {
+        // Critical only if persistent < -50bp for last ~60 trading days (≈3 months)
+        const last60 = series.slice(-60);
+        const allInverted = last60.length >= 60 && last60.every((p) => p.value * 100 < -50);
+        if (allInverted) {
+            status = 'Critical';
+            notes.push('< -50bp persisted ≥ 60 days');
+        } else {
+            status = 'Warning';
+            notes.push('Below -50bp but persistence < 60 days');
+        }
+    }
+
+    return {
+        name: '10Y-2Y',
+        value: Math.round(valueBp * 10) / 10,
+        status,
+        delta_4w: null,
+        notes,
+        is_skipped: false
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 3. VIX (+ SPY RV20 quality check + persistence requirement)
+// ─────────────────────────────────────────────────────────────────────────
+
+export async function computeVix(massiveFetcher: MassiveDataFetcher): Promise<IndicatorReading> {
+    const vixSeries = await fetchFredSeries('VIXCLS', 30);
+    if (!vixSeries || vixSeries.length === 0) {
+        return makeSkipped('VIX + RV20', 'FRED VIXCLS unavailable');
+    }
+    const latest = latestPoint(vixSeries);
+    if (!latest) return makeSkipped('VIX + RV20', 'No VIXCLS observations');
+    const vix = latest.value;
+
+    const notes: string[] = [];
+    let status: RegimeSeverity;
+    if (vix < 18) status = 'Healthy';
+    else if (vix < 25) status = 'Neutral';
+    else if (vix < 35) status = 'Warning';
+    else status = 'Critical';
+
+    // Quality sub-check: compute SPY 20-day realized volatility (annualized %).
+    // If VIX is Healthy (< 18) but RV20 > VIX + 3, vol is being suppressed.
+    let spyBars: DailyPriceBar[] = [];
+    try {
+        spyBars = await massiveFetcher.fetchPriceHistory('SPY', 35);
+    } catch {
+        spyBars = [];
+    }
+
+    if (spyBars.length >= 21) {
+        const recent = spyBars.slice(-21);
+        const logReturns: number[] = [];
+        for (let i = 1; i < recent.length; i += 1) {
+            const prev = recent[i - 1].close;
+            const curr = recent[i].close;
+            if (prev > 0 && curr > 0) {
+                logReturns.push(Math.log(curr / prev));
+            }
+        }
+        if (logReturns.length >= 15) {
+            const mean = logReturns.reduce((s, v) => s + v, 0) / logReturns.length;
+            const variance =
+                logReturns.reduce((s, v) => s + (v - mean) * (v - mean), 0) / (logReturns.length - 1);
+            const rv20 = Math.sqrt(variance) * Math.sqrt(252) * 100;
+            notes.push(`RV20 = ${rv20.toFixed(1)}`);
+            if (status === 'Healthy' && rv20 > vix + 3) {
+                status = 'Neutral';
+                notes.push('Vol suppression (RV20 > VIX + 3) → downgraded Healthy → Neutral');
+            }
+        }
+    } else {
+        notes.push('SPY 20d bars unavailable for RV20 quality check');
+    }
+
+    // Persistence requirement for Warning+: VIX ≥ 25 must hold ≥ 3 sessions.
+    // Single-day spikes don't escalate.
+    if (status === 'Warning' || status === 'Critical') {
+        const lastThree = vixSeries.slice(-3);
+        const persistent = lastThree.length >= 3 && lastThree.every((point) => point.value >= 25);
+        if (!persistent) {
+            status = 'Neutral';
+            notes.push('VIX spike not persistent (< 3 sessions ≥ 25) → reverted to Neutral');
+        }
+    }
+
+    return {
+        name: 'VIX + RV20',
+        value: Math.round(vix * 10) / 10,
+        status,
+        delta_4w: null,
+        notes,
+        is_skipped: false
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 4. 10Y Yield 4-Week Shock
+// ─────────────────────────────────────────────────────────────────────────
+
+export async function computeDgs10FourWeekShock(): Promise<IndicatorReading> {
+    const series = await fetchFredSeries('DGS10', 60);
+    if (!series || series.length === 0) {
+        return makeSkipped('10Y yield 4w shock', 'FRED DGS10 unavailable');
+    }
+    const latest = latestPoint(series);
+    const fourWeeksBack = pointDaysBack(series, 28);
+    if (!latest || !fourWeeksBack) {
+        return makeSkipped('10Y yield 4w shock', 'Insufficient DGS10 history for 4w delta');
+    }
+
+    // DGS10 published as percentage points; delta in bp.
+    const deltaBp = (latest.value - fourWeeksBack.value) * 100;
+    const absDelta = Math.abs(deltaBp);
+
+    let status: RegimeSeverity;
+    if (absDelta < 35) status = 'Healthy';
+    else if (absDelta < 50) status = 'Neutral';
+    else if (absDelta < 75) status = 'Warning';
+    else status = 'Critical';
+
+    return {
+        name: '10Y yield 4w shock',
+        value: Math.round(deltaBp * 10) / 10,
+        status,
+        delta_4w: Math.round(deltaBp * 10) / 10,
+        notes: [`Latest 10Y ${latest.value.toFixed(2)}%; 4w prior ${fourWeeksBack.value.toFixed(2)}%`],
+        is_skipped: false
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 5. AI_BREADTH — 16 mega-cap weighted % above 50DMA
+// ─────────────────────────────────────────────────────────────────────────
+
+const AI_BREADTH_UNIVERSE: Array<{ ticker: string; tier: 1 | 2 | 3 }> = [
+    { ticker: 'NVDA', tier: 1 },
+    { ticker: 'MSFT', tier: 1 },
+    { ticker: 'GOOG', tier: 1 },
+    { ticker: 'AMZN', tier: 1 },
+    { ticker: 'META', tier: 1 },
+    { ticker: 'AVGO', tier: 1 },
+    { ticker: 'AMD', tier: 2 },
+    { ticker: 'TSM', tier: 2 },
+    { ticker: 'MU', tier: 2 },
+    { ticker: 'ANET', tier: 2 },
+    { ticker: 'MRVL', tier: 2 },
+    { ticker: 'CRDO', tier: 2 },
+    { ticker: 'LITE', tier: 2 },
+    { ticker: 'VRT', tier: 3 },
+    { ticker: 'GEV', tier: 3 },
+    { ticker: 'ALAB', tier: 3 }
+];
+
+const TIER_WEIGHT: Record<1 | 2 | 3, number> = { 1: 2.0, 2: 1.5, 3: 1.0 };
+
+export async function computeAiBreadth(
+    massiveFetcher: MassiveDataFetcher
+): Promise<IndicatorReading> {
+    const results = await Promise.allSettled(
+        AI_BREADTH_UNIVERSE.map(async ({ ticker, tier }) => {
+            const bars = await massiveFetcher.fetchPriceHistory(ticker, 75);
+            return { ticker, tier, bars };
+        })
+    );
+
+    const valid: Array<{ ticker: string; tier: 1 | 2 | 3; aboveMa50: boolean }> = [];
+    const failed: string[] = [];
+
+    for (const result of results) {
+        if (result.status !== 'fulfilled') {
+            failed.push('unknown');
+            continue;
+        }
+        const { ticker, tier, bars } = result.value;
+        if (bars.length < 50) {
+            failed.push(ticker);
+            continue;
+        }
+        const ma50 = ma(
+            bars.map((b) => b.close),
+            50
+        );
+        const close = bars[bars.length - 1].close;
+        if (ma50 === null) {
+            failed.push(ticker);
+            continue;
+        }
+        valid.push({ ticker, tier, aboveMa50: close > ma50 });
+    }
+
+    if (valid.length < AI_BREADTH_UNIVERSE.length * 0.7) {
+        return makeSkipped(
+            'AI Breadth (16 mega cap)',
+            `Insufficient data: ${valid.length}/${AI_BREADTH_UNIVERSE.length} resolved`
+        );
+    }
+
+    const totalWeight = valid.reduce((sum, v) => sum + TIER_WEIGHT[v.tier], 0);
+    const aboveWeight = valid
+        .filter((v) => v.aboveMa50)
+        .reduce((sum, v) => sum + TIER_WEIGHT[v.tier], 0);
+    const weightedPct = totalWeight > 0 ? (aboveWeight / totalWeight) * 100 : 0;
+
+    let status: RegimeSeverity;
+    if (weightedPct > 75) status = 'Healthy';
+    else if (weightedPct > 50) status = 'Neutral';
+    else if (weightedPct > 30) status = 'Warning';
+    else status = 'Critical';
+
+    const tier1 = valid.filter((v) => v.tier === 1);
+    const tier1Below = tier1.filter((v) => !v.aboveMa50);
+    const notes: string[] = [];
+    notes.push(`${valid.length}/${AI_BREADTH_UNIVERSE.length} active`);
+    notes.push(`Tier 1: ${tier1Below.length}/${tier1.length} below 50DMA`);
+    if (failed.length > 0) {
+        notes.push(`Skipped tickers: ${failed.slice(0, 4).join(',')}${failed.length > 4 ? '…' : ''}`);
+    }
+
+    // Special guardrail: if ≥ 4 Tier 1 names below 50DMA, force Critical
+    // (but only escalate to actionable if weighted < 30% OR 10-day persistence).
+    // For snapshot purposes here we surface Critical status but leave the
+    // "action eligible" gating to the aggregation layer.
+    if (tier1Below.length >= 4) {
+        status = 'Critical';
+        notes.push('Tier 1 guardrail: ≥ 4 Tier 1 below 50DMA → Critical');
+    }
+
+    return {
+        name: 'AI Breadth (16 mega cap)',
+        value: Math.round(weightedPct * 10) / 10,
+        status,
+        delta_4w: null,
+        notes,
+        is_skipped: false
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 6. BROAD_BREADTH — Nasdaq-100 % above 200DMA (equal weight)
+// ─────────────────────────────────────────────────────────────────────────
+
+// NDX components are large and change occasionally. Hardcoding a snapshot list
+// matches the Python project's approach and avoids per-snapshot index lookup.
+// If components shift materially, refresh this constant; the indicator
+// quietly skips tickers that fail to resolve.
+const NDX_COMPONENTS: string[] = [
+    'AAPL', 'ABNB', 'ADBE', 'ADI', 'ADP', 'ADSK', 'AEP', 'AMAT', 'AMD', 'AMGN',
+    'AMZN', 'ANSS', 'APP', 'ARM', 'ASML', 'AVGO', 'AXON', 'AZN', 'BIIB', 'BKNG',
+    'BKR', 'CCEP', 'CDNS', 'CDW', 'CEG', 'CHTR', 'CMCSA', 'COST', 'CPRT', 'CRWD',
+    'CSCO', 'CSGP', 'CSX', 'CTAS', 'CTSH', 'DASH', 'DDOG', 'DLTR', 'DXCM', 'EA',
+    'EXC', 'FANG', 'FAST', 'FTNT', 'GEHC', 'GFS', 'GILD', 'GOOG', 'GOOGL', 'HON',
+    'IDXX', 'INTC', 'INTU', 'ISRG', 'KDP', 'KHC', 'KLAC', 'LIN', 'LRCX', 'LULU',
+    'MAR', 'MCHP', 'MDB', 'MDLZ', 'MELI', 'META', 'MNST', 'MRVL', 'MSFT', 'MSTR',
+    'MU', 'NFLX', 'NVDA', 'NXPI', 'ODFL', 'ON', 'ORLY', 'PANW', 'PAYX', 'PCAR',
+    'PDD', 'PEP', 'PLTR', 'PYPL', 'QCOM', 'REGN', 'ROP', 'ROST', 'SBUX', 'SNPS',
+    'TEAM', 'TMUS', 'TSLA', 'TTD', 'TTWO', 'TXN', 'VRSK', 'VRTX', 'WBD', 'WDAY',
+    'XEL', 'ZS'
+];
+
+export async function computeBroadBreadth(
+    massiveFetcher: MassiveDataFetcher
+): Promise<IndicatorReading> {
+    const results = await Promise.allSettled(
+        NDX_COMPONENTS.map(async (ticker) => {
+            const bars = await massiveFetcher.fetchPriceHistory(ticker, 230);
+            return { ticker, bars };
+        })
+    );
+
+    const valid: Array<{ ticker: string; aboveMa200: boolean }> = [];
+    const failed: string[] = [];
+
+    for (const result of results) {
+        if (result.status !== 'fulfilled') {
+            failed.push('unknown');
+            continue;
+        }
+        const { ticker, bars } = result.value;
+        if (bars.length < 200) {
+            failed.push(ticker);
+            continue;
+        }
+        const ma200 = ma(
+            bars.map((b) => b.close),
+            200
+        );
+        const close = bars[bars.length - 1].close;
+        if (ma200 === null) {
+            failed.push(ticker);
+            continue;
+        }
+        valid.push({ ticker, aboveMa200: close > ma200 });
+    }
+
+    if (valid.length < NDX_COMPONENTS.length * 0.7) {
+        return makeSkipped(
+            'NDX-100 above 200DMA',
+            `Insufficient data: ${valid.length}/${NDX_COMPONENTS.length} resolved`
+        );
+    }
+
+    const pct = (valid.filter((v) => v.aboveMa200).length / valid.length) * 100;
+
+    let status: RegimeSeverity;
+    if (pct > 65) status = 'Healthy';
+    else if (pct > 45) status = 'Neutral';
+    else if (pct > 30) status = 'Warning';
+    else status = 'Critical';
+
+    const notes: string[] = [`${valid.length}/${NDX_COMPONENTS.length} active`];
+
+    // Special escalation: if 4w breadth Δ < -25pp, force escalate one step.
+    // Compute by snapshotting MA200 with bars 4 weeks (≈20 trading days) ago.
+    let delta4wPp: number | null = null;
+    try {
+        const fourWeeksAgoValid: Array<{ aboveMa200: boolean }> = [];
+        for (const result of results) {
+            if (result.status !== 'fulfilled') continue;
+            const { bars } = result.value;
+            if (bars.length < 220) continue;
+            const barsThen = bars.slice(0, bars.length - 20);
+            if (barsThen.length < 200) continue;
+            const ma200Then = ma(
+                barsThen.map((b) => b.close),
+                200
+            );
+            const closeThen = barsThen[barsThen.length - 1].close;
+            if (ma200Then === null) continue;
+            fourWeeksAgoValid.push({ aboveMa200: closeThen > ma200Then });
+        }
+        if (fourWeeksAgoValid.length >= NDX_COMPONENTS.length * 0.6) {
+            const pctThen =
+                (fourWeeksAgoValid.filter((v) => v.aboveMa200).length / fourWeeksAgoValid.length) * 100;
+            delta4wPp = pct - pctThen;
+            notes.push(`Δ4w ${delta4wPp >= 0 ? '+' : ''}${delta4wPp.toFixed(1)}pp`);
+            if (delta4wPp < -25) {
+                status = escalateSeverityOnce(status);
+                notes.push('Δ4w < -25pp triggered escalation');
+            }
+        }
+    } catch {
+        // Best-effort; delta computation failure does not break primary reading.
+    }
+
+    return {
+        name: 'NDX-100 above 200DMA',
+        value: Math.round(pct * 10) / 10,
+        status,
+        delta_4w: delta4wPp !== null ? Math.round(delta4wPp * 10) / 10 : null,
+        notes,
+        is_skipped: false
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 7. BTC_DRAWDOWN — Liquidity proxy from 60d high
+// ─────────────────────────────────────────────────────────────────────────
+
+export async function computeBtcDrawdown(): Promise<IndicatorReading> {
+    const series = await fetchFredSeries('CBBTCUSD', 90);
+    if (!series || series.length < 30) {
+        return makeSkipped('BTC 60d drawdown', 'FRED CBBTCUSD unavailable or thin');
+    }
+    const recent = series.slice(-60);
+    const last = recent[recent.length - 1].value;
+    const peak = Math.max(...recent.map((p) => p.value));
+    const drawdown = peak > 0 ? (last / peak - 1) * 100 : 0;
+
+    let status: RegimeSeverity;
+    if (drawdown > -15) status = 'Healthy';
+    else if (drawdown > -25) status = 'Neutral';
+    else if (drawdown > -40) status = 'Warning';
+    else status = 'Critical';
+
+    const notes: string[] = [
+        `Peak ${peak.toFixed(0)} → last ${last.toFixed(0)}`,
+        'Liquidity proxy — does not solo-trigger portfolio Critical'
+    ];
+
+    return {
+        name: 'BTC 60d drawdown',
+        value: Math.round(drawdown * 10) / 10,
+        status,
+        delta_4w: null,
+        notes,
+        is_skipped: false
+    };
+}
