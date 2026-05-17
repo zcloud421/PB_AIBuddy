@@ -18,7 +18,6 @@ import {
     computeConcentration,
     computeDgs10AbsLevel,
     computeDgs10FourWeekShock,
-    computeDxy,
     computeHyOas,
     computeVix,
     computeYieldCurve
@@ -57,7 +56,6 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         dgs10AbsLevel,
         dgs10Shock,
         concentration,
-        dxy,
         aiBreadth,
         broadBreadth,
         btcDrawdown,
@@ -70,7 +68,6 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         computeDgs10AbsLevel(),
         computeDgs10FourWeekShock(),
         Promise.resolve(computeConcentration(spyHoldings)),
-        computeDxy(fetcher),
         computeAiBreadth(fetcher),
         computeBroadBreadth(fetcher),
         computeBtcDrawdown(),
@@ -85,7 +82,6 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         DGS10_ABS_LEVEL: dgs10AbsLevel,
         DGS10_4W_SHOCK: dgs10Shock,
         CONCENTRATION: concentration,
-        DXY: dxy,
         AI_BREADTH: aiBreadth,
         BROAD_BREADTH: broadBreadth,
         BTC_DRAWDOWN: btcDrawdown

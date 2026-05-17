@@ -95,6 +95,25 @@ Variables can be added (e.g., DXY for FX channel), but always as discrete
 peers in the MAX + escalation aggregator, never as weighted contributors
 to a composite.
 
+## Why DXY Was Removed
+
+DXY was briefly added as an FX-channel signal (industry FCI standard) but
+removed after honest reassessment for our specific PB FCN use case:
+
+- **Coincident, not leading** — USD strengthens *after* risk-off begins
+- **Signal redundancy** — 90% of DXY's information already captured by
+  DGS10_ABS_LEVEL (rates and USD strength share Fed-tightening driver)
+- **Multinational EPS pressure is slow** — quarterly effect, not 1-6mo
+  PB decision window
+- **PB RM doesn't watch DXY** — when pricing FCN strikes, DXY isn't on
+  the decision tree
+
+Goldman/Bloomberg FCI include DXY because they serve global macro overlay
+investors, not single-asset PB. We're a single-asset (US equity) tool —
+DXY's marginal information for our use case is negligible.
+
+Indicator count: 12 → 11 (visible) after removal.
+
 ## Last Reviewed
 
 - 2026-05-17 — initial document; reverted MA200 change
