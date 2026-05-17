@@ -77,8 +77,9 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         fetchSpyHoldings()
     ]);
 
+    const hyOas = await computeHyOas();
+
     const [
-        hyOas,
         yieldCurve,
         vix,
         dgs10AbsLevel,
@@ -90,7 +91,6 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         aiCloudStress,
         creditFundingStress
     ] = await Promise.all([
-        computeHyOas(),
         computeYieldCurve(),
         computeVix(fetcher),
         computeDgs10AbsLevel(),
@@ -99,7 +99,7 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         computeAiBreadth(fetcher),
         computeBroadBreadth(fetcher),
         computeBtcDrawdown(),
-        computeAiCloudStress(fetcher, hyOasDelta4w),
+        computeAiCloudStress(fetcher, hyOasDelta4w, hyOas.status),
         computeCreditFundingStress(fetcher, hyOasSeries)
     ]);
 

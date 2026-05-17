@@ -14,6 +14,7 @@ import type {
     AiCloudStressStatus,
     AiCloudStressTickerSignal,
     CreditFundingStressReport,
+    RegimeSeverity,
     SideMonitorStatus,
     SideSubSignal
 } from './types';
@@ -38,6 +39,24 @@ function aiCloudStatusFromScore(score: 0 | 1 | 2 | 3): AiCloudStressStatus {
     if (score === 1) return 'Watch';
     if (score === 2) return 'Stress';
     return 'Crisis';
+}
+
+function computeAiCloudConfirmedScore(
+    crwvSignal: 0 | 1 | 2 | 3,
+    nbisSignal: 0 | 1 | 2 | 3,
+    hyDivergenceConfirmed: boolean
+): 0 | 1 | 2 | 3 {
+    // Two pure-play GPU cloud names breaking together is confirmation.
+    if (crwvSignal >= 3 && nbisSignal >= 3) return 3;
+    if (crwvSignal >= 2 && nbisSignal >= 2) return 2;
+
+    // Single-stock breaks need credit confirmation; without it, treat as
+    // company-specific noise rather than system-level AI infra stress.
+    const maxSingle = Math.max(crwvSignal, nbisSignal);
+    if (maxSingle >= 3 && hyDivergenceConfirmed) return 2;
+    if (maxSingle >= 2 && hyDivergenceConfirmed) return 1;
+    if (maxSingle >= 3) return 1;
+    return 0;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -132,7 +151,8 @@ async function computeAiCloudTickerSignal(
 
 export async function computeAiCloudStress(
     massiveFetcher: MassiveDataFetcher,
-    hyOasDelta4wBp: number | null
+    hyOasDelta4wBp: number | null,
+    hyOasSeverity: RegimeSeverity = 'Neutral'
 ): Promise<AiCloudStressReport> {
     // Reference: 60d return of NVDA for relative-weakness subsignal
     let nvdaSixtyDayReturnPct: number | null = null;
@@ -154,9 +174,8 @@ export async function computeAiCloudStress(
         computeAiCloudTickerSignal('NBIS', massiveFetcher, hyOasDelta4wBp, nvdaSixtyDayReturnPct)
     ]);
 
-    // Weighted composite: 0.65 × CRWV + 0.35 × NBIS, rounded
-    const composite = Math.round(0.65 * crwv.signal + 0.35 * nbis.signal);
-    const clamped = Math.max(0, Math.min(3, composite)) as 0 | 1 | 2 | 3;
+    const hyDivergenceConfirmed = hyOasSeverity === 'Warning' || hyOasSeverity === 'Critical';
+    const clamped = computeAiCloudConfirmedScore(crwv.signal, nbis.signal, hyDivergenceConfirmed);
 
     return {
         score: clamped,
