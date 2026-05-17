@@ -66,6 +66,35 @@ whether to formalize as a tracked sub-signal. Reasons to hold off:
 - Correlated redundancy with CONCENTRATION + AI Cloud Stress
 - No out-of-sample validation yet
 
+## Why No Composite Score
+
+The system intentionally uses **discrete severity ladder + voting count** as
+its aggregation, not a weighted 0-100 composite. Decision rationale:
+
+1. **No calibration data** — we have ~18 months of production history; any
+   weight choice is fabricated precision masquerading as research-anchored.
+
+2. **PM gold standard is discrete** — Druckenmiller, Soros, Tudor Jones all
+   operate on rule-based triggers ("if 3 of 4 break, de-risk"), not
+   weighted scores. Weighted composites are mainly sell-side marketing or
+   quant systems with 50+ year backtests.
+
+3. **Composite scores hide single-signal failures** — when one indicator's
+   data feed breaks or threshold drifts, a weighted score silently absorbs
+   the bias. Discrete voting surfaces the problem indicator immediately.
+
+4. **Round-number pillar weights aren't real research** — even if anchored
+   in published frameworks (NY Fed, GS FCI), those weights come from
+   regression-fit GDP impact models we don't replicate. Borrowing the
+   numbers without the model is cargo-cult.
+
+The Hero anchor is therefore "**N / M signals breached**" (Druckenmiller
+voting metric), not "Josan Risk Score 47/100" (fake composite).
+
+Variables can be added (e.g., DXY for FX channel), but always as discrete
+peers in the MAX + escalation aggregator, never as weighted contributors
+to a composite.
+
 ## Last Reviewed
 
 - 2026-05-17 — initial document; reverted MA200 change
