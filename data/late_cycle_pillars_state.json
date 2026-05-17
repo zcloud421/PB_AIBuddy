@@ -1,4 +1,5 @@
 {
+  "_deprecated_note": "valuation 字段已从 active late-cycle pillar 移除,保留仅为向后兼容。请勿读取。",
   "valuation": {
     "state": "elevated",
     "summary": "Forward P/E 22.4 · CAPE 40.1",

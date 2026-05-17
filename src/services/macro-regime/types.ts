@@ -84,7 +84,7 @@ export interface LateCycleContext {
     consecutive_days_active: number;
     fatigue_warning: boolean;
     pillars: {
-        valuation: LateCyclePillar;
+        valuation?: LateCyclePillar;
         concentration_display: LateCyclePillar;
         oas_complacency: LateCyclePillar;
         sentiment_manual: LateCyclePillar;

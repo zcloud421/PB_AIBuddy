@@ -1,57 +1,9 @@
-import fs from 'fs';
-import path from 'path';
-
 import { fetchFearGreedIndex, type FearGreedReading } from '../../data/cnn-fear-greed-fetcher';
 import type { SpyHolding } from '../../data/spy-holdings-fetcher';
 import type { LateCycleContext, LateCyclePillar, PillarState } from './types';
 
-interface ManualPillarState {
-    state: PillarState;
-    summary: string;
-    evidence: string[];
-    last_reviewed_at: string;
-}
-
-interface ManualStateFile {
-    valuation?: ManualPillarState;
-}
-
-const MANUAL_STATE_PATH = path.resolve(process.cwd(), 'data', 'late_cycle_pillars_state.json');
-const STALE_REVIEW_DAYS = 100;
-
 function todayIsoDate(): string {
     return new Date().toISOString().slice(0, 10);
-}
-
-function daysSince(dateIso: string): number {
-    const date = new Date(`${dateIso}T00:00:00Z`);
-    if (Number.isNaN(date.getTime())) return 9999;
-    const today = new Date(`${todayIsoDate()}T00:00:00Z`);
-    return Math.max(0, Math.floor((today.getTime() - date.getTime()) / (24 * 60 * 60 * 1000)));
-}
-
-function toPillar(state: ManualPillarState | undefined, fallbackSummary: string): LateCyclePillar {
-    const lastReviewed = state?.last_reviewed_at ?? '1970-01-01';
-    const reviewAge = daysSince(lastReviewed);
-    return {
-        state: state?.state ?? 'normal',
-        summary: state?.summary ?? fallbackSummary,
-        evidence: Array.isArray(state?.evidence) ? state.evidence : [],
-        last_reviewed_at: lastReviewed,
-        days_since_review: reviewAge,
-        stale_warning: reviewAge > STALE_REVIEW_DAYS
-    };
-}
-
-function readManualState(): ManualStateFile {
-    try {
-        const raw = fs.readFileSync(MANUAL_STATE_PATH, 'utf8');
-        return JSON.parse(raw) as ManualStateFile;
-    } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`[late-cycle-context] manual state unavailable: ${message}`);
-        return {};
-    }
 }
 
 function topHoldings(holdings: SpyHolding[]): SpyHolding[] {
@@ -179,8 +131,6 @@ export async function buildLateCycleContext(
     spyHoldings: SpyHolding[] | null,
     hyOasSeries: number[] | null
 ): Promise<LateCycleContext> {
-    const manualState = readManualState();
-    const valuation = toPillar(manualState.valuation, 'Valuation review unavailable');
     const fearGreed = await fetchFearGreedIndex();
     const sentimentManual = fearGreed
         ? buildSentimentFromFearGreed(fearGreed)
@@ -189,7 +139,6 @@ export async function buildLateCycleContext(
     const oasComplacency = buildOasComplacencyPillar(hyOasSeries);
 
     const pillars = {
-        valuation,
         concentration_display: concentrationDisplay,
         oas_complacency: oasComplacency,
         sentiment_manual: sentimentManual
