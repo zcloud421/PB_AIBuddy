@@ -92,6 +92,7 @@ export interface MacroRegimeIndicators {
     DGS10_ABS_LEVEL: IndicatorReading;
     DGS10_4W_SHOCK: IndicatorReading;
     CONCENTRATION: IndicatorReading;
+    DXY: IndicatorReading;
     AI_BREADTH: IndicatorReading;
     BROAD_BREADTH: IndicatorReading;
     BTC_DRAWDOWN: IndicatorReading;

@@ -335,6 +335,77 @@ export function computeConcentration(spyHoldings: SpyHolding[] | null): Indicato
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// 4d. DXY — broad-dollar level + 4w momentum
+// ─────────────────────────────────────────────────────────────────────────
+
+export async function computeDxy(
+    massiveFetcher: MassiveDataFetcher
+): Promise<IndicatorReading> {
+    let bars: DailyPriceBar[] = [];
+    try {
+        bars = await massiveFetcher.fetchPriceHistory('I:DXY', 100);
+    } catch {
+        bars = [];
+    }
+
+    let latest: number | null = null;
+    let fourWeeksBack: number | null = null;
+    let sourceLabel = 'Massive I:DXY';
+
+    if (bars.length >= 30) {
+        latest = bars[bars.length - 1].close;
+        const priorBar = bars[Math.max(0, bars.length - 21)];
+        fourWeeksBack = priorBar.close;
+    } else {
+        const series = await fetchFredSeries('DTWEXM', 60);
+        if (series && series.length > 0) {
+            const latestPointValue = latestPoint(series);
+            const priorPoint = pointDaysBack(series, 28);
+            if (latestPointValue) latest = latestPointValue.value;
+            if (priorPoint) fourWeeksBack = priorPoint.value;
+            sourceLabel = 'FRED DTWEXM';
+        }
+    }
+
+    if (latest === null) {
+        return makeSkipped('DXY (broad dollar)', 'DXY data unavailable from Massive + FRED');
+    }
+
+    const delta4wPct =
+        fourWeeksBack !== null && fourWeeksBack > 0
+            ? ((latest - fourWeeksBack) / fourWeeksBack) * 100
+            : null;
+
+    let status: RegimeSeverity;
+    if (latest >= 110 || (delta4wPct !== null && delta4wPct > 5)) {
+        status = 'Critical';
+    } else if (latest >= 105 || (delta4wPct !== null && delta4wPct > 3)) {
+        status = 'Warning';
+    } else if (latest >= 100) {
+        status = 'Neutral';
+    } else {
+        status = 'Healthy';
+    }
+
+    const notes = [`Latest ${latest.toFixed(1)} (${sourceLabel})`];
+    if (delta4wPct !== null) {
+        notes.push(`Δ4w ${delta4wPct >= 0 ? '+' : ''}${delta4wPct.toFixed(1)}%`);
+    }
+    if (status === 'Warning' || status === 'Critical') {
+        notes.push('Strong USD pressures multinational EPS & EM risk assets');
+    }
+
+    return {
+        name: 'DXY (broad dollar)',
+        value: Math.round(latest * 10) / 10,
+        status,
+        delta_4w: delta4wPct !== null ? Math.round(delta4wPct * 10) / 10 : null,
+        notes,
+        is_skipped: false
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // 5. AI_BREADTH — 16 mega-cap weighted % above 50DMA
 // ─────────────────────────────────────────────────────────────────────────
 
