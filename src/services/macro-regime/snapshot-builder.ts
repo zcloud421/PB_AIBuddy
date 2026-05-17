@@ -1,12 +1,12 @@
 /**
- * Snapshot orchestrator — fans out 7 indicator + 2 side-monitor computations
+ * Snapshot orchestrator — fans out indicator + side-monitor computations
  * in parallel, applies aggregation + escalations, returns a complete
  * MacroRegimeSnapshot.
  *
  * All computations are independently fail-soft (return is_skipped or normal
  * status when their data source fails). Snapshot generation itself never
  * throws — worst case the snapshot has many skipped indicators and an
- * accurate "data unavailable" headline.
+ * accurate skipped readings.
  */
 
 import { MassiveDataFetcher } from '../../data/massive-fetcher';
@@ -14,7 +14,6 @@ import { fetchSpyHoldings } from '../../data/spy-holdings-fetcher';
 import {
     computeAiBreadth,
     computeBroadBreadth,
-    computeBtcDrawdown,
     computeConcentration,
     computeDgs10AbsLevel,
     computeDgs10FourWeekShock,
@@ -28,7 +27,7 @@ import {
     computeHyOasDelta4wBp,
     fetchHyOasSeriesBp
 } from './side-monitors';
-import { applyEscalations, composeHeadline, computeBaseSeverity } from './aggregate';
+import { applyEscalations, computeBaseSeverity } from './aggregate';
 import { loadFundamentalModifier } from './fundamental-modifier';
 import { buildLateCycleContext } from './late-cycle-context';
 import { persistenceFor, syncAllPersistence } from './persistence';
@@ -87,7 +86,6 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         concentration,
         aiBreadth,
         broadBreadth,
-        btcDrawdown,
         aiCloudStress,
         creditFundingStress
     ] = await Promise.all([
@@ -98,7 +96,6 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         Promise.resolve(computeConcentration(spyHoldings)),
         computeAiBreadth(fetcher),
         computeBroadBreadth(fetcher),
-        computeBtcDrawdown(),
         computeAiCloudStress(fetcher, hyOasDelta4w, hyOas.status),
         computeCreditFundingStress(fetcher, hyOasSeries)
     ]);
@@ -111,12 +108,11 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         DGS10_4W_SHOCK: dgs10Shock,
         CONCENTRATION: concentration,
         AI_BREADTH: aiBreadth,
-        BROAD_BREADTH: broadBreadth,
-        BTC_DRAWDOWN: btcDrawdown
+        BROAD_BREADTH: broadBreadth
     };
 
     const fundamentalModifier = loadFundamentalModifier();
-    const lateCycleContext = await buildLateCycleContext(spyHoldings, hyOasSeries);
+    const lateCycleContext = await buildLateCycleContext();
     const baseOverall = computeBaseSeverity(indicators);
     const overall = applyEscalations(
         baseOverall,
@@ -136,14 +132,6 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         as_of: asOf,
         overall,
         base_overall: baseOverall,
-        headline: composeHeadline(
-            overall,
-            indicators,
-            aiCloudStress,
-            creditFundingStress,
-            fundamentalModifier,
-            lateCycleContext
-        ),
         indicators,
         ai_cloud_stress: aiCloudStress,
         credit_funding_stress: creditFundingStress,

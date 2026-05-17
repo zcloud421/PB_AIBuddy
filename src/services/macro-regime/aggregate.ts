@@ -1,5 +1,5 @@
 /**
- * Aggregation logic — combines 7 indicators + side monitors + fundamental
+ * Aggregation logic — combines indicators + side monitors + fundamental
  * modifier into a single overall severity.
  *
  * Step 1: base severity from indicators alone
@@ -12,8 +12,6 @@
  * Step 3: Credit/Funding overall = Crisis escalates one step
  * Step 4: Fundamental modifier applies escalation_level (0/1/2)
  *
- * BTC_DRAWDOWN is a liquidity proxy — it never solo-triggers portfolio Critical
- * (its `portfolio_critical_eligible` is false). Other Critical sources do.
  */
 
 import type {
@@ -21,7 +19,6 @@ import type {
     CreditFundingStressReport,
     FundamentalModifier,
     IndicatorReading,
-    LateCycleContext,
     MacroRegimeIndicators,
     RegimeSeverity
 } from './types';
@@ -34,9 +31,9 @@ function escalate(severity: RegimeSeverity, by: number): RegimeSeverity {
 }
 
 function isPortfolioCriticalEligible(name: string, indicator: IndicatorReading): boolean {
-    // BTC drawdown is liquidity proxy and concentration is a structural
-    // late-cycle context/tail-risk marker — neither solo-triggers Critical.
-    if (name === 'BTC_DRAWDOWN' || name === 'CONCENTRATION') return false;
+    // Concentration is a structural late-cycle/tail-risk marker; it should not
+    // solo-trigger portfolio Critical.
+    if (name === 'CONCENTRATION') return false;
     if (indicator.is_skipped) return false;
     return true;
 }
@@ -95,56 +92,4 @@ export function applyEscalations(
     if (credit.overall_status === 'crisis') result = escalate(result, 1);
     result = escalate(result, modifier.escalation_level);
     return result;
-}
-
-/**
- * Compose a short human-readable headline summarising the regime.
- * Format: "{emoji} {Severity}: {top issue}"
- */
-export function composeHeadline(
-    overall: RegimeSeverity,
-    indicators: MacroRegimeIndicators,
-    aiCloud: AiCloudStressReport,
-    credit: CreditFundingStressReport,
-    modifier: FundamentalModifier,
-    lateCycleContext?: LateCycleContext
-): string {
-    const emoji =
-        overall === 'Critical' ? '🔴' :
-            overall === 'Warning' ? '🟠' :
-                overall === 'Neutral' ? '🟡' : '🟢';
-
-    const reasons: string[] = [];
-
-    const indicatorEntries = Object.entries(indicators) as Array<[string, IndicatorReading]>;
-    for (const [key, reading] of indicatorEntries) {
-        if (reading.is_skipped) continue;
-        if (reading.status === 'Critical' || reading.status === 'Warning') {
-            reasons.push(`${reading.name} ${reading.status.toLowerCase()}`);
-        }
-    }
-    if (aiCloud.score >= 2) {
-        reasons.push(`AI cloud ${aiCloud.status.toLowerCase()}`);
-    }
-    if (credit.overall_score >= 2) {
-        reasons.push(`credit/funding ${credit.overall_status}`);
-    }
-    if (modifier.escalation_level >= 1) {
-        reasons.push(`AI capex ${modifier.state}`);
-    }
-
-    if (reasons.length === 0) {
-        // Healthy / Neutral with nothing escalated — highlight strongest signal.
-        const positives: string[] = [];
-        for (const [, reading] of indicatorEntries) {
-            if (reading.is_skipped) continue;
-            if (reading.status === 'Healthy') positives.push(reading.name);
-        }
-        if (positives.length > 0) {
-            return `${emoji} Macro ${overall}: ${positives.slice(0, 2).join(', ')} healthy${lateCycleContext?.headline_suffix ?? ''}`;
-        }
-        return `${emoji} Macro ${overall}${lateCycleContext?.headline_suffix ?? ''}`;
-    }
-
-    return `${emoji} Macro ${overall}: ${reasons.slice(0, 2).join(', ')}${lateCycleContext?.headline_suffix ?? ''}`;
 }

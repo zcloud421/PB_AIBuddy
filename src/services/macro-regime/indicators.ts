@@ -1,5 +1,5 @@
 /**
- * Macro Regime — 7 core indicators.
+ * Macro Regime — core indicators.
  *
  * Thresholds and rules sourced directly from the 9-round-audited Portfolio
  * Optimization project spec. Do not introduce new indicators or modify
@@ -555,41 +555,6 @@ export async function computeBroadBreadth(
         value: Math.round(pct * 10) / 10,
         status,
         delta_4w: delta4wPp !== null ? Math.round(delta4wPp * 10) / 10 : null,
-        notes,
-        is_skipped: false
-    };
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// 7. BTC_DRAWDOWN — Liquidity proxy from 60d high
-// ─────────────────────────────────────────────────────────────────────────
-
-export async function computeBtcDrawdown(): Promise<IndicatorReading> {
-    const series = await fetchFredSeries('CBBTCUSD', 90);
-    if (!series || series.length < 30) {
-        return makeSkipped('BTC 60d drawdown', 'FRED CBBTCUSD unavailable or thin');
-    }
-    const recent = series.slice(-60);
-    const last = recent[recent.length - 1].value;
-    const peak = Math.max(...recent.map((p) => p.value));
-    const drawdown = peak > 0 ? (last / peak - 1) * 100 : 0;
-
-    let status: RegimeSeverity;
-    if (drawdown > -15) status = 'Healthy';
-    else if (drawdown > -25) status = 'Neutral';
-    else if (drawdown > -40) status = 'Warning';
-    else status = 'Critical';
-
-    const notes: string[] = [
-        `Peak ${peak.toFixed(0)} → last ${last.toFixed(0)}`,
-        'Liquidity proxy — does not solo-trigger portfolio Critical'
-    ];
-
-    return {
-        name: 'BTC 60d drawdown',
-        value: Math.round(drawdown * 10) / 10,
-        status,
-        delta_4w: null,
         notes,
         is_skipped: false
     };

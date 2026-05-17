@@ -80,13 +80,9 @@ export interface LateCyclePillar {
 export interface LateCycleContext {
     elevated_count: number;
     soft_pause_active: boolean;
-    headline_suffix: string;
     consecutive_days_active: number;
     fatigue_warning: boolean;
     pillars: {
-        valuation?: LateCyclePillar;
-        concentration_display: LateCyclePillar;
-        oas_complacency: LateCyclePillar;
         sentiment_manual: LateCyclePillar;
     };
 }
@@ -100,14 +96,12 @@ export interface MacroRegimeIndicators {
     CONCENTRATION: IndicatorReading;
     AI_BREADTH: IndicatorReading;
     BROAD_BREADTH: IndicatorReading;
-    BTC_DRAWDOWN: IndicatorReading;
 }
 
 export interface MacroRegimeSnapshot {
     as_of: string;                  // ISO date "2026-05-16"
     overall: RegimeSeverity;        // final severity after all escalations
     base_overall: RegimeSeverity;   // before any escalation
-    headline: string;               // one-liner human readable summary
     indicators: MacroRegimeIndicators;
     ai_cloud_stress: AiCloudStressReport;
     credit_funding_stress: CreditFundingStressReport;
