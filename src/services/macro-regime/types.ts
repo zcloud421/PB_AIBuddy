@@ -23,6 +23,12 @@ export interface IndicatorReading {
     delta_4w: number | null;
     notes: string[];
     is_skipped: boolean;
+    persistence?: IndicatorPersistence;
+}
+
+export interface IndicatorPersistence {
+    consecutive_days: number;
+    severity_started_at: string;
 }
 
 export interface SideSubSignal {
@@ -107,4 +113,10 @@ export interface MacroRegimeSnapshot {
     credit_funding_stress: CreditFundingStressReport;
     fundamental_modifier: FundamentalModifier;
     late_cycle_context: LateCycleContext;
+    regime_persistence: IndicatorPersistence;
+    composite_persistence: {
+        ai_cloud: IndicatorPersistence;
+        credit_funding: IndicatorPersistence;
+        fundamental: IndicatorPersistence;
+    };
 }

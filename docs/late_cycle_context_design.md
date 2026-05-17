@@ -114,6 +114,52 @@ DXY's marginal information for our use case is negligible.
 
 Indicator count: 12 → 11 (visible) after removal.
 
+## Persistence Tracking — Tail-Risk vs Noise
+
+Spot severity reading conflates two fundamentally different scenarios:
+
+- **Short-term noise** (2025/4 tariff V-shape, single-day VIX spike) —
+  RM should ignore, can explain to client through narrative
+- **Regime change** (2008 multi-quarter HY OAS widening, 2022 rate cycle) —
+  RM should reduce FCN exposure proactively
+
+To distinguish, we track per-indicator **consecutive days at current
+severity**. The Postgres table `indicator_persistence` maintains:
+
+- `current_severity` — latest reading
+- `consecutive_days` — calendar days since last severity change
+- `severity_started_at` — start date of current streak
+
+Heuristic interpretation:
+
+| Days at Warning | Interpretation |
+|----------------|----------------|
+| < 7 | Initial / could resolve quickly |
+| 7-14 | Short-term — still possibly noise |
+| 15-29 | Worth monitoring closely |
+| 30-59 | Not noise — likely structural shift |
+| 60+ | Regime change confirmed |
+
+Why this matters more than alert-level for tail risk:
+
+- 2008 GFC: HY OAS spent ~6 months building up before September catastrophe
+- 2000 dotcom: Breadth deterioration started Q4 1999, 30 months bear
+- 2022 inflation cycle: DGS10 climbed for 12 consecutive months
+
+A single-day Warning means almost nothing for tail risk. A 60-day Warning
+means strategic deploy reduction.
+
+## What Persistence Tracking Replaces
+
+This feature replaces several rejected proposals:
+
+- CFTC positioning data (wrong target — predicts short-term, not tail)
+- Composite 0-100 score (fake precision, hides single-signal failures)
+- ISM / jobless claims (lead time too weak vs tail events)
+
+The honest framing: **for tail risk, persistence of existing signals
+matters more than adding new signals**.
+
 ## Last Reviewed
 
 - 2026-05-17 — initial document; reverted MA200 change

@@ -45,6 +45,23 @@ export async function ensureLateCyclePillarHistoryTable(): Promise<void> {
     `);
 }
 
+export async function ensureIndicatorPersistenceTable(): Promise<void> {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS indicator_persistence (
+            indicator_key       TEXT PRIMARY KEY,
+            current_severity    TEXT NOT NULL,
+            consecutive_days    INTEGER NOT NULL DEFAULT 1,
+            severity_started_at DATE NOT NULL,
+            last_seen_date      DATE NOT NULL,
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    `);
+    await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_indicator_persistence_severity
+        ON indicator_persistence (current_severity)
+    `);
+}
+
 async function resolveLateCycleSoftPauseFirstActiveAt(
     runDate: string,
     softPauseActive: boolean

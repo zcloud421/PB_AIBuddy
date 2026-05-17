@@ -31,10 +31,38 @@ import {
 import { applyEscalations, composeHeadline, computeBaseSeverity } from './aggregate';
 import { loadFundamentalModifier } from './fundamental-modifier';
 import { buildLateCycleContext } from './late-cycle-context';
-import type { MacroRegimeIndicators, MacroRegimeSnapshot } from './types';
+import { persistenceFor, syncAllPersistence } from './persistence';
+import type {
+    AiCloudStressStatus,
+    FundamentalState,
+    MacroRegimeIndicators,
+    MacroRegimeSnapshot,
+    RegimeSeverity,
+    SideMonitorStatus
+} from './types';
 
 function todayUtcDate(): string {
     return new Date().toISOString().slice(0, 10);
+}
+
+function sideStatusToSeverity(status: SideMonitorStatus): RegimeSeverity {
+    if (status === 'normal') return 'Healthy';
+    if (status === 'watch') return 'Neutral';
+    if (status === 'stress') return 'Warning';
+    return 'Critical';
+}
+
+function aiCloudStatusToSeverity(status: AiCloudStressStatus): RegimeSeverity {
+    if (status === 'Normal') return 'Healthy';
+    if (status === 'Watch') return 'Neutral';
+    if (status === 'Stress') return 'Warning';
+    return 'Critical';
+}
+
+function fundamentalStateToSeverity(state: FundamentalState): RegimeSeverity {
+    if (state === 'intact') return 'Healthy';
+    if (state === 'weakening') return 'Warning';
+    return 'Critical';
 }
 
 export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
@@ -96,9 +124,16 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         creditFundingStress,
         fundamentalModifier
     );
+    const asOf = todayUtcDate();
+    const persistenceRecords = await syncAllPersistence(asOf, indicators, {
+        overall,
+        ai_cloud: aiCloudStatusToSeverity(aiCloudStress.status),
+        credit_funding: sideStatusToSeverity(creditFundingStress.overall_status),
+        fundamental: fundamentalStateToSeverity(fundamentalModifier.state)
+    });
 
     const snapshot: MacroRegimeSnapshot = {
-        as_of: todayUtcDate(),
+        as_of: asOf,
         overall,
         base_overall: baseOverall,
         headline: composeHeadline(
@@ -113,7 +148,13 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         ai_cloud_stress: aiCloudStress,
         credit_funding_stress: creditFundingStress,
         fundamental_modifier: fundamentalModifier,
-        late_cycle_context: lateCycleContext
+        late_cycle_context: lateCycleContext,
+        regime_persistence: persistenceFor(persistenceRecords, 'OVERALL'),
+        composite_persistence: {
+            ai_cloud: persistenceFor(persistenceRecords, 'AI_CLOUD'),
+            credit_funding: persistenceFor(persistenceRecords, 'CREDIT_FUNDING'),
+            fundamental: persistenceFor(persistenceRecords, 'FUNDAMENTAL')
+        }
     };
 
     console.log(

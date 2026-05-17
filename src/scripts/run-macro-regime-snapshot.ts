@@ -14,6 +14,7 @@ import dotenv from 'dotenv';
 
 import { pool } from '../db/client';
 import {
+    ensureIndicatorPersistenceTable,
     ensureMacroRegimeSnapshotsTable,
     upsertMacroRegimeSnapshot
 } from '../db/queries/macro-regime';
@@ -24,6 +25,7 @@ dotenv.config();
 async function main(): Promise<void> {
     console.log('[macro-regime-cron] starting daily snapshot run');
     await ensureMacroRegimeSnapshotsTable();
+    await ensureIndicatorPersistenceTable();
     const snapshot = await buildMacroRegimeSnapshot();
     await upsertMacroRegimeSnapshot(snapshot);
 

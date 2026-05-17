@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 
 import { buildMacroRegimeSnapshot } from '../services/macro-regime/snapshot-builder';
 import {
+    ensureIndicatorPersistenceTable,
     ensureLateCyclePillarHistoryTable,
     ensureMacroRegimeSnapshotsTable,
     getLatestMacroRegimeSnapshot,
@@ -42,6 +43,7 @@ function warnStaleLateCyclePillars(snapshot: Awaited<ReturnType<typeof buildMacr
  */
 export async function getLatestMacroRegimeController(_req: Request, res: Response): Promise<void> {
     await ensureMacroRegimeSnapshotsTable();
+    await ensureIndicatorPersistenceTable();
     const snapshot = await getLatestMacroRegimeSnapshot();
     if (!snapshot) {
         res.status(503).json({
@@ -66,6 +68,7 @@ export async function refreshMacroRegimeController(req: Request, res: Response):
 
     await ensureMacroRegimeSnapshotsTable();
     await ensureLateCyclePillarHistoryTable();
+    await ensureIndicatorPersistenceTable();
     const snapshot = await buildMacroRegimeSnapshot();
     warnStaleLateCyclePillars(snapshot);
     await upsertMacroRegimeSnapshot(snapshot);
