@@ -14,7 +14,7 @@ import type { IndicatorReading, RegimeSeverity } from './types';
 import { MassiveDataFetcher, type DailyPriceBar } from '../../data/massive-fetcher';
 import type { SpyHolding } from '../../data/spy-holdings-fetcher';
 import { fetchFredSeries, latestPoint, pointDaysBack } from '../../data/fred-series-fetcher';
-import { fetchUsTreasuryCurve, latestY10, latestY2, y10DaysBack } from '../../data/tushare-client';
+import { fetchUsTreasuryCurve, latestY10, latestY2, y10DaysBack } from '../../data/massive-treasury-yields';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -99,7 +99,7 @@ export async function computeYieldCurve(): Promise<IndicatorReading> {
     const latest10 = latestY10(curve);
     const latest2 = latestY2(curve);
     if (latest10 === null || latest2 === null) {
-        return makeSkipped('10Y-2Y', 'Tushare us_tycr unavailable');
+        return makeSkipped('10Y-2Y', 'Massive treasury-yields unavailable');
     }
 
     const valueBp = (latest10 - latest2) * 100;
@@ -220,7 +220,7 @@ export async function computeDgs10FourWeekShock(): Promise<IndicatorReading> {
     const latest = latestY10(curve);
     const fourWeeksBack = y10DaysBack(curve, 28);
     if (latest === null || fourWeeksBack === null) {
-        return makeSkipped('10Y yield 4w shock', 'Tushare us_tycr unavailable');
+        return makeSkipped('10Y yield 4w shock', 'Massive treasury-yields unavailable');
     }
 
     const deltaBp = (latest - fourWeeksBack) * 100;
@@ -250,7 +250,7 @@ export async function computeDgs10AbsLevel(): Promise<IndicatorReading> {
     const curve = await fetchUsTreasuryCurve(40);
     const latest = latestY10(curve);
     if (latest === null) {
-        return makeSkipped('10Y absolute level', 'Tushare us_tycr unavailable');
+        return makeSkipped('10Y absolute level', 'Massive treasury-yields unavailable');
     }
     const fourWeeksBack = y10DaysBack(curve, 28);
     const delta4w = fourWeeksBack !== null ? (latest - fourWeeksBack) * 100 : null;
