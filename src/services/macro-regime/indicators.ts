@@ -14,7 +14,42 @@ import type { IndicatorReading, RegimeSeverity } from './types';
 import { MassiveDataFetcher, type DailyPriceBar } from '../../data/massive-fetcher';
 import type { SpyHolding } from '../../data/spy-holdings-fetcher';
 import { fetchFredSeries, latestPoint, pointDaysBack } from '../../data/fred-series-fetcher';
-import { fetchUsTreasuryCurve, latestY10, latestY2, y10DaysBack } from '../../data/massive-treasury-yields';
+import {
+    fetchUsTreasuryCurve as fetchMassiveTreasuryCurve,
+    latestY10,
+    latestY2,
+    y10DaysBack,
+    type UsTreasuryPoint
+} from '../../data/massive-treasury-yields';
+import { fetchFredTreasuryCurve } from '../../data/fred-treasury-fallback';
+
+type TreasuryCurveResult = {
+    curve: UsTreasuryPoint[];
+    source: string;  // human-readable vendor label for notes
+};
+
+/**
+ * Treasury curve fetch with vendor fallback.
+ * Massive primary (canonical Polygon Treasury Yields endpoint) → FRED fallback
+ * (DGS10 + DGS2, same canonical source, just published via FRED). Both verified
+ * 2026-05-18 to return identical values for 5/12-5/14. Notes downstream get
+ * data date + vendor label so the UI is transparent about freshness.
+ */
+async function fetchTreasuryCurveWithSource(daysBack: number): Promise<TreasuryCurveResult> {
+    const massive = await fetchMassiveTreasuryCurve(daysBack);
+    if (massive.length > 0) {
+        return { curve: massive, source: 'Massive Treasury Yields' };
+    }
+    const fred = await fetchFredTreasuryCurve(daysBack);
+    if (fred.length > 0) {
+        return { curve: fred, source: 'FRED DGS10 + DGS2 (fallback)' };
+    }
+    return { curve: [], source: 'unavailable' };
+}
+
+function freshnessNote(latestDate: string, source: string): string {
+    return `数据截至 ${latestDate} · ${source}`;
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -95,15 +130,16 @@ export async function computeHyOas(): Promise<IndicatorReading> {
 // ─────────────────────────────────────────────────────────────────────────
 
 export async function computeYieldCurve(): Promise<IndicatorReading> {
-    const curve = await fetchUsTreasuryCurve(120);
+    const { curve, source } = await fetchTreasuryCurveWithSource(120);
     const latest10 = latestY10(curve);
     const latest2 = latestY2(curve);
-    if (latest10 === null || latest2 === null) {
-        return makeSkipped('10Y-2Y', 'Massive treasury-yields unavailable');
+    if (latest10 === null || latest2 === null || curve.length === 0) {
+        return makeSkipped('10Y-2Y', 'Treasury curve unavailable (Massive + FRED both failed)');
     }
+    const latestDate = curve[curve.length - 1].date;
 
     const valueBp = (latest10 - latest2) * 100;
-    const notes: string[] = [];
+    const notes: string[] = [freshnessNote(latestDate, source)];
 
     let status: RegimeSeverity;
     if (valueBp > 50) {
@@ -216,12 +252,13 @@ export async function computeVix(massiveFetcher: MassiveDataFetcher): Promise<In
 // ─────────────────────────────────────────────────────────────────────────
 
 export async function computeDgs10FourWeekShock(): Promise<IndicatorReading> {
-    const curve = await fetchUsTreasuryCurve(40);
+    const { curve, source } = await fetchTreasuryCurveWithSource(40);
     const latest = latestY10(curve);
     const fourWeeksBack = y10DaysBack(curve, 28);
-    if (latest === null || fourWeeksBack === null) {
-        return makeSkipped('10Y yield 4w shock', 'Massive treasury-yields unavailable');
+    if (latest === null || fourWeeksBack === null || curve.length === 0) {
+        return makeSkipped('10Y yield 4w shock', 'Treasury curve unavailable (Massive + FRED both failed)');
     }
+    const latestDate = curve[curve.length - 1].date;
 
     const deltaBp = (latest - fourWeeksBack) * 100;
     const absDelta = Math.abs(deltaBp);
@@ -237,7 +274,10 @@ export async function computeDgs10FourWeekShock(): Promise<IndicatorReading> {
         value: Math.round(deltaBp * 10) / 10,
         status,
         delta_4w: Math.round(deltaBp * 10) / 10,
-        notes: [`Latest 10Y ${latest.toFixed(2)}%; 4w prior ${fourWeeksBack.toFixed(2)}%`],
+        notes: [
+            freshnessNote(latestDate, source),
+            `Latest 10Y ${latest.toFixed(2)}%; 4w prior ${fourWeeksBack.toFixed(2)}%`
+        ],
         is_skipped: false
     };
 }
@@ -247,11 +287,12 @@ export async function computeDgs10FourWeekShock(): Promise<IndicatorReading> {
 // ─────────────────────────────────────────────────────────────────────────
 
 export async function computeDgs10AbsLevel(): Promise<IndicatorReading> {
-    const curve = await fetchUsTreasuryCurve(40);
+    const { curve, source } = await fetchTreasuryCurveWithSource(40);
     const latest = latestY10(curve);
-    if (latest === null) {
-        return makeSkipped('10Y absolute level', 'Massive treasury-yields unavailable');
+    if (latest === null || curve.length === 0) {
+        return makeSkipped('10Y absolute level', 'Treasury curve unavailable (Massive + FRED both failed)');
     }
+    const latestDate = curve[curve.length - 1].date;
     const fourWeeksBack = y10DaysBack(curve, 28);
     const delta4w = fourWeeksBack !== null ? (latest - fourWeeksBack) * 100 : null;
 
@@ -276,6 +317,7 @@ export async function computeDgs10AbsLevel(): Promise<IndicatorReading> {
         status,
         delta_4w: delta4w !== null ? Math.round(delta4w * 10) / 10 : null,
         notes: [
+            freshnessNote(latestDate, source),
             `absolute ${latest.toFixed(2)}% (${zone})`,
             '4.5%+ marks the P/E compression zone; >5.0% echoes the 2023-10 risk-asset break'
         ],
