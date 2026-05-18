@@ -13,13 +13,8 @@ export async function ensureMacroRegimeSnapshotsTable(): Promise<void> {
         CREATE TABLE IF NOT EXISTS macro_regime_snapshots (
             run_date     DATE PRIMARY KEY,
             snapshot_json JSONB NOT NULL,
-            late_cycle_soft_pause_first_active_at TIMESTAMPTZ NULL,
             created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
-    `);
-    await pool.query(`
-        ALTER TABLE macro_regime_snapshots
-        ADD COLUMN IF NOT EXISTS late_cycle_soft_pause_first_active_at TIMESTAMPTZ NULL
     `);
     await pool.query(`
         CREATE INDEX IF NOT EXISTS idx_macro_regime_snapshots_created_at
@@ -62,68 +57,20 @@ export async function ensureIndicatorPersistenceTable(): Promise<void> {
     `);
 }
 
-async function resolveLateCycleSoftPauseFirstActiveAt(
-    runDate: string,
-    softPauseActive: boolean
-): Promise<Date | null> {
-    if (!softPauseActive) return null;
-
-    const result = await pool.query<{
-        soft_pause_active: boolean | null;
-        late_cycle_soft_pause_first_active_at: Date | null;
-    }>(
-        `
-        SELECT
-            (snapshot_json->'late_cycle_context'->>'soft_pause_active')::boolean AS soft_pause_active,
-            late_cycle_soft_pause_first_active_at
-        FROM macro_regime_snapshots
-        WHERE run_date < $1::date
-        ORDER BY run_date DESC, created_at DESC
-        LIMIT 1
-        `,
-        [runDate]
-    );
-    const previous = result.rows[0];
-    if (previous?.soft_pause_active) {
-        return previous.late_cycle_soft_pause_first_active_at ?? new Date();
-    }
-    return new Date();
-}
-
-function applyLateCycleSoftPauseCounter(snapshot: MacroRegimeSnapshot, firstActiveAt: Date | null): void {
-    if (!snapshot.late_cycle_context.soft_pause_active || !firstActiveAt) {
-        snapshot.late_cycle_context.consecutive_days_active = 0;
-        snapshot.late_cycle_context.fatigue_warning = false;
-        return;
-    }
-
-    const days = Math.max(0, Math.floor((Date.now() - firstActiveAt.getTime()) / (24 * 60 * 60 * 1000)));
-    snapshot.late_cycle_context.consecutive_days_active = days;
-    snapshot.late_cycle_context.fatigue_warning = days > 180;
-}
-
 export async function upsertMacroRegimeSnapshot(snapshot: MacroRegimeSnapshot): Promise<void> {
-    const firstActiveAt = await resolveLateCycleSoftPauseFirstActiveAt(
-        snapshot.as_of,
-        snapshot.late_cycle_context.soft_pause_active
-    );
-    applyLateCycleSoftPauseCounter(snapshot, firstActiveAt);
-
     await pool.query(
         `
         INSERT INTO macro_regime_snapshots (
             run_date,
-            snapshot_json,
-            late_cycle_soft_pause_first_active_at
+            snapshot_json
         )
-        VALUES ($1::date, $2::jsonb, $3::timestamptz)
+        VALUES ($1::date, $2::jsonb)
         ON CONFLICT (run_date)
         DO UPDATE SET
             snapshot_json = EXCLUDED.snapshot_json,
-            late_cycle_soft_pause_first_active_at = EXCLUDED.late_cycle_soft_pause_first_active_at,
             created_at = NOW()
         `,
-        [snapshot.as_of, JSON.stringify(snapshot), firstActiveAt]
+        [snapshot.as_of, JSON.stringify(snapshot)]
     );
 }
 

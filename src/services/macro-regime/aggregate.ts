@@ -1,6 +1,6 @@
 /**
- * Aggregation logic — combines indicators + side monitors + fundamental
- * modifier into a single overall severity.
+ * Aggregation logic — combines indicators + side monitors into a single
+ * overall severity.
  *
  * Step 1: base severity from indicators alone
  *   - Any Critical (portfolio-critical-eligible + action-eligible) → Critical
@@ -10,14 +10,11 @@
  *
  * Step 2: AI Cloud Stress = 3 (Crisis) escalates one step
  * Step 3: Credit/Funding overall = Crisis escalates one step
- * Step 4: Fundamental modifier applies escalation_level (0/1/2)
- *
  */
 
 import type {
     AiCloudStressReport,
     CreditFundingStressReport,
-    FundamentalModifier,
     IndicatorReading,
     MacroRegimeIndicators,
     RegimeSeverity
@@ -84,12 +81,10 @@ export function computeBaseSeverity(indicators: MacroRegimeIndicators): RegimeSe
 export function applyEscalations(
     base: RegimeSeverity,
     aiCloud: AiCloudStressReport,
-    credit: CreditFundingStressReport,
-    modifier: FundamentalModifier
+    credit: CreditFundingStressReport
 ): RegimeSeverity {
     let result = base;
     if (aiCloud.score === 3) result = escalate(result, 1);
     if (credit.overall_status === 'crisis') result = escalate(result, 1);
-    result = escalate(result, modifier.escalation_level);
     return result;
 }

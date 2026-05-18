@@ -78,10 +78,6 @@ export interface LateCyclePillar {
 }
 
 export interface LateCycleContext {
-    elevated_count: number;
-    soft_pause_active: boolean;
-    consecutive_days_active: number;
-    fatigue_warning: boolean;
     pillars: {
         sentiment_manual: LateCyclePillar;
     };

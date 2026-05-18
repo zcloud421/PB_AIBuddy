@@ -54,14 +54,7 @@ export async function buildLateCycleContext(): Promise<LateCycleContext> {
     const pillars = {
         sentiment_manual: sentimentManual
     };
-    const elevatedCount = Object.values(pillars).filter((pillar) => pillar.state !== 'normal').length;
-    const softPauseActive = elevatedCount >= 2;
-
     return {
-        elevated_count: elevatedCount,
-        soft_pause_active: softPauseActive,
-        consecutive_days_active: 0,
-        fatigue_warning: false,
         pillars
     };
 }

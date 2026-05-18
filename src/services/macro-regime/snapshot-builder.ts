@@ -117,8 +117,7 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
     const overall = applyEscalations(
         baseOverall,
         aiCloudStress,
-        creditFundingStress,
-        fundamentalModifier
+        creditFundingStress
     );
     const asOf = todayUtcDate();
     const persistenceRecords = await syncAllPersistence(asOf, indicators, {

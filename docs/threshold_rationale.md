@@ -132,7 +132,7 @@
 ### Fundamental Modifier (AI Capex JSON)
 
 - 季度人工 review,intact / softening / breaking
-- escalation_level 0/1/2 直接 += overall severity
+- Context-only: 不再机械上调整体 severity；用于提示 RM/IC 将 AI Capex 敞口拿回 house view / IC 框架复核
 - **Anchor:** 2022/11 ChatGPT 推出 / 2025/1 DeepSeek shock 季度复核结果
 
 ---

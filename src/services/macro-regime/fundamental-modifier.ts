@@ -4,10 +4,11 @@
  * The file lives at repo root: data/ai_capex_fundamental_state.json
  * Updated quarterly during AI capex review; not driven by automation.
  *
- * State mapping → escalation_level applied on top of base severity:
- *   - intact   (0): no modifier
- *   - weakening (1): bump overall up one ladder step
- *   - cracking  (2): force to Critical
+ * State mapping is retained for display and persistence only. This manually
+ * maintained quarterly review is context, not a mechanical severity escalator:
+ *   - intact   (0): no context warning
+ *   - weakening (1): context warning
+ *   - cracking  (2): severe context warning
  *
  * If file is missing or malformed, returns a safe "intact" default and logs a
  * warning. Snapshot generation never fails on this layer.
