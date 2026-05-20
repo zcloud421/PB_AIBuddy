@@ -1,0 +1,43 @@
+name: Daily Macro Regime Snapshot
+
+# Triggers the macro-regime snapshot via the backend /refresh endpoint.
+# Replaces the Railway cron service after migration to Fly.io 2026-05-20.
+
+on:
+  schedule:
+    # UTC 23:30 = 北京时间 07:30 (next day) = US 19:30 ET (after close)
+    # Ideal time: post-US-close so HY OAS / VIX / Treasury daily data are settled.
+    - cron: '30 23 * * *'
+  workflow_dispatch:  # 允许 GitHub UI 手动触发(调试用)
+
+jobs:
+  trigger-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger macro-regime snapshot
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          SETUP_TOKEN: ${{ secrets.SETUP_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          echo "Triggering snapshot at $(date -u +'%Y-%m-%dT%H:%M:%SZ')..."
+
+          RESPONSE=$(curl -sS -w "\n%{http_code}" \
+            -X POST "${BACKEND_URL}/macro-regime/refresh" \
+            -H "x-setup-token: ${SETUP_TOKEN}" \
+            --max-time 60)
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "HTTP $HTTP_CODE"
+          echo "$BODY" | head -c 2000  # truncate huge payload in logs
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ Snapshot trigger failed with HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+          echo "✅ Snapshot triggered successfully"

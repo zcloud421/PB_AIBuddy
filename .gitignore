@@ -4,3 +4,8 @@ mobile/node_modules/
 dist/
 .expo/
 .DS_Store
+
+# Migration artifacts (local only)
+railway_backup_*.sql
+restore.log
+.env.migration
