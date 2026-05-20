@@ -28,6 +28,7 @@ import {
     ensureLateCyclePillarHistoryTable,
     ensureMacroRegimeSnapshotsTable
 } from './db/queries/macro-regime';
+import { asyncHandler } from './lib/async-handler';
 
 dotenv.config();
 
@@ -91,6 +92,46 @@ export function createApp() {
         await deleteTodayIdeaCandidate(symbol);
         res.json({ status: 'cleared', symbol });
     });
+
+    app.post('/screener/refresh', asyncHandler(async (req, res) => {
+        const rawSetupToken = process.env.SETUP_TOKEN?.trim() ?? null;
+        const rawProvided = req.header('x-setup-token')?.trim() ?? null;
+        if (!rawSetupToken || rawProvided !== rawSetupToken) {
+            res.status(403).json({ error: 'forbidden' });
+            return;
+        }
+
+        const { runDailyScreener } = await import('./scripts/run-daily-screener');
+        runDailyScreener()
+            .then((result) => {
+                console.log('[screener-cron] completed', result);
+            })
+            .catch((error) => {
+                console.error('[screener-cron] failed:', error);
+            });
+
+        res.status(202).json({ status: 'screener triggered (async)' });
+    }));
+
+    app.post('/attribution-health/check', asyncHandler(async (req, res) => {
+        const rawSetupToken = process.env.SETUP_TOKEN?.trim() ?? null;
+        const rawProvided = req.header('x-setup-token')?.trim() ?? null;
+        if (!rawSetupToken || rawProvided !== rawSetupToken) {
+            res.status(403).json({ error: 'forbidden' });
+            return;
+        }
+
+        const { runAttributionHealthCheck } = await import('./scripts/check-attribution-health');
+        runAttributionHealthCheck()
+            .then((result) => {
+                console.log('[attrib-health-cron] completed', result);
+            })
+            .catch((error) => {
+                console.error('[attrib-health-cron] failed:', error);
+            });
+
+        res.status(202).json({ status: 'attribution health check triggered (async)' });
+    }));
 
     app.use('/ideas', ideasRouter);
     app.use('/device', deviceRouter);

@@ -28,7 +28,7 @@ import {
     updateIdeaRunStatus
 } from '../db/queries/ideas';
 import type { ScoringResult } from '../scoring-engine';
-import { runDailyScreener } from '../scoring-engine';
+import { runDailyScreener as scoreDailyScreenerSymbols } from '../scoring-engine';
 import { selectDailyBest, selectDailyRecommendationShowcase } from '../services/ideas-service';
 import { runPriceTracker } from '../services/tracker-service';
 import { generateNarrative } from '../utils/narrative-generator';
@@ -56,7 +56,7 @@ function todayInHongKongIsoDate(): string {
     }).format(new Date());
 }
 
-async function main(): Promise<void> {
+export async function runDailyScreener(): Promise<void> {
     const client = await pool.connect();
     let runId: string | null = null;
     const runDate = todayInHongKongIsoDate();
@@ -121,7 +121,7 @@ async function main(): Promise<void> {
                 await upsertUnderlyingCompanyName(symbol, companyName);
                 const underlying = await getUnderlyingBySymbol(symbol);
 
-                const [result] = await runDailyScreener([symbol], fetcher);
+                const [result] = await scoreDailyScreenerSymbols([symbol], fetcher);
                 if (!result) {
                     throw new Error(`No scoring result returned for ${symbol}`);
                 }
@@ -302,19 +302,21 @@ async function main(): Promise<void> {
         throw error;
     } finally {
         client.release();
-        await pool.end();
     }
 }
 
-main()
+if (require.main === module) {
+    runDailyScreener()
     .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
         console.error(message);
         process.exitCode = 1;
     })
-    .finally(() => {
+    .finally(async () => {
+        await pool.end();
         process.exit(process.exitCode ?? 0);
     });
+}
 
 function delay(ms: number): Promise<void> {
     return new Promise((resolve) => {

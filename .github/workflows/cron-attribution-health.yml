@@ -1,0 +1,38 @@
+name: Attribution Health Check
+
+on:
+  schedule:
+    # UTC 01:00 = HKT 09:00, after macro-regime and screener triggers.
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  trigger-attribution-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger attribution health
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          SETUP_TOKEN: ${{ secrets.SETUP_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "Triggering attribution health at $(date -u)..."
+
+          RESPONSE=$(curl -sS -w "\n%{http_code}" \
+            -X POST "${BACKEND_URL}/attribution-health/check" \
+            -H "x-setup-token: ${SETUP_TOKEN}" \
+            --max-time 30)
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "HTTP $HTTP_CODE"
+          echo "$BODY"
+
+          if [ "$HTTP_CODE" != "202" ] && [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ Trigger failed"
+            exit 1
+          fi
+
+          echo "✅ Attribution health triggered (running async on backend)"

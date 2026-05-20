@@ -273,7 +273,7 @@ function formatReport(metrics: HealthMetrics, issues: string[], forceReport: boo
     ].join('\n');
 }
 
-async function main(): Promise<void> {
+export async function runAttributionHealthCheck(): Promise<void> {
     const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
     const chatId = process.env.TELEGRAM_CHAT_ID?.trim();
     if (!botToken || !chatId) {
@@ -305,7 +305,8 @@ async function main(): Promise<void> {
     }
 }
 
-main()
+if (require.main === module) {
+    runAttributionHealthCheck()
     .catch((error: unknown) => {
         const message = error instanceof Error ? error.stack ?? error.message : String(error);
         console.error(`[attrib-health] fatal: ${message}`);
@@ -314,3 +315,4 @@ main()
     .finally(async () => {
         await pool.end();
     });
+}

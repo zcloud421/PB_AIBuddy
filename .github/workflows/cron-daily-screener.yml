@@ -1,0 +1,38 @@
+name: Daily FCN Screener
+
+on:
+  schedule:
+    # UTC 22:00 = HKT 06:00, after US close data should be settled.
+    - cron: '0 22 * * *'
+  workflow_dispatch:
+
+jobs:
+  trigger-screener:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger screener
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          SETUP_TOKEN: ${{ secrets.SETUP_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "Triggering screener at $(date -u)..."
+
+          RESPONSE=$(curl -sS -w "\n%{http_code}" \
+            -X POST "${BACKEND_URL}/screener/refresh" \
+            -H "x-setup-token: ${SETUP_TOKEN}" \
+            --max-time 30)
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "HTTP $HTTP_CODE"
+          echo "$BODY"
+
+          if [ "$HTTP_CODE" != "202" ] && [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ Trigger failed"
+            exit 1
+          fi
+
+          echo "✅ Screener triggered (running async on backend)"
