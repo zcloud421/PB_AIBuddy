@@ -13,6 +13,7 @@
 import type { IndicatorReading, RegimeSeverity } from './types';
 import { MassiveDataFetcher, type DailyPriceBar } from '../../data/massive-fetcher';
 import type { SpyHolding } from '../../data/spy-holdings-fetcher';
+import type { SoxPoint } from '../../data/sox-index-fetcher';
 import { fetchFredSeries, latestPoint, pointDaysBack } from '../../data/fred-series-fetcher';
 import {
     fetchUsTreasuryCurve as fetchMassiveTreasuryCurve,
@@ -77,6 +78,10 @@ function ma(values: number[], window: number): number | null {
     const slice = values.slice(-window);
     const sum = slice.reduce((acc, v) => acc + v, 0);
     return sum / window;
+}
+
+function signedPercent(value: number): string {
+    return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -480,6 +485,48 @@ export async function computeAiBreadth(
         status,
         delta_4w: null,
         notes,
+        is_skipped: false
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 5b. SOX_200DMA_DEVIATION — semiconductor stretch vs 200DMA
+// ─────────────────────────────────────────────────────────────────────────
+
+export function computeSox200DmaDeviation(
+    history: SoxPoint[],
+    sourceLabel = 'Polygon I:SOX'
+): IndicatorReading {
+    if (history.length < 200) {
+        return makeSkipped('SOX 200DMA Deviation', '数据不足 200 交易日');
+    }
+
+    const closes = history.map((point) => point.close);
+    const ma200 = ma(closes, 200);
+    const latest = history[history.length - 1];
+    if (ma200 === null || ma200 <= 0 || latest.close <= 0) {
+        return makeSkipped('SOX 200DMA Deviation', 'SOX 200DMA unavailable');
+    }
+
+    const deviationPct = ((latest.close - ma200) / ma200) * 100;
+
+    let status: RegimeSeverity;
+    if (deviationPct < 15) status = 'Healthy';
+    else if (deviationPct < 30) status = 'Neutral';
+    else if (deviationPct < 50) status = 'Warning';
+    else status = 'Critical';
+
+    return {
+        name: 'SOX 200DMA Deviation',
+        value: Math.round(deviationPct * 10) / 10,
+        status,
+        delta_4w: null,
+        notes: [
+            `SOX 当前 ${signedPercent(deviationPct)} vs 200DMA。`,
+            '历史泡沫峰值参考: Mississippi 1720 +73%、Dotcom NASDAQ 2000 +55%、1700 年以来主要泡沫均值 +35%(BofA Hartnett《Flow Show》2026-05-15)。',
+            '本指标反映 AI 算力板块位置伸展度,属 entry-risk 上下文,非独立 de-risk 触发。',
+            `数据截至 ${latest.date} · ${sourceLabel}`
+        ],
         is_skipped: false
     };
 }

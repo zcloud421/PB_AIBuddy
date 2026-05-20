@@ -10,6 +10,7 @@
  */
 
 import { MassiveDataFetcher } from '../../data/massive-fetcher';
+import { fetchSoxIndexHistoryWithSource } from '../../data/sox-index-fetcher';
 import { fetchSpyHoldings } from '../../data/spy-holdings-fetcher';
 import {
     computeAiBreadth,
@@ -18,6 +19,7 @@ import {
     computeDgs10AbsLevel,
     computeDgs10FourWeekShock,
     computeHyOas,
+    computeSox200DmaDeviation,
     computeVix,
     computeYieldCurve
 } from './indicators';
@@ -71,10 +73,11 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
 
     // Side monitor pre-requisites (HY OAS series in bp + Δ4w) reused for
     // indicator and Credit/Funding stress acceleration sub-signal.
-    const [hyOasSeries, hyOasDelta4w, spyHoldings] = await Promise.all([
+    const [hyOasSeries, hyOasDelta4w, spyHoldings, soxHistory] = await Promise.all([
         fetchHyOasSeriesBp(),
         computeHyOasDelta4wBp(),
-        fetchSpyHoldings()
+        fetchSpyHoldings(),
+        fetchSoxIndexHistoryWithSource()
     ]);
 
     const hyOas = await computeHyOas();
@@ -86,6 +89,7 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         dgs10Shock,
         concentration,
         aiBreadth,
+        soxDeviation,
         broadBreadth,
         aiCloudStress,
         creditFundingStress
@@ -96,6 +100,7 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         computeDgs10FourWeekShock(),
         Promise.resolve(computeConcentration(spyHoldings)),
         computeAiBreadth(fetcher),
+        Promise.resolve(computeSox200DmaDeviation(soxHistory.points, soxHistory.source)),
         computeBroadBreadth(fetcher),
         computeAiCloudStress(fetcher, hyOasDelta4w, hyOas.status),
         computeCreditFundingStress(fetcher, hyOasSeries)
@@ -109,6 +114,7 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         DGS10_4W_SHOCK: dgs10Shock,
         CONCENTRATION: concentration,
         AI_BREADTH: aiBreadth,
+        SOX_200DMA_DEVIATION: soxDeviation,
         BROAD_BREADTH: broadBreadth
     };
 
@@ -125,13 +131,15 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         DGS10_ABS_LEVEL: dgs10AbsLevel,
         DGS10_4W_SHOCK: dgs10Shock,
         HY_OAS: hyOas,
-        VIX: vix
+        VIX: vix,
+        SOX_200DMA_DEVIATION: soxDeviation
     }, lateCycleContext);
     await persistSubBandHistory(asOf, {
         DGS10_ABS_LEVEL: dgs10AbsLevel,
         DGS10_4W_SHOCK: dgs10Shock,
         HY_OAS: hyOas,
-        VIX: vix
+        VIX: vix,
+        SOX_200DMA_DEVIATION: soxDeviation
     }, lateCycleContext);
     const persistenceRecords = await syncAllPersistence(asOf, indicators, {
         overall,

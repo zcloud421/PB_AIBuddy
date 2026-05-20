@@ -43,7 +43,7 @@ export interface SubBandNextAnchor {
 
 export interface IndicatorVelocity {
     value: number;
-    unit: 'bp' | 'pct' | 'pts';
+    unit: 'bp' | 'pct' | 'pts' | 'pp';
     label: string;
 }
 
@@ -110,6 +110,7 @@ export interface MacroRegimeIndicators {
     DGS10_4W_SHOCK: IndicatorReading;
     CONCENTRATION: IndicatorReading;
     AI_BREADTH: IndicatorReading;
+    SOX_200DMA_DEVIATION: IndicatorReading;
     BROAD_BREADTH: IndicatorReading;
 }
 

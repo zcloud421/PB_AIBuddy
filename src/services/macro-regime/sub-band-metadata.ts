@@ -10,8 +10,14 @@ import type {
     SubBandNextAnchor
 } from './types';
 
-type SubBandIndicatorId = 'DGS10_ABS_LEVEL' | 'DGS10_4W_SHOCK' | 'HY_OAS' | 'VIX' | 'SENTIMENT_MANUAL';
-type SubBandUnit = 'bp' | 'pct' | 'pts';
+type SubBandIndicatorId =
+    | 'DGS10_ABS_LEVEL'
+    | 'DGS10_4W_SHOCK'
+    | 'HY_OAS'
+    | 'VIX'
+    | 'SOX_200DMA_DEVIATION'
+    | 'SENTIMENT_MANUAL';
+type SubBandUnit = 'bp' | 'pct' | 'pts' | 'pp';
 
 interface BandConfig {
     id: SubBandIndicatorId;
@@ -71,6 +77,18 @@ const SUB_BAND_CONFIGS: Record<Exclude<SubBandIndicatorId, 'SENTIMENT_MANUAL'>, 
         ],
         anchorLabel: (next, value) => `${severityLabel(next)} @ ${value.toFixed(1)}`,
         distanceLabel: (distance) => `${distance >= 0 ? '+' : ''}${distance.toFixed(1)}pts`
+    },
+    SOX_200DMA_DEVIATION: {
+        id: 'SOX_200DMA_DEVIATION',
+        unit: 'pp',
+        thresholds: [
+            { severity: 'Healthy', lower: 0, upper: 15 },
+            { severity: 'Neutral', lower: 15, upper: 30 },
+            { severity: 'Warning', lower: 30, upper: 50 },
+            { severity: 'Critical', lower: 50, upper: null }
+        ],
+        anchorLabel: (next, value) => `${severityLabel(next)} @ +${value.toFixed(0)}%`,
+        distanceLabel: (distance) => `${distance >= 0 ? '+' : ''}${distance.toFixed(1)}pp`
     }
 };
 
@@ -114,6 +132,8 @@ async function velocityFor(
     const value = round(currentValue - prior.raw_value, unit === 'pct' ? 2 : 1);
     const suffix = unit === 'pct'
         ? `${value >= 0 ? '+' : ''}${Math.round(value * 100)}bp / 5d`
+        : unit === 'pp'
+            ? `${value >= 0 ? '+' : ''}${value.toFixed(1)}pp / 5d`
         : `${value >= 0 ? '+' : ''}${value.toFixed(unit === 'pts' ? 1 : 0)}${unit} / 5d`;
     return {
         value,
@@ -192,6 +212,7 @@ export async function attachSubBandMetadata(
         DGS10_4W_SHOCK: IndicatorReading;
         HY_OAS: IndicatorReading;
         VIX: IndicatorReading;
+        SOX_200DMA_DEVIATION: IndicatorReading;
     },
     lateCycleContext: LateCycleContext
 ): Promise<void> {
@@ -200,6 +221,7 @@ export async function attachSubBandMetadata(
         decorateIndicator('DGS10_4W_SHOCK', indicators.DGS10_4W_SHOCK, asOf),
         decorateIndicator('HY_OAS', indicators.HY_OAS, asOf),
         decorateIndicator('VIX', indicators.VIX, asOf),
+        decorateIndicator('SOX_200DMA_DEVIATION', indicators.SOX_200DMA_DEVIATION, asOf),
         decorateFearGreed(lateCycleContext, asOf)
     ]);
 }
@@ -211,6 +233,7 @@ export async function persistSubBandHistory(
         DGS10_4W_SHOCK: IndicatorReading;
         HY_OAS: IndicatorReading;
         VIX: IndicatorReading;
+        SOX_200DMA_DEVIATION: IndicatorReading;
     },
     lateCycleContext: LateCycleContext
 ): Promise<void> {

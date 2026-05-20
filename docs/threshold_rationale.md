@@ -114,7 +114,24 @@
 
 ---
 
-## 9-11. Side Monitors
+## 9. SOX_200DMA_DEVIATION
+
+**意图:** 衡量 AI 算力板块位置伸展度,补齐 AI pillar 在"位置极端 / 泡沫尾段"维度的缺口。
+
+| Threshold | Severity | Anchor Episode |
+|---|---|---|
+| < +15% | Healthy | 正常牛市 stretch |
+| +15% to +30% | Neutral | 偏热,但远离泡沫尾段 |
+| +30% to +50% | Warning | 接近 1700 年以来主要资产泡沫峰值均值 +35% |
+| > +50% | Critical (soft-capped to Warning) | Dotcom NASDAQ 2000 (+55%) / Mississippi 1720 (+73%) 量级 |
+
+**Aggregation behavior:** SOX row-level Critical 被 soft-cap 到 Warning,仅在与 AI_BREADTH / VIX / DGS10_ABS_LEVEL 其中一个 Warning+ 共振时,才允许在聚合层表现为 Critical。
+
+**Rationale:** 估值/位置类信号 timing 性差,可持续数月(参考 NASDAQ 1999 stretch 超过 12 个月)。单独触发 Critical 会重蹈 CAPE 老路。它是 entry-risk context,不是独立 de-risk trigger。
+
+---
+
+## 10-12. Side Monitors
 
 ### AI Cloud Stress (CRWV + NBIS)
 
@@ -137,7 +154,7 @@
 
 ---
 
-## 12. CNN Fear & Greed (Layer B context, 不进 severity aggregator)
+## 13. CNN Fear & Greed (Layer B context, 不进 severity aggregator)
 
 | Score | Band | Tone (PB asymmetric) |
 |---|---|---|

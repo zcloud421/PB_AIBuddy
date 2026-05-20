@@ -31,6 +31,10 @@ function isPortfolioCriticalEligible(name: string, indicator: IndicatorReading):
     // Concentration is a structural late-cycle/tail-risk marker; it should not
     // solo-trigger portfolio Critical.
     if (name === 'CONCENTRATION') return false;
+    // SOX 200DMA deviation is an AI stretch / entry-risk context signal. It can
+    // display row-level Critical, but only becomes portfolio-critical when
+    // confirmed by breadth, vol, or rates stress in computeBaseSeverity().
+    if (name === 'SOX_200DMA_DEVIATION') return false;
     if (indicator.is_skipped) return false;
     return true;
 }
@@ -49,24 +53,43 @@ function isActionEligible(name: string, indicator: IndicatorReading): boolean {
 
 function effectiveIndicatorSeverity(
     name: keyof MacroRegimeIndicators,
-    indicator: IndicatorReading
+    indicator: IndicatorReading,
+    soxCriticalConfirmed = false
 ): RegimeSeverity {
     if (indicator.status !== 'Critical') return indicator.status;
+    if (name === 'SOX_200DMA_DEVIATION' && soxCriticalConfirmed) return 'Critical';
     if (!isPortfolioCriticalEligible(name, indicator) || !isActionEligible(name, indicator)) {
         return 'Warning';
     }
     return 'Critical';
 }
 
+function isWarningOrWorse(indicator: IndicatorReading | undefined): boolean {
+    return indicator !== undefined &&
+        !indicator.is_skipped &&
+        (indicator.status === 'Warning' || indicator.status === 'Critical');
+}
+
+function hasSoxCriticalResonance(indicators: MacroRegimeIndicators): boolean {
+    const sox = indicators.SOX_200DMA_DEVIATION;
+    if (!sox || sox.is_skipped || sox.status !== 'Critical') return false;
+    return (
+        isWarningOrWorse(indicators.AI_BREADTH) ||
+        isWarningOrWorse(indicators.VIX) ||
+        isWarningOrWorse(indicators.DGS10_ABS_LEVEL)
+    );
+}
+
 export function computeBaseSeverity(indicators: MacroRegimeIndicators): RegimeSeverity {
     const entries = Object.entries(indicators) as Array<[keyof MacroRegimeIndicators, IndicatorReading]>;
     const live = entries.filter(([, r]) => !r.is_skipped);
-    const effectiveStatuses = live.map(([name, r]) => effectiveIndicatorSeverity(name, r));
+    const soxCriticalConfirmed = hasSoxCriticalResonance(indicators);
+    const effectiveStatuses = live.map(([name, r]) => effectiveIndicatorSeverity(name, r, soxCriticalConfirmed));
 
     const hasActionableCritical = live.some(
         ([name, r]) =>
             r.status === 'Critical' &&
-            isPortfolioCriticalEligible(name, r) &&
+            ((name === 'SOX_200DMA_DEVIATION' && soxCriticalConfirmed) || isPortfolioCriticalEligible(name, r)) &&
             isActionEligible(name, r)
     );
 
