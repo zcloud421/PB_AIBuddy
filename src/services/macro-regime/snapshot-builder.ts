@@ -31,6 +31,7 @@ import { applyEscalations, computeBaseSeverity } from './aggregate';
 import { loadFundamentalModifier } from './fundamental-modifier';
 import { buildLateCycleContext } from './late-cycle-context';
 import { persistenceFor, syncAllPersistence } from './persistence';
+import { attachSubBandMetadata, persistSubBandHistory } from './sub-band-metadata';
 import type {
     AiCloudStressStatus,
     FundamentalState,
@@ -120,6 +121,18 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         creditFundingStress
     );
     const asOf = todayUtcDate();
+    await attachSubBandMetadata(asOf, {
+        DGS10_ABS_LEVEL: dgs10AbsLevel,
+        DGS10_4W_SHOCK: dgs10Shock,
+        HY_OAS: hyOas,
+        VIX: vix
+    }, lateCycleContext);
+    await persistSubBandHistory(asOf, {
+        DGS10_ABS_LEVEL: dgs10AbsLevel,
+        DGS10_4W_SHOCK: dgs10Shock,
+        HY_OAS: hyOas,
+        VIX: vix
+    }, lateCycleContext);
     const persistenceRecords = await syncAllPersistence(asOf, indicators, {
         overall,
         ai_cloud: aiCloudStatusToSeverity(aiCloudStress.status),

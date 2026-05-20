@@ -25,6 +25,7 @@ import { macroRegimeRouter } from './routes/macro-regime';
 import { ensureDeviceTables } from './db/queries/devices';
 import {
     ensureIndicatorPersistenceTable,
+    ensureIndicatorHistoryTable,
     ensureLateCyclePillarHistoryTable,
     ensureMacroRegimeSnapshotsTable
 } from './db/queries/macro-regime';
@@ -155,6 +156,7 @@ async function ensureSchemaGuards(): Promise<void> {
     await ensureMacroRegimeSnapshotsTable();
     await ensureLateCyclePillarHistoryTable();
     await ensureIndicatorPersistenceTable();
+    await ensureIndicatorHistoryTable();
 }
 
 if (require.main === module) {

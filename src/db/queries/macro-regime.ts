@@ -6,7 +6,7 @@
  */
 
 import { pool } from '../client';
-import type { MacroRegimeSnapshot } from '../../services/macro-regime/types';
+import type { MacroRegimeSnapshot, RegimeSeverity } from '../../services/macro-regime/types';
 
 export async function ensureMacroRegimeSnapshotsTable(): Promise<void> {
     await pool.query(`
@@ -55,6 +55,85 @@ export async function ensureIndicatorPersistenceTable(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_indicator_persistence_severity
         ON indicator_persistence (current_severity)
     `);
+}
+
+export async function ensureIndicatorHistoryTable(): Promise<void> {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS indicator_history (
+            indicator_id   TEXT NOT NULL,
+            snapshot_date  DATE NOT NULL,
+            raw_value      DOUBLE PRECISION NOT NULL,
+            severity       TEXT NOT NULL,
+            created_at     TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (indicator_id, snapshot_date)
+        )
+    `);
+    await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_indicator_history_id_date
+        ON indicator_history (indicator_id, snapshot_date DESC)
+    `);
+}
+
+export interface IndicatorHistoryPoint {
+    indicator_id: string;
+    snapshot_date: string;
+    raw_value: number;
+    severity: RegimeSeverity;
+}
+
+export async function fetchIndicatorHistory(
+    indicatorId: string,
+    beforeDate: string,
+    daysBack = 7
+): Promise<IndicatorHistoryPoint[]> {
+    await ensureIndicatorHistoryTable();
+    const result = await pool.query<{
+        indicator_id: string;
+        snapshot_date: string;
+        raw_value: number;
+        severity: RegimeSeverity;
+    }>(
+        `
+        SELECT
+            indicator_id,
+            TO_CHAR(snapshot_date, 'YYYY-MM-DD') AS snapshot_date,
+            raw_value,
+            severity
+        FROM indicator_history
+        WHERE indicator_id = $1
+          AND snapshot_date < $2::date
+          AND snapshot_date >= $2::date - ($3::int * INTERVAL '1 day')
+        ORDER BY snapshot_date ASC
+        `,
+        [indicatorId, beforeDate, daysBack]
+    );
+    return result.rows;
+}
+
+export async function upsertIndicatorHistory(input: {
+    indicator_id: string;
+    snapshot_date: string;
+    raw_value: number;
+    severity: RegimeSeverity;
+}): Promise<void> {
+    await ensureIndicatorHistoryTable();
+    await pool.query(
+        `
+        INSERT INTO indicator_history (
+            indicator_id,
+            snapshot_date,
+            raw_value,
+            severity
+        )
+        VALUES ($1, $2::date, $3, $4)
+        ON CONFLICT (indicator_id, snapshot_date)
+        DO UPDATE SET
+            raw_value = EXCLUDED.raw_value,
+            severity = EXCLUDED.severity,
+            created_at = NOW()
+        `,
+        [input.indicator_id, input.snapshot_date, input.raw_value, input.severity]
+    );
 }
 
 export async function upsertMacroRegimeSnapshot(snapshot: MacroRegimeSnapshot): Promise<void> {

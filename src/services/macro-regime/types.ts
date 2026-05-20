@@ -24,11 +24,27 @@ export interface IndicatorReading {
     notes: string[];
     is_skipped: boolean;
     persistence?: IndicatorPersistence;
+    band_position_pct?: number;
+    next_anchor?: SubBandNextAnchor;
+    velocity_5d?: IndicatorVelocity | null;
 }
 
 export interface IndicatorPersistence {
     consecutive_days: number;
     severity_started_at: string;
+}
+
+export interface SubBandNextAnchor {
+    value: number;
+    label: string;
+    distance?: number;
+    distance_label?: string;
+}
+
+export interface IndicatorVelocity {
+    value: number;
+    unit: 'bp' | 'pct' | 'pts';
+    label: string;
 }
 
 export interface SideSubSignal {
@@ -75,6 +91,9 @@ export interface LateCyclePillar {
     last_reviewed_at: string;
     days_since_review: number;
     stale_warning: boolean;
+    band_position_pct?: number;
+    next_anchor?: SubBandNextAnchor;
+    velocity_5d?: IndicatorVelocity | null;
 }
 
 export interface LateCycleContext {
