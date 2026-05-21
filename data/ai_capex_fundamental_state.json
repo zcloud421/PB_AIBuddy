@@ -4,9 +4,9 @@
   "state": "intact",
   "escalation_level": 0,
   "evidence_summary": [
-    "5/5 hyperscalers raised or maintained 2026 capex guide",
-    "No GPU depreciation policy changes",
-    "AI revenue/capex gap narrowing in 4/5"
+    "5/5 云算力巨头上调或维持 2026 资本开支指引",
+    "无 GPU 折旧政策变更",
+    "5 家中 4 家 AI 收入与资本开支差距收窄"
   ],
   "next_review_date": "2026-08-15"
 }

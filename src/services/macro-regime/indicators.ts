@@ -123,7 +123,7 @@ export async function computeHyOas(): Promise<IndicatorReading> {
 
     const tightZone = buildHyOasTightZone(valueBp);
     if (tightZone) {
-        notes.push('Sub-300bp:信用自满风险,信用-基本面背离监测中');
+        notes.push('利差跌破 300bp:信用市场过度乐观,与基本面背离风险升高');
     }
 
     const confirmation: HyOasConfirmationResult = await confirmHyOasSeverity(rawStatus, todayUtcDate()).catch((error) => {
@@ -157,8 +157,8 @@ export function buildHyOasTightZone(valueBp: number): IndicatorReading['tight_zo
     if (valueBp >= 300) return undefined;
     return {
         active: true,
-        label: '信用自满区 · 接近周期低点',
-        historical_anchor: '2007-06 周期低点 241bp · 2021-10 周期低点 290bp · 3/3 历史 sub-300 期均以重定价收场'
+        label: '信用利差极度收窄 · 接近周期低点',
+        historical_anchor: '2007-06 周期低点 241bp · 2021-10 周期低点 290bp · 历史上利差跌破 300bp 的三次时期均触发后续风险资产重定价'
     };
 }
 

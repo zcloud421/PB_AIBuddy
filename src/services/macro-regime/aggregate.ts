@@ -31,7 +31,7 @@ function isPortfolioCriticalEligible(name: string, indicator: IndicatorReading):
     // Concentration is a structural late-cycle/tail-risk marker; it should not
     // solo-trigger portfolio Critical.
     if (name === 'CONCENTRATION') return false;
-    // SOX 200DMA deviation is an AI stretch / entry-risk context signal. It can
+    // SOX 200DMA deviation is an AI valuation-stretch context signal. It can
     // display row-level Critical, but only becomes portfolio-critical when
     // confirmed by breadth, vol, or rates stress in computeBaseSeverity().
     if (name === 'SOX_200DMA_DEVIATION') return false;
