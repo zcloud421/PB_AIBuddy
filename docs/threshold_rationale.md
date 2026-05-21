@@ -288,3 +288,62 @@ AND SOX persistence >= 5 trading days
 - 至少每季度复核一次(check market regime drift)
 - 单个 threshold 调整 <= 10%(防止 fit-to-recent)
 - 全面调整必须经过 cross-review(类似当前流程)
+
+---
+
+## FCN Pair Suitability 相关性阈值说明
+
+本系统使用的相关性阈值为基于学术效应量(Cohen 1988)和 PB 实操经验的
+heuristic 取值,**非业界 published 标准**。
+
+### 评分阈值
+
+| 维度 | LOW gate | HIGH gate |
+|---|---|---|
+| downside_sync | < 0.55 | >= 0.70 |
+| corr90 (3M) | < 0.30 | >= 0.50 |
+| bear_2022 | < 0.40 | >= 0.60 |
+| vol_gap (vol_ratio) | — | > 1.4 触发 caveat |
+
+### 取值理由
+
+**为什么 corr90 HIGH gate 用 0.50 而非业界 pairs trading 常见的 0.70+**
+
+- Pairs trading 业界标准(0.70+)适用于**套利策略**(短期 mean-reversion),
+  需要强相关
+- Worst-of FCN 是**风险结构**(避免 idio leg 单独 KI),需要"足够相关
+  防止脱钩"即可
+- 业界 PB FCN 实操(DBS / 标杆 / Barclays 公开资料)接受"基本同向"的
+  pair(corr90 ~0.50 区间)做 worst-of 结构
+- 若强制 0.70+,几乎所有跨子行业 pair 被判 LOW,工具失去差异化作用
+
+**为什么 bear_2022 HIGH gate 比 corr90 略严(0.60 vs 0.50)**
+
+- Stress-regime 相关性才是真正的 KI 风险信号(2022 是最近完整熊市)
+- 跨 sector pair 平时可能 0.5+,但 2022 BEAR 跌到 0.2 — 这种背离正是
+  worst-of 真风险
+- 因此 bear_2022 用更严的阈值过滤压力情景脱钩
+
+**Cohen 效应量参考**
+
+- 0.5+ = large effect(对应"HIGH"级)
+- 0.3+ = medium effect(对应"baseline"通过)
+- < 0.3 = small effect(对应"LOW"未达标)
+
+### 限制与待办
+
+- 当前阈值**未经 backtest 验证**,基于实操经验估值
+- 计划:积累 >=6 个月实际 RM 使用反馈 + FCN deal KI/autocall 数据后,
+  进行 backtest 校准
+- 单独"vol_gap > 1.4"阈值同样为 heuristic,对应"年化波动率高出对手 40%
+  以上"业界粗略经验值
+
+### Chart 颜色阈值与 scoring 一致
+
+Mobile correlationTone 函数 per-row 阈值(2026-05-21 修订):
+
+- Daily rows (3M / 4M / 6M / 1Y):>= 0.50 绿 / 0.30-0.50 琥珀 / < 0.30 红
+- 2022 BEAR:>= 0.60 绿 / 0.40-0.60 琥珀 / < 0.40 红
+
+保持 CRITERIA 表格 ✓/~/✗ 染色与 chart marker / value 染色完全一致,
+避免同一个数值在两处显示不同颜色。
