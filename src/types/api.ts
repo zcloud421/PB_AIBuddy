@@ -618,7 +618,7 @@ export interface SymbolPriceHistoryResponse {
 export interface SuitabilityNote {
     reason: string;
     weakness: string;
-    next_step: string;
+    next_step: string | null;
 }
 
 export interface PairAnalysisResponse {
@@ -628,7 +628,7 @@ export interface PairAnalysisResponse {
     trading_days_overlap: number;
     correlation: {
         d60?: number;
-        d120?: number;
+        d120: number;
         d90: number;
         d180: number;
         d252: number;

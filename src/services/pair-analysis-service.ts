@@ -8,7 +8,7 @@ export interface PairAnalysisResponse {
     trading_days_overlap: number;
     correlation: {
         d60?: number;
-        d120?: number;
+        d120: number;
         d90: number;
         d180: number;
         d252: number;
@@ -32,7 +32,7 @@ export interface PairAnalysisResponse {
 export interface SuitabilityNote {
     reason: string;
     weakness: string;
-    next_step: string;
+    next_step: string | null;
 }
 
 export type PairAnalysisResult =
@@ -89,6 +89,7 @@ export async function analyzePairSuitability(symbolA: string, symbolB: string): 
     const recentReturnSeries = takeRecentTradingWindow(returnSeries, RECENT_TRADING_DAYS);
     const recentAlignedSeries = alignedSeries.slice(-(recentReturnSeries.length + 1));
     const corr90 = roundMetric(calculateCorrelation(takeRecentTradingWindow(returnSeries, 90).map((point) => point.returnA), takeRecentTradingWindow(returnSeries, 90).map((point) => point.returnB)));
+    const corr120 = roundMetric(calculateCorrelation(takeRecentTradingWindow(returnSeries, 120).map((point) => point.returnA), takeRecentTradingWindow(returnSeries, 120).map((point) => point.returnB)));
     const corr180 = roundMetric(calculateCorrelation(takeRecentTradingWindow(returnSeries, 180).map((point) => point.returnA), takeRecentTradingWindow(returnSeries, 180).map((point) => point.returnB)));
     const corr252 = roundMetric(calculateCorrelation(recentReturnSeries.map((point) => point.returnA), recentReturnSeries.map((point) => point.returnB)));
     const bear2022Series = filterReturnSeriesByDateRange(returnSeries, BEAR_2022_START, BEAR_2022_END);
@@ -125,9 +126,9 @@ export async function analyzePairSuitability(symbolA: string, symbolB: string): 
             data_as_of: recentAlignedSeries[recentAlignedSeries.length - 1].date,
             trading_days_overlap: recentAlignedSeries.length,
             correlation: {
-                // Backward-compatible aliases for older mobile builds that still expect 60/120-day keys.
+                // d60 remains a backward-compatible alias for older mobile builds.
                 d60: corr90,
-                d120: corr180,
+                d120: corr120,
                 d90: corr90,
                 d180: corr180,
                 d252: corr252,
@@ -275,7 +276,9 @@ export function determineSuitability(
     if (corrBear2022 < 0.40) return 'LOW';
     if (maxDailyCorr < 0.30) return 'LOW';
 
-    const dailyStrong = maxDailyCorr >= 0.50 && corr180 >= 0.40;
+    // PB FCN tenor is commonly 3M; use corr90 as the direct HIGH gate.
+    // Longer windows remain displayed in correlation detail as reference context.
+    const dailyStrong = corr90 >= 0.50;
     if (downsideSync >= 0.70 && corrBear2022 >= 0.60 && dailyStrong) return 'HIGH';
 
     return 'MEDIUM';
@@ -345,32 +348,29 @@ export function buildSuitabilityNote(
             return {
                 reason: `下跌同步率仅 ${syncPct},低于 55% baseline,压力情景下两只标的会出现单边掉队风险`,
                 weakness: `主要短板:下跌同步率 ${syncPct}`,
-                next_step: '不建议双标结构,改单标方案'
+                next_step: generateNextStep(metrics, suitability)
             };
         }
         if (metrics.corrBear2022 < 0.40) {
             return {
                 reason: `2022 熊市相关性仅 ${bear},压力情景下脱钩,无法依靠双标的结构对冲`,
                 weakness: `主要短板:压力情景相关性 ${bear}`,
-                next_step: '压力情景脱钩,改单标或更换其中一只'
+                next_step: generateNextStep(metrics, suitability)
             };
         }
         return {
             reason: `日常相关性最高仅 ${maxDaily}(90/180/252 日),两只标的不应配对`,
             weakness: '主要短板:日常相关性过低',
-            next_step: '配对不合理,重选标的'
+            next_step: generateNextStep(metrics, suitability)
         };
     }
 
     if (suitability === 'HIGH') {
         const weakness = volGap ?? '无明显短板';
-        const nextStep = volGap && metrics.volGapLeg
-            ? `可直接进入询价 / pricing 流程;询价时可同时索取 ${metrics.volGapLeg} 的 vol/skew 数据`
-            : '可直接进入询价 / pricing 流程';
         return {
-            reason: `下跌同步率 ${syncPct}、2022 熊市相关性 ${bear}、日常相关性 ${corr(metrics.corr180)}(180 日)三项均达标`,
+            reason: `下跌同步率 ${syncPct}、2022 熊市相关性 ${bear}、3M 相关性 ${corr(metrics.corr90)} 三项均达标`,
             weakness,
-            next_step: nextStep
+            next_step: generateNextStep(metrics, suitability)
         };
     }
 
@@ -379,36 +379,35 @@ export function buildSuitabilityNote(
         weaknesses.push({
             label: `下跌同步率 ${syncPct}`,
             reason: `下跌同步率 ${syncPct} 达 baseline 但未到 70% 强同步区间`,
-            next: '可继续询价,结构端讨论执行价下调 5-10% 或缩短至 6 个月'
+            next: '建议缩短期限或提高保护缓冲后再推进'
         });
     }
     if (metrics.corrBear2022 < 0.60) {
         weaknesses.push({
             label: `2022 熊市相关性 ${bear}`,
             reason: `2022 熊市相关性 ${bear} 达 baseline 但未到 0.60 强联动`,
-            next: '可询价,pricing 后建议对比同 sector 替代 pair'
+            next: '建议增加下行保护,或更换其中一只标的'
         });
     }
     if (!(maxDailyCorr(metrics) >= 0.50 && metrics.corr180 >= 0.40)) {
         weaknesses.push({
             label: `日常相关性偏弱`,
             reason: `日常相关性偏弱(corr180 = ${corr(metrics.corr180)},maxDaily = ${maxDaily})`,
-            next: '可继续询价,但短期交易节奏可能分化,建议关注 pricing 时的隐含相关性'
+            next: '建议降低结构激进度,或拆为单标方案'
         });
     }
 
     const primary = weaknesses[0] ?? {
         label: '指标未完全进入强确认区间',
         reason: '核心指标达 baseline,但未全部进入 HIGH 区间',
-        next: '可继续询价,并在 pricing 后复核风险补偿'
+        next: '可推进,但建议先复核结构保护是否充分'
     };
     const weaknessLabels = weaknesses.slice(0, 2).map((item) => item.label);
     let weakness = `主要短板:${weaknessLabels.length > 0 ? weaknessLabels.join('、') : primary.label}`;
-    let nextStep = primary.next;
+    let nextStep = generateNextStep(metrics, suitability) ?? primary.next;
 
     if (volGap && metrics.volGapLeg) {
         weakness = `${weakness};${volGap}`;
-        nextStep = `${nextStep},并优先评估 ${metrics.volGapLeg} 单标方案`;
     }
 
     return {
@@ -419,7 +418,45 @@ export function buildSuitabilityNote(
 }
 
 function formatSuitabilityNote(note: SuitabilityNote): string {
-    return [note.reason, note.weakness, note.next_step].join('\n\n');
+    return [note.reason, note.weakness, note.next_step].filter(Boolean).join('\n\n');
+}
+
+function generateNextStep(
+    metrics: SuitabilityNoteMetrics,
+    suitability: 'HIGH' | 'MEDIUM' | 'LOW'
+): string | null {
+    if (suitability === 'HIGH') {
+        return null;
+    }
+
+    if (suitability === 'LOW') {
+        if (metrics.downsideSync < 0.55) {
+            return '不建议推进双标结构,优先考虑单标或更换配对';
+        }
+        if (metrics.corrBear2022 < 0.40) {
+            return '压力情景联动不足,优先考虑单标或更换其中一只标的';
+        }
+        if (maxDailyCorr(metrics) < 0.30) {
+            return '日常相关性过低,建议重选标的';
+        }
+        return '基线未达,优先考虑单标或更换配对';
+    }
+
+    if (metrics.volGapFlag) {
+        const leg = metrics.volGapLeg ?? '高波动标的';
+        return `建议复核 ${leg} 的主要风险腿影响,必要时改为单标方案`;
+    }
+    if (metrics.downsideSync < 0.70) {
+        return '建议缩短期限或提高保护缓冲后再推进';
+    }
+    if (metrics.corrBear2022 < 0.60) {
+        return '建议增加下行保护,或更换其中一只标的';
+    }
+    if (metrics.corr90 < 0.50) {
+        return '建议降低结构激进度,或拆为单标方案';
+    }
+
+    return '可推进,但建议先复核结构保护是否充分';
 }
 
 function calculateMean(values: number[]): number {

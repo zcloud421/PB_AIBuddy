@@ -58,7 +58,7 @@ function runPairSuitabilityTests(): void {
     assert.strictEqual(determineSuitability(0.29, 0.28, 0.27, 0.7, 0.7), 'LOW');
 
     assert.strictEqual(determineSuitability(0.50, 0.40, 0.45, 0.60, 0.70), 'HIGH');
-    assert.strictEqual(determineSuitability(0.55, 0.39, 0.45, 0.60, 0.70), 'MEDIUM');
+    assert.strictEqual(determineSuitability(0.49, 0.55, 0.45, 0.60, 0.70), 'MEDIUM');
 
     const highVolGap = buildSuitabilityNote('HIGH', {
         corr90: 0.55,
@@ -71,7 +71,7 @@ function runPairSuitabilityTests(): void {
         volRatio: 1.5
     });
     assert.match(highVolGap.weakness, /MU 年化波动率高出对手 50%/);
-    assert.match(highVolGap.next_step, /vol\/skew/);
+    assert.strictEqual(highVolGap.next_step, null);
 
     const noVolGap = buildSuitabilityNote('HIGH', {
         corr90: 0.55,
@@ -85,8 +85,8 @@ function runPairSuitabilityTests(): void {
     });
     assert.doesNotMatch(noVolGap.weakness, /波动率/);
 
-    const joined = [noVolGap.reason, noVolGap.weakness, noVolGap.next_step].join('\n\n');
-    assert.strictEqual(joined.split('\n\n').length, 3);
+    const joined = [noVolGap.reason, noVolGap.weakness, noVolGap.next_step].filter(Boolean).join('\n\n');
+    assert.strictEqual(joined.split('\n\n').length, 2);
 }
 
 if (require.main === module) {
