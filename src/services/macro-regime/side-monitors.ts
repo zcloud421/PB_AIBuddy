@@ -262,20 +262,30 @@ async function computeHyAccelerationSubSignal(
     const delta4w = last - fourWeeksBack;
     const delta8w = last - eightWeeksBack;
     const acceleration = delta4w - delta8w;
-
-    let score: 0 | 1 | 2 | 3;
-    if (acceleration < 25) score = 0;
-    else if (acceleration < 50) score = 1;
-    else if (acceleration < 100) score = 2;
-    else score = 3;
+    const score = scoreHyOasAcceleration(delta4w, delta8w);
 
     return {
         name: 'HY OAS Δ4w-Δ8w',
         value: Math.round(acceleration * 10) / 10,
         score,
         status: statusFromScore(score),
-        notes: [`Δ4w ${delta4w.toFixed(0)}bp, Δ8w ${delta8w.toFixed(0)}bp`]
+        notes: [
+            `Δ4w ${delta4w >= 0 ? '+' : ''}${delta4w.toFixed(0)}bp · Δ8w ${delta8w >= 0 ? '+' : ''}${delta8w.toFixed(0)}bp`,
+            delta4w <= 0 ? '当前为 tightening,acceleration 不打分' : ''
+        ].filter((note): note is string => Boolean(note))
     };
+}
+
+export function scoreHyOasAcceleration(delta4w: number, delta8w: number): 0 | 1 | 2 | 3 {
+    const acceleration = delta4w - delta8w;
+
+    // Only widening acceleration should score. When both Δ4w and Δ8w are
+    // negative, a positive acceleration is merely "tightening deceleration",
+    // not credit stress.
+    if (delta4w <= 0 || acceleration < 25) return 0;
+    if (acceleration < 50) return 1;
+    if (acceleration < 100) return 2;
+    return 3;
 }
 
 async function computeFundingProxySubSignal(): Promise<SideSubSignal> {

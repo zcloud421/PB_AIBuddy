@@ -21,6 +21,37 @@
 
 **Note:** < 300bp 是 complacency tight,但**不进 severity aggregator**(避免 alert fatigue,2017-2019 常年 <350bp 但未出事)。
 
+### HY_OAS 子带 + Widening Confirmation
+
+#### Tight zone (<300bp)
+
+历史 anchor:
+- 2007-06 cycle low **241bp**(GFC 7 个月后爆发,Bear Stearns 基金 1 个月后崩盘)
+- 2021-10 cycle low **290bp**(2022 全年熊市)
+- 1998 LTCM 危机前同样 sub-300
+
+3/3 历史 sub-300 tight 期均以重定价收场。
+
+**当前(2026-05)**:HY OAS 约 280bp,已进入信用-基本面背离区:HY default rate 抬升,但 spread 仍在 cycle low 附近。
+
+**系统行为**:
+- row 显示 Healthy(spread 绝对水位不触发 stress)
+- 展开态显示 Complacency badge + 历史 anchor
+- 不进 aggregation,不影响 overall
+
+#### Widening Confirmation
+
+Druckenmiller 框架:credit spread widening **持续 >=2 周才视为 risk-off 信号**,单日尖刺不动 severity。
+
+- 升档(Healthy → Neutral / Warning / Critical):需要 **10 个交易日** confirmation
+- 降档:立即生效(收窄要立即体现 risk-off 退潮)
+- pending 期间 row 显示 "升档待确认 · X/10 天",但 severity 仍为旧值
+- 仅对 HY_OAS 启用(其他指标不变)
+
+#### hy_acceleration_signal 修复(2026-05-21)
+
+原逻辑 `acceleration = delta4w - delta8w` 在两者都为负(都在 tightening)时仍可能输出正值,触发 false "watch"。修复:仅当 `delta4w > 0`(确实在 widening)时打分。
+
 ---
 
 ## 2. YIELD_CURVE (10Y-2Y Spread)

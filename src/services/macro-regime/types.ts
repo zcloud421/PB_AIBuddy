@@ -24,6 +24,17 @@ export interface IndicatorReading {
     notes: string[];
     is_skipped: boolean;
     persistence?: IndicatorPersistence;
+    tight_zone?: {
+        active: boolean;
+        label: string;
+        historical_anchor: string;
+    };
+    pending_upgrade?: {
+        target_severity: RegimeSeverity;
+        confirmation_days_elapsed: number;
+        confirmation_days_required: number;
+        notes: string;
+    };
     band_position_pct?: number;
     next_anchor?: SubBandNextAnchor;
     velocity_5d?: IndicatorVelocity | null;

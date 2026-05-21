@@ -23,6 +23,7 @@ import {
     type UsTreasuryPoint
 } from '../../data/massive-treasury-yields';
 import { fetchFredTreasuryCurve } from '../../data/fred-treasury-fallback';
+import { confirmHyOasSeverity, type HyOasConfirmationResult } from './persistence';
 
 type TreasuryCurveResult = {
     curve: UsTreasuryPoint[];
@@ -73,6 +74,10 @@ function makeSkipped(name: string, reason: string): IndicatorReading {
     };
 }
 
+function todayUtcDate(): string {
+    return new Date().toISOString().slice(0, 10);
+}
+
 function ma(values: number[], window: number): number | null {
     if (values.length < window) return null;
     const slice = values.slice(-window);
@@ -104,11 +109,7 @@ export async function computeHyOas(): Promise<IndicatorReading> {
     const fourWeeksBack = pointDaysBack(series, 28);
     const delta4wBp = fourWeeksBack ? (latest.value - fourWeeksBack.value) * 100 : null;
 
-    let status: RegimeSeverity;
-    if (valueBp < 350) status = 'Healthy';
-    else if (valueBp < 450) status = 'Neutral';
-    else if (valueBp < 600) status = 'Warning';
-    else status = 'Critical';
+    let rawStatus = computeHyOasRawSeverity(valueBp);
 
     const notes: string[] = [];
     if (delta4wBp !== null) {
@@ -116,17 +117,48 @@ export async function computeHyOas(): Promise<IndicatorReading> {
     }
     // Rule: if Δ4w > +75bp, force escalate 1 step (acceleration)
     if (delta4wBp !== null && delta4wBp > 75) {
-        status = escalateSeverityOnce(status);
+        rawStatus = escalateSeverityOnce(rawStatus);
         notes.push('Δ4w > +75bp triggered acceleration escalation');
+    }
+
+    const tightZone = buildHyOasTightZone(valueBp);
+    if (tightZone) {
+        notes.push('Sub-300bp:信用自满风险,信用-基本面背离监测中');
+    }
+
+    const confirmation: HyOasConfirmationResult = await confirmHyOasSeverity(rawStatus, todayUtcDate()).catch((error) => {
+        console.warn('[macro-regime] HY OAS confirmation failed:', error instanceof Error ? error.message : error);
+        return { confirmedSeverity: rawStatus };
+    });
+    if (confirmation.pendingUpgrade) {
+        notes.push(`${confirmation.pendingUpgrade.target_severity} 升档待确认:已持续 ${confirmation.pendingUpgrade.confirmation_days_elapsed} / ${confirmation.pendingUpgrade.confirmation_days_required} 个交易日`);
     }
 
     return {
         name: 'HY OAS',
         value: Math.round(valueBp * 10) / 10,
-        status,
+        status: confirmation.confirmedSeverity,
         delta_4w: delta4wBp !== null ? Math.round(delta4wBp * 10) / 10 : null,
         notes,
-        is_skipped: false
+        is_skipped: false,
+        tight_zone: tightZone,
+        pending_upgrade: confirmation.pendingUpgrade
+    };
+}
+
+export function computeHyOasRawSeverity(valueBp: number): RegimeSeverity {
+    if (valueBp < 350) return 'Healthy';
+    if (valueBp < 450) return 'Neutral';
+    if (valueBp < 600) return 'Warning';
+    return 'Critical';
+}
+
+export function buildHyOasTightZone(valueBp: number): IndicatorReading['tight_zone'] {
+    if (valueBp >= 300) return undefined;
+    return {
+        active: true,
+        label: '信用自满区 · 接近周期低点',
+        historical_anchor: '2007-06 周期低点 241bp · 2021-10 周期低点 290bp · 3/3 历史 sub-300 期均以重定价收场'
     };
 }
 

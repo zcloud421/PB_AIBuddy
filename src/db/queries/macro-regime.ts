@@ -55,6 +55,11 @@ export async function ensureIndicatorPersistenceTable(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_indicator_persistence_severity
         ON indicator_persistence (current_severity)
     `);
+    await pool.query(`
+        ALTER TABLE indicator_persistence
+        ADD COLUMN IF NOT EXISTS pending_upgrade_severity TEXT,
+        ADD COLUMN IF NOT EXISTS pending_upgrade_start_date DATE
+    `);
 }
 
 export async function ensureIndicatorHistoryTable(): Promise<void> {
