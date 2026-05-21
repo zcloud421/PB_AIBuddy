@@ -52,6 +52,35 @@ Druckenmiller 框架:credit spread widening **持续 >=2 周才视为 risk-off �
 
 原逻辑 `acceleration = delta4w - delta8w` 在两者都为负(都在 tightening)时仍可能输出正值,触发 false "watch"。修复:仅当 `delta4w > 0`(确实在 widening)时打分。
 
+#### hy_acceleration_signal noise floor (2026-05-21 进一步优化)
+
+继 P1 修复 tightening 减速误报后,实测发现 cycle low 区(286bp)+ Δ4w +1bp 仍触发 "watch" — 严格按规则是 widening,但 1bp 移动在 cycle low 区是数值噪音。
+
+**历史 reference**:真实 4-week credit widening stress 案例:
+- 2022 bear market: 平均 +33bp/4w
+- 2018 Q4: +85bp/4w
+- 2015-16 oil crash: +75bp/4w
+- 2020 COVID: +750bp/4w(极端)
+
+任何真实 stress 4-周扩张都 >=25-30bp。
+
+**双层 noise floor**:
+- **Tight zone (<300bp)**:noise_floor = **25bp**(cycle low 区噪音空间大)
+- **正常区 (>=300bp)**:noise_floor = **15bp**(已离开 complacency,15bp 是有意义 widening)
+
+打分逻辑(必须三个条件同时满足):
+1. `delta4w > 0`(排除 tightening)
+2. `delta4w >= noise_floor`(排除数值噪音)
+3. `acceleration >= 25`(打分起点)
+
+副作用验证:
+| HY OAS | Δ4w | acceleration | 行为 |
+|---|---|---|---|
+| 286 | +1 | +34 | score 0 ✅(原 bug case) |
+| 295 | +30 | +35 | score 1 ✅(tight zone 真实 widening) |
+| 400 | +20 | +30 | score 1 ✅(正常区真实 widening) |
+| 400 | +10 | +30 | score 0 ✅(正常区未达门槛) |
+
 ---
 
 ## 2. YIELD_CURVE (10Y-2Y Spread)

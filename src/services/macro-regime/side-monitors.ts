@@ -262,30 +262,56 @@ async function computeHyAccelerationSubSignal(
     const delta4w = last - fourWeeksBack;
     const delta8w = last - eightWeeksBack;
     const acceleration = delta4w - delta8w;
-    const score = scoreHyOasAcceleration(delta4w, delta8w);
+    const evaluation = evaluateHyOasAcceleration(delta4w, delta8w, last);
 
     return {
         name: 'HY OAS Δ4w-Δ8w',
         value: Math.round(acceleration * 10) / 10,
-        score,
-        status: statusFromScore(score),
-        notes: [
-            `Δ4w ${delta4w >= 0 ? '+' : ''}${delta4w.toFixed(0)}bp · Δ8w ${delta8w >= 0 ? '+' : ''}${delta8w.toFixed(0)}bp`,
-            delta4w <= 0 ? '当前为 tightening,acceleration 不打分' : ''
-        ].filter((note): note is string => Boolean(note))
+        score: evaluation.score,
+        status: statusFromScore(evaluation.score),
+        notes: evaluation.notes
     };
 }
 
-export function scoreHyOasAcceleration(delta4w: number, delta8w: number): 0 | 1 | 2 | 3 {
+export function evaluateHyOasAcceleration(
+    delta4w: number,
+    delta8w: number,
+    latestBp: number
+): {
+    score: 0 | 1 | 2 | 3;
+    noiseFloor: number;
+    notes: string[];
+} {
     const acceleration = delta4w - delta8w;
+    const noiseFloor = latestBp < 300 ? 25 : 15;
+    const meaningfulWidening = delta4w >= noiseFloor;
+
+    const notes: string[] = [
+        `Δ4w ${delta4w >= 0 ? '+' : ''}${delta4w.toFixed(0)}bp · Δ8w ${delta8w >= 0 ? '+' : ''}${delta8w.toFixed(0)}bp`
+    ];
 
     // Only widening acceleration should score. When both Δ4w and Δ8w are
     // negative, a positive acceleration is merely "tightening deceleration",
     // not credit stress.
-    if (delta4w <= 0 || acceleration < 25) return 0;
-    if (acceleration < 50) return 1;
-    if (acceleration < 100) return 2;
-    return 3;
+    if (delta4w <= 0) {
+        notes.push('当前为 tightening,acceleration 不打分');
+        return { score: 0, noiseFloor, notes };
+    }
+
+    if (!meaningfulWidening) {
+        const zone = latestBp < 300 ? 'tight zone' : '正常区';
+        notes.push(`Δ4w +${delta4w.toFixed(0)}bp 未达噪音门槛 ${noiseFloor}bp (${zone})`);
+        return { score: 0, noiseFloor, notes };
+    }
+
+    if (acceleration < 25) return { score: 0, noiseFloor, notes };
+    if (acceleration < 50) return { score: 1, noiseFloor, notes };
+    if (acceleration < 100) return { score: 2, noiseFloor, notes };
+    return { score: 3, noiseFloor, notes };
+}
+
+export function scoreHyOasAcceleration(delta4w: number, delta8w: number, latestBp = 300): 0 | 1 | 2 | 3 {
+    return evaluateHyOasAcceleration(delta4w, delta8w, latestBp).score;
 }
 
 async function computeFundingProxySubSignal(): Promise<SideSubSignal> {
