@@ -30,6 +30,7 @@ export interface IndicatorReading {
         historical_anchor: string;
     };
     pending_upgrade?: {
+        kind?: 'row_promotion' | 'escalation_eligibility';
         target_severity: RegimeSeverity;
         confirmation_days_elapsed: number;
         confirmation_days_required: number;
@@ -139,5 +140,22 @@ export interface MacroRegimeSnapshot {
         ai_cloud: IndicatorPersistence;
         credit_funding: IndicatorPersistence;
         fundamental: IndicatorPersistence;
+    };
+    guardrail?: {
+        applied: boolean;
+        note: string;
+        capped_from: 'Critical';
+        capped_to: 'Warning';
+    };
+    escalation_summary?: EscalationSummary;
+}
+
+export interface EscalationSummary {
+    base_overall: RegimeSeverity;
+    final_overall: RegimeSeverity;
+    escalation_reasons: string[];
+    guardrail?: {
+        applied: boolean;
+        note: string;
     };
 }

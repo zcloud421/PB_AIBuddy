@@ -29,10 +29,10 @@ import {
     computeHyOasDelta4wBp,
     fetchHyOasSeriesBp
 } from './side-monitors';
-import { applyEscalations, computeBaseSeverity } from './aggregate';
+import { annotateSoxEscalationEligibility, applyEscalationsDetailed, computeBaseSeverity } from './aggregate';
 import { loadFundamentalModifier } from './fundamental-modifier';
 import { buildLateCycleContext } from './late-cycle-context';
-import { persistenceFor, syncAllPersistence } from './persistence';
+import { persistenceFor, syncAllPersistence, syncIndicatorPersistence } from './persistence';
 import { attachSubBandMetadata, persistSubBandHistory } from './sub-band-metadata';
 import type {
     AiCloudStressStatus,
@@ -70,6 +70,7 @@ function fundamentalStateToSeverity(state: FundamentalState): RegimeSeverity {
 export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
     const startedAt = Date.now();
     const fetcher = new MassiveDataFetcher();
+    const asOf = todayUtcDate();
 
     // Side monitor pre-requisites (HY OAS series in bp + Δ4w) reused for
     // indicator and Credit/Funding stress acceleration sub-signal.
@@ -120,13 +121,16 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
 
     const fundamentalModifier = loadFundamentalModifier();
     const lateCycleContext = await buildLateCycleContext();
+    await syncIndicatorPersistence(asOf, indicators);
+    annotateSoxEscalationEligibility(indicators);
     const baseOverall = computeBaseSeverity(indicators);
-    const overall = applyEscalations(
+    const escalationResult = applyEscalationsDetailed(
         baseOverall,
         aiCloudStress,
-        creditFundingStress
+        creditFundingStress,
+        indicators
     );
-    const asOf = todayUtcDate();
+    const overall = escalationResult.overall;
     await attachSubBandMetadata(asOf, {
         DGS10_ABS_LEVEL: dgs10AbsLevel,
         DGS10_4W_SHOCK: dgs10Shock,
@@ -162,6 +166,18 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
             ai_cloud: persistenceFor(persistenceRecords, 'AI_CLOUD'),
             credit_funding: persistenceFor(persistenceRecords, 'CREDIT_FUNDING'),
             fundamental: persistenceFor(persistenceRecords, 'FUNDAMENTAL')
+        },
+        guardrail: escalationResult.guardrail,
+        escalation_summary: {
+            base_overall: baseOverall,
+            final_overall: overall,
+            escalation_reasons: escalationResult.reasons,
+            guardrail: escalationResult.guardrail
+                ? {
+                    applied: escalationResult.guardrail.applied,
+                    note: escalationResult.guardrail.note
+                }
+                : undefined
         }
     };
 

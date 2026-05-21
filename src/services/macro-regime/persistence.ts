@@ -24,6 +24,7 @@ const SEVERITY_RANK: Record<RegimeSeverity, number> = {
 export interface HyOasConfirmationResult {
     confirmedSeverity: RegimeSeverity;
     pendingUpgrade?: {
+        kind?: 'row_promotion' | 'escalation_eligibility';
         target_severity: RegimeSeverity;
         confirmation_days_elapsed: number;
         confirmation_days_required: number;
@@ -139,6 +140,7 @@ export async function confirmHyOasSeverity(
     return {
         confirmedSeverity: previousSeverity,
         pendingUpgrade: {
+            kind: 'row_promotion',
             target_severity: targetSeverity,
             confirmation_days_elapsed: elapsed,
             confirmation_days_required: requiredTradingDays,
@@ -279,6 +281,22 @@ function toPersistence(record: PersistenceRecord): IndicatorPersistence {
     };
 }
 
+export async function syncIndicatorPersistence(
+    asOfDate: string,
+    indicators: MacroRegimeIndicators
+): Promise<Map<string, PersistenceRecord>> {
+    const results = new Map<string, PersistenceRecord>();
+
+    for (const [key, reading] of Object.entries(indicators)) {
+        const severity: RegimeSeverity = reading.is_skipped ? 'Neutral' : reading.status;
+        const record = await upsertIndicatorPersistence(key, severity, asOfDate);
+        reading.persistence = toPersistence(record);
+        results.set(key, record);
+    }
+
+    return results;
+}
+
 /**
  * Update persistence for all indicators + composites + overall in one pass.
  */
@@ -292,14 +310,7 @@ export async function syncAllPersistence(
         fundamental: RegimeSeverity;
     }
 ): Promise<Map<string, PersistenceRecord>> {
-    const results = new Map<string, PersistenceRecord>();
-
-    for (const [key, reading] of Object.entries(indicators)) {
-        const severity: RegimeSeverity = reading.is_skipped ? 'Neutral' : reading.status;
-        const record = await upsertIndicatorPersistence(key, severity, asOfDate);
-        reading.persistence = toPersistence(record);
-        results.set(key, record);
-    }
+    const results = await syncIndicatorPersistence(asOfDate, indicators);
 
     results.set(
         'OVERALL',

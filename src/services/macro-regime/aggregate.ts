@@ -53,11 +53,9 @@ function isActionEligible(name: string, indicator: IndicatorReading): boolean {
 
 function effectiveIndicatorSeverity(
     name: keyof MacroRegimeIndicators,
-    indicator: IndicatorReading,
-    soxCriticalConfirmed = false
+    indicator: IndicatorReading
 ): RegimeSeverity {
     if (indicator.status !== 'Critical') return indicator.status;
-    if (name === 'SOX_200DMA_DEVIATION' && soxCriticalConfirmed) return 'Critical';
     if (!isPortfolioCriticalEligible(name, indicator) || !isActionEligible(name, indicator)) {
         return 'Warning';
     }
@@ -76,20 +74,50 @@ function hasSoxCriticalResonance(indicators: MacroRegimeIndicators): boolean {
     return (
         isWarningOrWorse(indicators.AI_BREADTH) ||
         isWarningOrWorse(indicators.VIX) ||
-        isWarningOrWorse(indicators.DGS10_ABS_LEVEL)
+        isWarningOrWorse(indicators.DGS10_4W_SHOCK)
     );
+}
+
+function soxCriticalDays(indicators: MacroRegimeIndicators): number {
+    return indicators.SOX_200DMA_DEVIATION.persistence?.consecutive_days ?? 0;
+}
+
+export function isSoxEligibleForEscalation(indicators: MacroRegimeIndicators): boolean {
+    const sox = indicators.SOX_200DMA_DEVIATION;
+    if (!sox || sox.is_skipped || sox.status !== 'Critical') return false;
+    return soxCriticalDays(indicators) >= 5;
+}
+
+export function annotateSoxEscalationEligibility(indicators: MacroRegimeIndicators): void {
+    const sox = indicators.SOX_200DMA_DEVIATION;
+    if (!sox || sox.is_skipped || sox.status !== 'Critical') return;
+
+    const days = soxCriticalDays(indicators);
+    if (days >= 5) {
+        if (sox.pending_upgrade?.kind === 'escalation_eligibility') {
+            sox.pending_upgrade = undefined;
+        }
+        return;
+    }
+
+    sox.pending_upgrade = {
+        kind: 'escalation_eligibility',
+        target_severity: 'Critical',
+        confirmation_days_elapsed: Math.max(1, days),
+        confirmation_days_required: 5,
+        notes: 'SOX 已达 Critical 水平,需持续 5 个交易日才参与整体 escalation'
+    };
 }
 
 export function computeBaseSeverity(indicators: MacroRegimeIndicators): RegimeSeverity {
     const entries = Object.entries(indicators) as Array<[keyof MacroRegimeIndicators, IndicatorReading]>;
     const live = entries.filter(([, r]) => !r.is_skipped);
-    const soxCriticalConfirmed = hasSoxCriticalResonance(indicators);
-    const effectiveStatuses = live.map(([name, r]) => effectiveIndicatorSeverity(name, r, soxCriticalConfirmed));
+    const effectiveStatuses = live.map(([name, r]) => effectiveIndicatorSeverity(name, r));
 
     const hasActionableCritical = live.some(
         ([name, r]) =>
             r.status === 'Critical' &&
-            ((name === 'SOX_200DMA_DEVIATION' && soxCriticalConfirmed) || isPortfolioCriticalEligible(name, r)) &&
+            isPortfolioCriticalEligible(name, r) &&
             isActionEligible(name, r)
     );
 
@@ -104,10 +132,103 @@ export function computeBaseSeverity(indicators: MacroRegimeIndicators): RegimeSe
 export function applyEscalations(
     base: RegimeSeverity,
     aiCloud: AiCloudStressReport,
-    credit: CreditFundingStressReport
+    credit: CreditFundingStressReport,
+    indicators?: MacroRegimeIndicators
 ): RegimeSeverity {
+    return applyEscalationsDetailed(base, aiCloud, credit, indicators).overall;
+}
+
+export interface EscalationResult {
+    overall: RegimeSeverity;
+    reasons: string[];
+    guardrail?: {
+        applied: boolean;
+        note: string;
+        capped_from: 'Critical';
+        capped_to: 'Warning';
+    };
+}
+
+export function applyEscalationsDetailed(
+    base: RegimeSeverity,
+    aiCloud: AiCloudStressReport,
+    credit: CreditFundingStressReport,
+    indicators?: MacroRegimeIndicators
+): EscalationResult {
     let result = base;
-    if (aiCloud.score === 3) result = escalate(result, 1);
-    if (credit.overall_status === 'crisis') result = escalate(result, 1);
-    return result;
+    const reasons: string[] = [];
+
+    if (indicators && hasSoxCriticalResonance(indicators) && isSoxEligibleForEscalation(indicators)) {
+        result = 'Critical';
+        const resonance = [
+            isWarningOrWorse(indicators.AI_BREADTH) ? 'AI_BREADTH' : null,
+            isWarningOrWorse(indicators.VIX) ? 'VIX' : null,
+            isWarningOrWorse(indicators.DGS10_4W_SHOCK) ? 'DGS10_4W_SHOCK' : null
+        ].filter((value): value is string => Boolean(value));
+        reasons.push(`SOX Critical + ${resonance.join('/')} 共振`);
+    }
+
+    if (aiCloud.score === 3) {
+        const next = escalate(result, 1);
+        if (next !== result) reasons.push('AI Cloud Crisis escalation');
+        result = next;
+    }
+
+    if (credit.overall_status === 'crisis') {
+        const next = escalate(result, 1);
+        if (next !== result) reasons.push('Credit/Funding Crisis escalation');
+        result = next;
+    }
+
+    if (indicators) {
+        const guardrail = applySoftDerivedCriticalGuardrail(base, result, reasons, indicators, credit);
+        if (guardrail.guardrailApplied) {
+            return {
+                overall: guardrail.overall,
+                reasons,
+                guardrail: {
+                    applied: true,
+                    note: guardrail.guardrailNote,
+                    capped_from: 'Critical',
+                    capped_to: 'Warning'
+                }
+            };
+        }
+    }
+
+    return { overall: result, reasons };
+}
+
+function applySoftDerivedCriticalGuardrail(
+    baseOverall: RegimeSeverity,
+    finalOverall: RegimeSeverity,
+    escalationReasons: string[],
+    indicators: MacroRegimeIndicators,
+    credit: CreditFundingStressReport
+): { overall: RegimeSeverity; guardrailApplied: false } | { overall: RegimeSeverity; guardrailApplied: true; guardrailNote: string } {
+    if (finalOverall !== 'Critical') return { overall: finalOverall, guardrailApplied: false };
+    if (baseOverall === 'Critical') return { overall: finalOverall, guardrailApplied: false };
+    if (escalationReasons.length === 0) return { overall: finalOverall, guardrailApplied: false };
+
+    const softDerivedSources = ['SOX', 'CONCENTRATION', 'BTC', 'valuation-stretch'];
+    const allSoftDerived = escalationReasons.every((reason) =>
+        softDerivedSources.some((source) => reason.includes(source))
+    );
+    if (!allSoftDerived) return { overall: finalOverall, guardrailApplied: false };
+
+    const hyOas = indicators.HY_OAS;
+    const vix = indicators.VIX;
+    const hyCalm = hyOas.value !== null && hyOas.value < 350;
+    const hyAccelNormal = credit.hy_acceleration_signal.score === 0;
+    const vixCalm = vix.value !== null && vix.value < 25;
+
+    if (hyCalm && hyAccelNormal && vixCalm) {
+        return {
+            overall: 'Warning',
+            guardrailApplied: true,
+            guardrailNote: '市场未定价 risk-off — 估值伸展风险维持 Warning,等待波动率 / 信用 / 宽度确认'
+        };
+    }
+
+    return { overall: finalOverall, guardrailApplied: false };
 }

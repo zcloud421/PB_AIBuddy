@@ -191,6 +191,59 @@ Druckenmiller 框架:credit spread widening **持续 >=2 周才视为 risk-off �
 
 ---
 
+## Aggregation Hardening(2026-05-21)
+
+### Persistence 分级原则
+
+| 指标类型 | Persistence 要求 | 理由 |
+|---|---|---|
+| volatility / breadth | 2-3 trading days | 高频信号,过滤太严会迟钝 |
+| rates shock / SOX stretch / valuation | **5 trading days** | 慢变量,过滤尖刺 |
+| credit widening | 10 trading days | Druckenmiller 框架,sustained widening 才算 risk-off |
+| manual context / quarterly | 不直接触发 Critical | 季度评审本就 lag,只做 context |
+
+### SOX Resonance 升级规则(2026-05-21 修订)
+
+SOX_200DMA_DEVIATION Critical AND (
+AI_BREADTH >= Warning OR
+VIX >= Warning OR
+DGS10_4W_SHOCK >= Warning
+)
+AND SOX persistence >= 5 trading days
+→ overall Critical(仍可能被 guardrail 降级)。
+
+修订点:使用 fresh rate shock(`DGS10_4W_SHOCK`),不再使用 `DGS10_ABS_LEVEL` backdrop。
+
+### Soft-Derived Critical Guardrail
+
+当 overall Critical **完全来自 soft-capped 指标 escalation**(SOX / CONCENTRATION / BTC),且市场未定价 risk-off,降级 Warning:
+
+- base_overall != Critical(hard signal 不在场)
+- 所有 escalation reasons 都是 soft-derived
+- HY_OAS < 350bp
+- HY acceleration normal(score 0)
+- VIX < 25
+
+→ overall cap 到 Warning
+→ note: "市场未定价 risk-off — 估值伸展风险维持 Warning,等待波动率 / 信用 / 宽度确认"
+
+**关键:** hard signal Critical(VIX/HY/breadth/fundamental 自身 Critical)**穿透** guardrail,不受影响。
+
+### Soft-Cap 指标列表(timing reliability 维度)
+
+- BTC_DRAWDOWN
+- CONCENTRATION
+- SOX_200DMA_DEVIATION
+- 未来候选(若加入):CAPE / Forward P/E / F&G Extreme Greed
+
+这些指标共性:**估值/位置类,timing 性差,可持续数月**。永远不能 solo Critical。
+
+### 不加降级 confirmation
+
+退潮立即生效。如果系统在风险消退后仍持续喊高危,信任流失成本高于反向。
+
+---
+
 ## 10-12. Side Monitors
 
 ### AI Cloud Stress (CRWV + NBIS)
