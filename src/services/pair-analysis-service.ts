@@ -12,7 +12,7 @@ export interface PairAnalysisResponse {
         d90: number;
         d180: number;
         d252: number;
-        bear_2022: number;
+        bear_2022: number | null;
     };
     volatility: {
         symbolA_annualized: number;
@@ -56,6 +56,7 @@ const RECENT_TRADING_DAYS = 252;
 const EXTENDED_LOOKBACK_DAYS = 1900;
 const BEAR_2022_START = '2022-01-01';
 const BEAR_2022_END = '2022-12-31';
+const MIN_BEAR_2022_DAYS = 100;
 const massiveFetcher = new MassiveDataFetcher();
 
 export async function analyzePairSuitability(symbolA: string, symbolB: string): Promise<PairAnalysisResult> {
@@ -93,10 +94,12 @@ export async function analyzePairSuitability(symbolA: string, symbolB: string): 
     const corr180 = roundMetric(calculateCorrelation(takeRecentTradingWindow(returnSeries, 180).map((point) => point.returnA), takeRecentTradingWindow(returnSeries, 180).map((point) => point.returnB)));
     const corr252 = roundMetric(calculateCorrelation(recentReturnSeries.map((point) => point.returnA), recentReturnSeries.map((point) => point.returnB)));
     const bear2022Series = filterReturnSeriesByDateRange(returnSeries, BEAR_2022_START, BEAR_2022_END);
-    const corrBear2022 = roundMetric(calculateCorrelation(
-        bear2022Series.map((point) => point.returnA),
-        bear2022Series.map((point) => point.returnB)
-    ));
+    const corrBear2022 = bear2022Series.length >= MIN_BEAR_2022_DAYS
+        ? roundMetric(calculateCorrelation(
+            bear2022Series.map((point) => point.returnA),
+            bear2022Series.map((point) => point.returnB)
+        ))
+        : null;
     const recent60Returns = takeRecentTradingWindow(recentReturnSeries, 60);
     const volA = roundMetric(calculateAnnualizedVolatility(recent60Returns.map((point) => point.returnA)));
     const volB = roundMetric(calculateAnnualizedVolatility(recent60Returns.map((point) => point.returnB)));
@@ -268,18 +271,19 @@ export function determineSuitability(
     corr90: number,
     corr180: number,
     corr252: number,
-    corrBear2022: number,
+    corrBear2022: number | null,
     downsideSync: number
 ): 'HIGH' | 'MEDIUM' | 'LOW' {
     const maxDailyCorr = Math.max(corr90, corr180, corr252);
     if (downsideSync < 0.55) return 'LOW';
-    if (corrBear2022 < 0.40) return 'LOW';
+    if (corrBear2022 !== null && corrBear2022 < 0.40) return 'LOW';
     if (maxDailyCorr < 0.30) return 'LOW';
 
     // PB FCN tenor is commonly 3M; use corr90 as the direct HIGH gate.
     // Longer windows remain displayed in correlation detail as reference context.
     const dailyStrong = corr90 >= 0.50;
-    if (downsideSync >= 0.70 && corrBear2022 >= 0.60 && dailyStrong) return 'HIGH';
+    const bearStrong = corrBear2022 === null || corrBear2022 >= 0.60;
+    if (downsideSync >= 0.70 && bearStrong && dailyStrong) return 'HIGH';
 
     return 'MEDIUM';
 }
@@ -310,7 +314,7 @@ interface SuitabilityNoteMetrics {
     corr90: number;
     corr180: number;
     corr252: number;
-    corrBear2022: number;
+    corrBear2022: number | null;
     downsideSync: number;
     volGapFlag: boolean;
     volGapLeg: string | null;
@@ -323,6 +327,10 @@ function pct(value: number): string {
 
 function corr(value: number): string {
     return value.toFixed(2);
+}
+
+function nullableCorr(value: number | null): string {
+    return value === null ? '数据不足' : corr(value);
 }
 
 function maxDailyCorr(metrics: Pick<SuitabilityNoteMetrics, 'corr90' | 'corr180' | 'corr252'>): number {
@@ -339,7 +347,7 @@ export function buildSuitabilityNote(
     metrics: SuitabilityNoteMetrics
 ): SuitabilityNote {
     const syncPct = pct(metrics.downsideSync);
-    const bear = corr(metrics.corrBear2022);
+    const bear = nullableCorr(metrics.corrBear2022);
     const maxDaily = corr(maxDailyCorr(metrics));
     const volGap = volGapText(metrics);
 
@@ -351,7 +359,7 @@ export function buildSuitabilityNote(
                 next_step: generateNextStep(metrics, suitability)
             };
         }
-        if (metrics.corrBear2022 < 0.40) {
+        if (metrics.corrBear2022 !== null && metrics.corrBear2022 < 0.40) {
             return {
                 reason: `2022 熊市相关性仅 ${bear},压力情景下脱钩,无法依靠双标的结构对冲`,
                 weakness: `主要短板:压力情景相关性 ${bear}`,
@@ -367,8 +375,11 @@ export function buildSuitabilityNote(
 
     if (suitability === 'HIGH') {
         const weakness = volGap ?? '无明显短板';
+        const bearPhrase = metrics.corrBear2022 === null
+            ? '2022 熊市数据不足'
+            : `2022 熊市相关性 ${bear}`;
         return {
-            reason: `下跌同步率 ${syncPct}、2022 熊市相关性 ${bear}、3M 相关性 ${corr(metrics.corr90)} 三项均达标`,
+            reason: `下跌同步率 ${syncPct}、${bearPhrase}、3M 相关性 ${corr(metrics.corr90)} 达标`,
             weakness,
             next_step: generateNextStep(metrics, suitability)
         };
@@ -382,7 +393,7 @@ export function buildSuitabilityNote(
             next: '建议缩短期限或提高保护缓冲后再推进'
         });
     }
-    if (metrics.corrBear2022 < 0.60) {
+    if (metrics.corrBear2022 !== null && metrics.corrBear2022 < 0.60) {
         weaknesses.push({
             label: `2022 熊市相关性 ${bear}`,
             reason: `2022 熊市相关性 ${bear} 达 baseline 但未到 0.60 强联动`,
@@ -433,7 +444,7 @@ function generateNextStep(
         if (metrics.downsideSync < 0.55) {
             return '不建议推进双标结构,优先考虑单标或更换配对';
         }
-        if (metrics.corrBear2022 < 0.40) {
+        if (metrics.corrBear2022 !== null && metrics.corrBear2022 < 0.40) {
             return '压力情景联动不足,优先考虑单标或更换其中一只标的';
         }
         if (maxDailyCorr(metrics) < 0.30) {
@@ -449,7 +460,7 @@ function generateNextStep(
     if (metrics.downsideSync < 0.70) {
         return '建议缩短期限或提高保护缓冲后再推进';
     }
-    if (metrics.corrBear2022 < 0.60) {
+    if (metrics.corrBear2022 !== null && metrics.corrBear2022 < 0.60) {
         return '建议增加下行保护,或更换其中一只标的';
     }
     if (metrics.corr90 < 0.50) {
