@@ -554,9 +554,9 @@ export function computeSox200DmaDeviation(
         status,
         delta_4w: null,
         notes: [
-            `SOX 当前 ${signedPercent(deviationPct)} vs 200DMA。`,
-            '历史泡沫峰值参考: Mississippi 1720 +73%、Dotcom NASDAQ 2000 +55%、1700 年以来主要泡沫均值 +35%(BofA Hartnett《Flow Show》2026-05-15)。',
-            '本指标反映 AI 算力板块位置伸展度,属 entry-risk 上下文,非独立 de-risk 触发。',
+            `SOX 当前 ${signedPercent(deviationPct)} vs 200 日均线`,
+            '历史泡沫峰值:Mississippi 1720 +73% · Dotcom 2000 +55% · 历史均值 +35%(BofA Hartnett《Flow Show》2026-05-15)',
+            '仅作估值过热预警,需 VIX / 龙头动量 / 利率冲击共振才会触发减仓',
             `数据截至 ${latest.date} · ${sourceLabel}`
         ],
         is_skipped: false
