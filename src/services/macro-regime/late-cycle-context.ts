@@ -26,7 +26,7 @@ function buildSentimentFromFearGreed(reading: FearGreedReading): LateCyclePillar
         evidence: [
             `当前分值 ${score} (${reading.rating})`,
             `上周 ${formatFearGreedScore(reading.previous_1_week)} · 上月 ${formatFearGreedScore(reading.previous_1_month)}`,
-            '来源 CNN Fear & Greed Index · 7 个 sub-indicator 加权'
+            '来源 CNN Fear & Greed Index · 7 个子指标加权'
         ],
         last_reviewed_at: todayIsoDate(),
         days_since_review: 0,
@@ -38,7 +38,7 @@ function buildSentimentFallback(): LateCyclePillar {
     return {
         state: 'normal',
         summary: 'F&G 数据暂不可用',
-        evidence: ['数据源 CNN dataviz 暂时不可达,稍后重试'],
+        evidence: ['CNN 数据源暂时不可达,稍后重试'],
         last_reviewed_at: todayIsoDate(),
         days_since_review: 0,
         stale_warning: false

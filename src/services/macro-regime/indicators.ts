@@ -63,6 +63,13 @@ function escalateSeverityOnce(severity: RegimeSeverity): RegimeSeverity {
     return ladder[Math.min(idx + 1, ladder.length - 1)];
 }
 
+function severityLabel(severity: RegimeSeverity): string {
+    if (severity === 'Healthy') return '平稳';
+    if (severity === 'Neutral') return '中性';
+    if (severity === 'Warning') return '警示';
+    return '极高';
+}
+
 function makeSkipped(name: string, reason: string): IndicatorReading {
     return {
         name,
@@ -96,13 +103,13 @@ function signedPercent(value: number): string {
 export async function computeHyOas(): Promise<IndicatorReading> {
     const series = await fetchFredSeries('BAMLH0A0HYM2', 60);
     if (!series || series.length === 0) {
-        return makeSkipped('HY OAS', 'FRED BAMLH0A0HYM2 unavailable');
+        return makeSkipped('HY OAS', '数据源暂不可用,本次跳过该指标');
     }
 
     // FRED returns this as a percentage (e.g. 2.76 = 276bp). Convert to bp.
     const latest = latestPoint(series);
     if (!latest) {
-        return makeSkipped('HY OAS', 'No recent BAMLH0A0HYM2 observations');
+        return makeSkipped('HY OAS', '近期数据缺失,本次跳过该指标');
     }
     const valueBp = latest.value * 100;
 
@@ -118,7 +125,7 @@ export async function computeHyOas(): Promise<IndicatorReading> {
     // Rule: if Δ4w > +75bp, force escalate 1 step (acceleration)
     if (delta4wBp !== null && delta4wBp > 75) {
         rawStatus = escalateSeverityOnce(rawStatus);
-        notes.push('Δ4w > +75bp triggered acceleration escalation');
+        notes.push('Δ4w 超过 +75bp,触发信用利差扩张升档');
     }
 
     const tightZone = buildHyOasTightZone(valueBp);
@@ -131,7 +138,7 @@ export async function computeHyOas(): Promise<IndicatorReading> {
         return { confirmedSeverity: rawStatus };
     });
     if (confirmation.pendingUpgrade) {
-        notes.push(`${confirmation.pendingUpgrade.target_severity} 升档待确认:已持续 ${confirmation.pendingUpgrade.confirmation_days_elapsed} / ${confirmation.pendingUpgrade.confirmation_days_required} 个交易日`);
+        notes.push(`升至 ${severityLabel(confirmation.pendingUpgrade.target_severity)} 待确认:已持续 ${confirmation.pendingUpgrade.confirmation_days_elapsed} / ${confirmation.pendingUpgrade.confirmation_days_required} 个交易日`);
     }
 
     return {
@@ -171,7 +178,7 @@ export async function computeYieldCurve(): Promise<IndicatorReading> {
     const latest10 = latestY10(curve);
     const latest2 = latestY2(curve);
     if (latest10 === null || latest2 === null || curve.length === 0) {
-        return makeSkipped('10Y-2Y', 'Treasury curve unavailable (Massive + FRED both failed)');
+        return makeSkipped('10Y-2Y', '美债收益率数据暂不可用,本次跳过该指标');
     }
     const latestDate = curve[curve.length - 1].date;
 
@@ -192,10 +199,10 @@ export async function computeYieldCurve(): Promise<IndicatorReading> {
             last60.length >= 60 && last60.every((point) => (point.y10! - point.y2!) * 100 < -50);
         if (allInverted) {
             status = 'Critical';
-            notes.push('< -50bp persisted ≥ 60 days');
+            notes.push('10Y-2Y 利差倒挂超过 50bp,且已持续 60 个交易日以上');
         } else {
             status = 'Warning';
-            notes.push('Below -50bp but persistence < 60 days');
+            notes.push('10Y-2Y 利差倒挂超过 50bp,但持续不足 60 个交易日');
         }
     }
 
@@ -216,10 +223,10 @@ export async function computeYieldCurve(): Promise<IndicatorReading> {
 export async function computeVix(massiveFetcher: MassiveDataFetcher): Promise<IndicatorReading> {
     const vixSeries = await fetchFredSeries('VIXCLS', 30);
     if (!vixSeries || vixSeries.length === 0) {
-        return makeSkipped('VIX + RV20', 'FRED VIXCLS unavailable');
+        return makeSkipped('VIX + RV20', '数据源暂不可用,本次跳过该指标');
     }
     const latest = latestPoint(vixSeries);
-    if (!latest) return makeSkipped('VIX + RV20', 'No VIXCLS observations');
+    if (!latest) return makeSkipped('VIX + RV20', '近期数据缺失,本次跳过该指标');
     const vix = latest.value;
 
     const notes: string[] = [];
@@ -256,11 +263,11 @@ export async function computeVix(massiveFetcher: MassiveDataFetcher): Promise<In
             notes.push(`RV20 = ${rv20.toFixed(1)}`);
             if (status === 'Healthy' && rv20 > vix + 3) {
                 status = 'Neutral';
-                notes.push('Vol suppression (RV20 > VIX + 3) → downgraded Healthy → Neutral');
+                notes.push('实际波动率高于 VIX 3 点以上,VIX 可能低估压力,降至中性');
             }
         }
     } else {
-        notes.push('SPY 20d bars unavailable for RV20 quality check');
+        notes.push('SPY 近期数据缺失,跳过波动率质量校验');
     }
 
     // Persistence requirement for Warning+: VIX ≥ 25 must hold ≥ 3 sessions.
@@ -270,7 +277,7 @@ export async function computeVix(massiveFetcher: MassiveDataFetcher): Promise<In
         const persistent = lastThree.length >= 3 && lastThree.every((point) => point.value >= 25);
         if (!persistent) {
             status = 'Neutral';
-            notes.push('VIX spike not persistent (< 3 sessions ≥ 25) → reverted to Neutral');
+            notes.push('VIX ≥25 未连续 3 个交易日,单日尖峰退回中性');
         }
     }
 
@@ -293,7 +300,7 @@ export async function computeDgs10FourWeekShock(): Promise<IndicatorReading> {
     const latest = latestY10(curve);
     const fourWeeksBack = y10DaysBack(curve, 28);
     if (latest === null || fourWeeksBack === null || curve.length === 0) {
-        return makeSkipped('10Y yield 4w shock', 'Treasury curve unavailable (Massive + FRED both failed)');
+        return makeSkipped('10Y yield 4w shock', '美债收益率数据暂不可用,本次跳过该指标');
     }
     const latestDate = curve[curve.length - 1].date;
 
@@ -327,7 +334,7 @@ export async function computeDgs10AbsLevel(): Promise<IndicatorReading> {
     const { curve, source } = await fetchTreasuryCurveWithSource(40);
     const latest = latestY10(curve);
     if (latest === null || curve.length === 0) {
-        return makeSkipped('10Y absolute level', 'Treasury curve unavailable (Massive + FRED both failed)');
+        return makeSkipped('10Y absolute level', '美债收益率数据暂不可用,本次跳过该指标');
     }
     const latestDate = curve[curve.length - 1].date;
     const fourWeeksBack = y10DaysBack(curve, 28);
@@ -344,9 +351,9 @@ export async function computeDgs10AbsLevel(): Promise<IndicatorReading> {
     else status = 'Critical';
 
     const zone =
-        status === 'Healthy' ? 'Healthy zone' :
-            status === 'Neutral' ? 'Neutral zone' :
-                status === 'Warning' ? 'Warning zone' : 'Critical zone';
+        status === 'Healthy' ? '平稳区' :
+            status === 'Neutral' ? '中性区' :
+                status === 'Warning' ? '警示区' : '极高区';
 
     return {
         name: '10Y absolute level',
@@ -355,7 +362,7 @@ export async function computeDgs10AbsLevel(): Promise<IndicatorReading> {
         delta_4w: delta4w !== null ? Math.round(delta4w * 10) / 10 : null,
         notes: [
             freshnessNote(latestDate, source),
-            `absolute ${latest.toFixed(2)}% (${zone})`,
+            `当前 ${latest.toFixed(2)}% · ${zone}`,
             '4.5%+ 压制估值;5%+ 历史曾触发风险资产抛售(2023-10)'
         ],
         is_skipped: false
@@ -382,7 +389,7 @@ function hhi(holdings: SpyHolding[]): number {
 
 export function computeConcentration(spyHoldings: SpyHolding[] | null): IndicatorReading {
     if (!spyHoldings || spyHoldings.length === 0) {
-        return makeSkipped('Top-10 concentration', 'SPY holdings unavailable');
+        return makeSkipped('Top-10 concentration', 'S&P 500 持仓数据暂不可用,本次跳过该指标');
     }
     const value = topTenWeight(spyHoldings);
     const hhiValue = hhi(spyHoldings);
@@ -390,8 +397,8 @@ export function computeConcentration(spyHoldings: SpyHolding[] | null): Indicato
     // Anchors:
     // <25% = pre-2015 historical zone; 25–32% = 2020–2022 range;
     // 32–38% = warning band; >38% = extreme concentration. This indicator is
-    // soft-capped at Warning in v1.6 so it cannot mechanically create Critical
-    // by itself; it is a structural tail-risk context, not a timing trigger.
+    // capped at Warning in v1.6 so it cannot mechanically create portfolio
+    // Critical by itself; it is structural tail-risk context, not a timing trigger.
     let status: RegimeSeverity;
     if (value < 25) status = 'Healthy';
     else if (value < 32) status = 'Neutral';
@@ -406,8 +413,8 @@ export function computeConcentration(spyHoldings: SpyHolding[] | null): Indicato
             `Top-10 ~${value.toFixed(1)}%`,
             `HHI ~${hhiValue}`,
             value > 38
-                ? 'Extreme concentration (>38%) soft-capped to Warning; does not solo-trigger Critical'
-                : 'Top-heavy market structure raises mechanical tail risk'
+                ? '集中度极高(>38%),软上限锁定为警示,不单独触发极高风险'
+                : '头部集中度偏高,尾部风险上升'
         ],
         is_skipped: false
     };
@@ -477,7 +484,7 @@ export async function computeAiBreadth(
     if (valid.length < AI_BREADTH_UNIVERSE.length * 0.7) {
         return makeSkipped(
             'AI Breadth (16 mega cap)',
-            `Insufficient data: ${valid.length}/${AI_BREADTH_UNIVERSE.length} resolved`
+            `数据不足:${valid.length}/${AI_BREADTH_UNIVERSE.length}`
         );
     }
 
@@ -496,19 +503,19 @@ export async function computeAiBreadth(
     const tier1 = valid.filter((v) => v.tier === 1);
     const tier1Below = tier1.filter((v) => !v.aboveMa50);
     const notes: string[] = [];
-    notes.push(`${valid.length}/${AI_BREADTH_UNIVERSE.length} active`);
-    notes.push(`Tier 1: ${tier1Below.length}/${tier1.length} below 50DMA`);
+    notes.push(`样本覆盖:${valid.length}/${AI_BREADTH_UNIVERSE.length}`);
+    notes.push(`核心 6 只:${tier1Below.length}/${tier1.length} 跌破 50 日均线`);
     if (failed.length > 0) {
-        notes.push(`Skipped tickers: ${failed.slice(0, 4).join(',')}${failed.length > 4 ? '…' : ''}`);
+        notes.push(`数据缺失:${failed.slice(0, 4).join(',')}${failed.length > 4 ? '…' : ''}`);
     }
 
-    // Special guardrail: if ≥ 4 Tier 1 names below 50DMA, force Critical
+    // Special guardrail: if ≥ 4 core names are below the 50-day moving average, force Critical
     // (but only escalate to actionable if weighted < 30% OR 10-day persistence).
     // For snapshot purposes here we surface Critical status but leave the
     // "action eligible" gating to the aggregation layer.
     if (tier1Below.length >= 4) {
         status = 'Critical';
-        notes.push('Tier 1 guardrail: ≥ 4 Tier 1 below 50DMA → Critical');
+        notes.push('核心动量保护:核心 6 只中 ≥4 只跌破 50 日均线 → 极高');
     }
 
     return {
@@ -537,7 +544,7 @@ export function computeSox200DmaDeviation(
     const ma200 = ma(closes, 200);
     const latest = history[history.length - 1];
     if (ma200 === null || ma200 <= 0 || latest.close <= 0) {
-        return makeSkipped('SOX 200DMA Deviation', 'SOX 200DMA unavailable');
+        return makeSkipped('SOX 200DMA Deviation', 'SOX 数据暂不可用,本次跳过该指标');
     }
 
     const deviationPct = ((latest.close - ma200) / ma200) * 100;
@@ -624,7 +631,7 @@ export async function computeBroadBreadth(
     if (valid.length < NDX_COMPONENTS.length * 0.7) {
         return makeSkipped(
             'NDX-100 above 200DMA',
-            `Insufficient data: ${valid.length}/${NDX_COMPONENTS.length} resolved`
+            `数据不足:${valid.length}/${NDX_COMPONENTS.length}`
         );
     }
 
@@ -636,7 +643,7 @@ export async function computeBroadBreadth(
     else if (pct > 30) status = 'Warning';
     else status = 'Critical';
 
-    const notes: string[] = [`${valid.length}/${NDX_COMPONENTS.length} active`];
+    const notes: string[] = [`样本覆盖:${valid.length}/${NDX_COMPONENTS.length}`];
 
     // Special escalation: if 4w breadth Δ < -25pp, force escalate one step.
     // Compute by snapshotting MA200 with bars 4 weeks (≈20 trading days) ago.
@@ -664,7 +671,7 @@ export async function computeBroadBreadth(
             notes.push(`Δ4w ${delta4wPp >= 0 ? '+' : ''}${delta4wPp.toFixed(1)}pp`);
             if (delta4wPp < -25) {
                 status = escalateSeverityOnce(status);
-                notes.push('Δ4w < -25pp triggered escalation');
+                notes.push('4周变化低于 -25pp,触发宽度恶化升档');
             }
         }
     } catch {

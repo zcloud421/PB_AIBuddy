@@ -78,6 +78,12 @@ function hasSoxCriticalResonance(indicators: MacroRegimeIndicators): boolean {
     );
 }
 
+function resonanceLabel(name: string): string {
+    if (name === 'AI_BREADTH') return 'AI 龙头动量';
+    if (name === 'DGS10_4W_SHOCK') return '10Y 美债 4 周变化';
+    return name;
+}
+
 function soxCriticalDays(indicators: MacroRegimeIndicators): number {
     return indicators.SOX_200DMA_DEVIATION.persistence?.consecutive_days ?? 0;
 }
@@ -105,7 +111,7 @@ export function annotateSoxEscalationEligibility(indicators: MacroRegimeIndicato
         target_severity: 'Critical',
         confirmation_days_elapsed: Math.max(1, days),
         confirmation_days_required: 5,
-        notes: 'SOX 已达 Critical 水平,需持续 5 个交易日才参与整体 escalation'
+        notes: 'SOX 已达极高水平,需持续 5 个交易日才参与整体升档'
     };
 }
 
@@ -165,18 +171,18 @@ export function applyEscalationsDetailed(
             isWarningOrWorse(indicators.VIX) ? 'VIX' : null,
             isWarningOrWorse(indicators.DGS10_4W_SHOCK) ? 'DGS10_4W_SHOCK' : null
         ].filter((value): value is string => Boolean(value));
-        reasons.push(`SOX Critical + ${resonance.join('/')} 共振`);
+        reasons.push(`SOX 极高 + ${resonance.map(resonanceLabel).join('/')} 共振`);
     }
 
     if (aiCloud.score === 3) {
         const next = escalate(result, 1);
-        if (next !== result) reasons.push('AI Cloud Crisis escalation');
+        if (next !== result) reasons.push('AI 云算力压力升至极高');
         result = next;
     }
 
     if (credit.overall_status === 'crisis') {
         const next = escalate(result, 1);
-        if (next !== result) reasons.push('Credit/Funding Crisis escalation');
+        if (next !== result) reasons.push('信用 / 融资压力升至极高');
         result = next;
     }
 
@@ -226,7 +232,7 @@ function applySoftDerivedCriticalGuardrail(
         return {
             overall: 'Warning',
             guardrailApplied: true,
-            guardrailNote: '市场未定价 risk-off — 估值伸展风险维持 Warning,等待波动率 / 信用 / 宽度确认'
+            guardrailNote: '市场尚未反映 risk-off 信号 — 估值伸展维持高风险,等待波动率 / 信用 / 宽度共振确认'
         };
     }
 

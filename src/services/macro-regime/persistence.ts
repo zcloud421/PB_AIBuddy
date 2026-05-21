@@ -36,6 +36,13 @@ function isUpgrade(previous: RegimeSeverity, next: RegimeSeverity): boolean {
     return SEVERITY_RANK[next] > SEVERITY_RANK[previous];
 }
 
+function severityLabel(severity: RegimeSeverity): string {
+    if (severity === 'Healthy') return '平稳';
+    if (severity === 'Neutral') return '中性';
+    if (severity === 'Warning') return '警示';
+    return '极高';
+}
+
 export function countWeekdaysInclusive(startDate: string, endDate: string): number {
     const start = new Date(`${startDate}T00:00:00Z`);
     const end = new Date(`${endDate}T00:00:00Z`);
@@ -144,7 +151,7 @@ export async function confirmHyOasSeverity(
             target_severity: targetSeverity,
             confirmation_days_elapsed: elapsed,
             confirmation_days_required: requiredTradingDays,
-            notes: `${targetSeverity} 升档待确认:已持续 ${elapsed} / ${requiredTradingDays} 个交易日`
+            notes: `升至 ${severityLabel(targetSeverity)} 待确认:已持续 ${elapsed} / ${requiredTradingDays} 个交易日`
         }
     };
 }

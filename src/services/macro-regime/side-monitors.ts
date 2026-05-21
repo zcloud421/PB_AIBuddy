@@ -79,10 +79,10 @@ async function computeAiCloudTickerSignal(
         // 100 calendar days ≈ 70 trading bars (need 60 trading bars for return60d)
         bars = await massiveFetcher.fetchPriceHistory(ticker, 100);
     } catch {
-        return { ticker, signal: 0, details: [`${ticker} bars unavailable`] };
+        return { ticker, signal: 0, details: [`${ticker} 价格数据暂不可用`] };
     }
     if (bars.length < 30) {
-        return { ticker, signal: 0, details: [`${ticker} insufficient history`] };
+        return { ticker, signal: 0, details: [`${ticker} 历史数据不足`] };
     }
 
     const closes = bars.map((b) => b.close);
@@ -113,13 +113,13 @@ async function computeAiCloudTickerSignal(
         else if (spread <= -15) s2 = 1;
     }
 
-    // 3. HY OAS divergence: ticker -20%+ but HY tight
+    // 3. HY OAS divergence: ticker -20%+ while HY spreads remain tight
     let s3: 0 | 1 | 2 | 3 = 0;
     if (drawdown <= -20 && hyOasDelta4wBp !== null && hyOasDelta4wBp < 20) {
         s3 = 2;
     }
 
-    // 4. Volume spike + same-day decline
+    // 4. Volume jump + same-day decline
     let s4: 0 | 1 | 2 | 3 = 0;
     if (bars.length >= 21) {
         const ma20Vol = ma(volumes.slice(0, -1), 20);
@@ -141,9 +141,9 @@ async function computeAiCloudTickerSignal(
         `60d drawdown ${drawdown.toFixed(1)}%`,
         return60d !== null
             ? `60d return ${return60d.toFixed(1)}%${nvdaSixtyDayReturnPct !== null ? ` (NVDA ${nvdaSixtyDayReturnPct.toFixed(1)}%)` : ''}`
-            : '60d return n/a',
-        s3 > 0 ? 'HY tight + equity stress (divergence)' : 'No HY divergence',
-        s4 > 0 ? 'Volume spike + -5% day' : 'No volume spike'
+            : '60 日收益暂缺',
+        s3 > 0 ? '高收益债利差偏紧 + 股价承压(背离)' : '无信用-股票背离',
+        s4 > 0 ? '成交放量且单日下跌超 5%' : '无放量下跌异动'
     ];
 
     return { ticker, signal, details };
@@ -202,7 +202,7 @@ async function computeKbeSubSignal(
             value: null,
             score: 0,
             status: 'normal',
-            notes: ['KBE bars unavailable']
+            notes: ['KBE 价格数据暂不可用']
         };
     }
     if (bars.length < 200) {
@@ -211,7 +211,7 @@ async function computeKbeSubSignal(
             value: null,
             score: 0,
             status: 'normal',
-            notes: ['KBE insufficient history']
+            notes: ['KBE 历史数据不足']
         };
     }
     const closes = bars.map((b) => b.close);
@@ -223,7 +223,7 @@ async function computeKbeSubSignal(
             value: null,
             score: 0,
             status: 'normal',
-            notes: ['KBE MA200 unavailable']
+            notes: ['KBE 200 日均线暂不可用']
         };
     }
     const deviationPct = (close / ma200 - 1) * 100;
@@ -239,7 +239,7 @@ async function computeKbeSubSignal(
         value: Math.round(deviationPct * 10) / 10,
         score,
         status: statusFromScore(score),
-        notes: [`KBE close ${close.toFixed(2)} vs MA200 ${ma200.toFixed(2)}`]
+        notes: [`KBE 当前 ${close.toFixed(2)} vs 200 日均线 ${ma200.toFixed(2)}`]
     };
 }
 
@@ -253,7 +253,7 @@ async function computeHyAccelerationSubSignal(
             value: null,
             score: 0,
             status: 'normal',
-            notes: ['HY OAS history insufficient']
+            notes: ['HY OAS 历史数据不足']
         };
     }
     const last = hyOasSeriesBp[hyOasSeriesBp.length - 1];
@@ -294,12 +294,12 @@ export function evaluateHyOasAcceleration(
     // negative, a positive acceleration is merely "tightening deceleration",
     // not credit stress.
     if (delta4w <= 0) {
-        notes.push('当前为 tightening,acceleration 不打分');
+        notes.push('当前利差收窄,不计入扩张加速评分');
         return { score: 0, noiseFloor, notes };
     }
 
     if (!meaningfulWidening) {
-        const zone = latestBp < 300 ? 'tight zone' : '正常区';
+        const zone = latestBp < 300 ? '利差极低区' : '正常区';
         notes.push(`Δ4w +${delta4w.toFixed(0)}bp 未达噪音门槛 ${noiseFloor}bp (${zone})`);
         return { score: 0, noiseFloor, notes };
     }
@@ -325,7 +325,7 @@ async function computeFundingProxySubSignal(): Promise<SideSubSignal> {
             value: null,
             score: 0,
             status: 'normal',
-            notes: ['FRED DGS3MO or DGS2 unavailable']
+            notes: ['短端利率数据暂不可用']
         };
     }
     const latest3m = latestPoint(dgs3mo);
@@ -336,7 +336,7 @@ async function computeFundingProxySubSignal(): Promise<SideSubSignal> {
             value: null,
             score: 0,
             status: 'normal',
-            notes: ['DGS3MO/DGS2 latest unavailable']
+            notes: ['短端利率近期数据缺失']
         };
     }
     // Both percent points; convert spread to bp

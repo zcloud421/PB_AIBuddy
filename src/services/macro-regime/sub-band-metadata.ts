@@ -93,10 +93,10 @@ const SUB_BAND_CONFIGS: Record<Exclude<SubBandIndicatorId, 'SENTIMENT_MANUAL'>, 
 };
 
 function severityLabel(severity: RegimeSeverity): string {
-    if (severity === 'Healthy') return 'Healthy';
-    if (severity === 'Neutral') return 'Neutral';
-    if (severity === 'Warning') return 'Warning';
-    return 'Critical';
+    if (severity === 'Healthy') return '平稳';
+    if (severity === 'Neutral') return '中性';
+    if (severity === 'Warning') return '警示';
+    return '极高';
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -131,10 +131,10 @@ async function velocityFor(
     const prior = history[history.length - 5];
     const value = round(currentValue - prior.raw_value, unit === 'pct' ? 2 : 1);
     const suffix = unit === 'pct'
-        ? `${value >= 0 ? '+' : ''}${Math.round(value * 100)}bp / 5d`
+        ? `${value >= 0 ? '+' : ''}${Math.round(value * 100)}bp / 5 日`
         : unit === 'pp'
-            ? `${value >= 0 ? '+' : ''}${value.toFixed(1)}pp / 5d`
-        : `${value >= 0 ? '+' : ''}${value.toFixed(unit === 'pts' ? 1 : 0)}${unit} / 5d`;
+            ? `${value >= 0 ? '+' : ''}${value.toFixed(1)}pp / 5 日`
+        : `${value >= 0 ? '+' : ''}${value.toFixed(unit === 'pts' ? 1 : 0)}${unit} / 5 日`;
     return {
         value,
         unit,
