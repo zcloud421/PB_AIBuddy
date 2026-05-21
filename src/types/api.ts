@@ -615,6 +615,12 @@ export interface SymbolPriceHistoryResponse {
     display_drawdown_events?: StrikeRiskGroupedDrawdownEvent[];
 }
 
+export interface SuitabilityNote {
+    reason: string;
+    weakness: string;
+    next_step: string;
+}
+
 export interface PairAnalysisResponse {
     symbolA: string;
     symbolB: string;
@@ -632,11 +638,15 @@ export interface PairAnalysisResponse {
         symbolA_annualized: number;
         symbolB_annualized: number;
         gap: number;
+        ratio: number;
+        gap_flag: boolean;
+        gap_leg: string | null;
     };
     downside_sync: number;
     correlation_stability: 'STABLE' | 'MODERATE' | 'UNSTABLE';
     suitability: 'HIGH' | 'MEDIUM' | 'LOW';
     suitability_note: string;
+    suitability_note_structured?: SuitabilityNote;
 }
 
 export interface AsyncScoringStatusResponse {
