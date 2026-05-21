@@ -334,9 +334,9 @@ export async function computeDgs10AbsLevel(): Promise<IndicatorReading> {
     const delta4w = fourWeeksBack !== null ? (latest - fourWeeksBack) * 100 : null;
 
     // Anchors:
-    // <4.0%: long-run mean neighborhood; 4.0–4.5%: upper valuation compression band;
-    // 4.5–5.0%: P/E compression zone observed in multiple risk-asset selloffs;
-    // >5.0%: 2023-10 risk-asset break point.
+    // <4.0%: 长期均值附近; 4.0-4.5%: 估值压力累积;
+    // 4.5-5.0%: 多次风险资产抛售中观察到的估值受压区间;
+    // >5.0%: 2023-10 风险资产抛售触发点。
     let status: RegimeSeverity;
     if (latest < 4.0) status = 'Healthy';
     else if (latest < 4.5) status = 'Neutral';
@@ -356,7 +356,7 @@ export async function computeDgs10AbsLevel(): Promise<IndicatorReading> {
         notes: [
             freshnessNote(latestDate, source),
             `absolute ${latest.toFixed(2)}% (${zone})`,
-            '4.5%+ marks the P/E compression zone; >5.0% echoes the 2023-10 risk-asset break'
+            '4.5%+ 压制估值;5%+ 历史曾触发风险资产抛售(2023-10)'
         ],
         is_skipped: false
     };
