@@ -286,6 +286,7 @@ async function fetchNewsFromMassive(symbol: string, from?: string, to?: string):
 
 const HISTORICAL_NEWS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const HISTORICAL_NEWS_WINDOW_MERGE_GAP_DAYS = 45;
+const NARRATIVE_NEWS_WINDOW_DAYS = 14;
 const historicalNewsCache = new Map<string, { expiresAt: number; value: NewsItem[] }>();
 const historicalNewsInFlight = new Map<string, Promise<NewsItem[]>>();
 
@@ -301,15 +302,19 @@ export async function fetchStockNewsContext(
     try {
         const normalizedSymbol = symbol.toUpperCase();
         const earningsStatus = await getRecentEarningsStatus(normalizedSymbol);
+        const now = new Date();
+        const windowStart = new Date(now.getTime() - NARRATIVE_NEWS_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+        const fromIso = windowStart.toISOString();
+        const toIso = now.toISOString();
 
-        let rawItems = await fetchNewsFromMassive(normalizedSymbol);
+        let rawItems = await fetchNewsFromMassive(normalizedSymbol, fromIso, toIso);
         let source = 'Massive';
         if (rawItems.length === 0) {
-            rawItems = await fetchNewsFromFinnhub(normalizedSymbol);
+            rawItems = await fetchNewsFromFinnhub(normalizedSymbol, fromIso, toIso);
             source = 'Finnhub';
         }
         console.log(
-            `[news-fetcher] ${normalizedSymbol} hasRecentEarnings=${earningsStatus.hasRecentEarnings}, fetched ${rawItems.length} items from ${source}`
+            `[news-fetcher] ${normalizedSymbol} window ${fromIso.slice(0, 10)}~${toIso.slice(0, 10)}, hasRecentEarnings=${earningsStatus.hasRecentEarnings}, fetched ${rawItems.length} items from ${source}`
         );
 
         const newsIndicatesRecentEarnings = rawItems.some((item) => isEarningsHeadline(item.title));
