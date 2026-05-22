@@ -48,6 +48,7 @@ export interface NarrativeOutput {
     risk_note: string;
     sentiment_score: number;
     key_events: string[];
+    source_quality?: 'llm_validated' | 'template_fallback' | 'llm_failed_validation' | 'blocked';
 }
 
 export interface IdeaCard {

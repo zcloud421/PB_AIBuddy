@@ -1,10 +1,16 @@
 import type { Flag } from '../types/api';
+import { classifyNarrativeMode, type NarrativeMode } from './narrative-confidence';
+import { buildTemplateNarrative } from './narrative-template';
+import { validateNarrativeNumbers, type ValidationResult } from './narrative-validator';
+
+export type NarrativeSourceQuality = 'llm_validated' | 'template_fallback' | 'llm_failed_validation' | 'blocked';
 
 export interface NarrativeOutput {
     why_now: string;
     risk_note: string;
     sentiment_score: number;
     key_events: string[];
+    source_quality?: NarrativeSourceQuality;
 }
 
 interface NarrativeNewsItem {
@@ -13,7 +19,7 @@ interface NarrativeNewsItem {
     published_at?: string;
 }
 
-interface NarrativeInput {
+export interface NarrativeInput {
     symbol: string;
     company_name?: string | null;
     theme: string;
@@ -85,10 +91,41 @@ const KNOWN_CONFERENCE_WINDOWS: Partial<Record<string, ConferenceWindow>> = {
 export async function generateNarrative(input: NarrativeInput): Promise<NarrativeOutput> {
     logNarrativeInput(input);
 
-    const fallback = buildFallbackNarrative(input);
+    const { mode, reasons } = classifyNarrativeMode(input);
+    console.log(`[narrative] ${input.symbol} mode=${mode} reasons=${JSON.stringify(reasons)}`);
+
+    if (mode === 'block') {
+        const result: NarrativeOutput = {
+            why_now: '',
+            risk_note: '',
+            sentiment_score: 0.5,
+            key_events: [],
+            source_quality: 'blocked'
+        };
+        logNarrativeOutput(input.symbol, result);
+        logNarrativeComplete(input, mode, result, null);
+        return result;
+    }
+
+    if (mode === 'template_only') {
+        const template = buildTemplateNarrative(input);
+        const result: NarrativeOutput = {
+            why_now: template.why_now,
+            risk_note: template.risk_note,
+            sentiment_score: 0.5,
+            key_events: [],
+            source_quality: 'template_fallback'
+        };
+        logNarrativeOutput(input.symbol, result);
+        logNarrativeComplete(input, mode, result, null);
+        return result;
+    }
+
+    const fallback = withSourceQuality(buildFallbackNarrative(input), 'template_fallback');
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
         logNarrativeOutput(input.symbol, fallback);
+        logNarrativeComplete(input, mode, fallback, null);
         return fallback;
     }
 
@@ -154,6 +191,7 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
 
         if (!response.ok) {
             logNarrativeOutput(input.symbol, fallback);
+            logNarrativeComplete(input, mode, fallback, null);
             return fallback;
         }
 
@@ -165,6 +203,7 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
         const parsed = safeParseJson(content);
         if (!parsed) {
             logNarrativeOutput(input.symbol, fallback);
+            logNarrativeComplete(input, mode, fallback, null);
             return fallback;
         }
 
@@ -175,16 +214,40 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
             input.company_name
         );
 
-        const result = applyNarrativeOutputGuardrails({
+        const llmResult = applyNarrativeOutputGuardrails({
             why_now: typeof parsed.why_now === 'string' ? parsed.why_now : fallback.why_now,
             risk_note: typeof parsed.risk_note === 'string' ? parsed.risk_note : fallback.risk_note,
             sentiment_score: parseSentimentScore(parsed.sentiment_score, fallback.sentiment_score),
             key_events: parsedKeyEvents
         }, input);
+
+        const validation = validateNarrativeNumbers(llmResult.why_now, input);
+        if (!validation.passed) {
+            console.warn(
+                `[narrative] ${input.symbol} validation FAILED — unauthorized numbers:`,
+                validation.unauthorized
+            );
+            const template = buildTemplateNarrative(input);
+            const result: NarrativeOutput = {
+                why_now: template.why_now,
+                risk_note: llmResult.risk_note,
+                sentiment_score: llmResult.sentiment_score,
+                key_events: llmResult.key_events,
+                source_quality: 'llm_failed_validation'
+            };
+            logNarrativeOutput(input.symbol, result);
+            logNarrativeComplete(input, mode, result, validation);
+            return result;
+        }
+
+        console.log(`[narrative] ${input.symbol} validation PASSED, ${validation.authorizedCount} numbers verified`);
+        const result = withSourceQuality(llmResult, 'llm_validated');
         logNarrativeOutput(input.symbol, result);
+        logNarrativeComplete(input, mode, result, validation);
         return result;
     } catch {
         logNarrativeOutput(input.symbol, fallback);
+        logNarrativeComplete(input, mode, fallback, null);
         return fallback;
     }
 }
@@ -206,6 +269,32 @@ function logNarrativeOutput(symbol: string, result: NarrativeOutput): void {
         key_events_len: result.key_events.length,
         numbers_count: (result.why_now.match(/\d+\.?\d*\s*(?:%|\$|bp)/g) || []).length
     });
+}
+
+function logNarrativeComplete(
+    input: NarrativeInput,
+    mode: NarrativeMode,
+    result: NarrativeOutput,
+    validation: ValidationResult | null
+): void {
+    console.log(JSON.stringify({
+        tag: 'narrative_complete',
+        symbol: input.symbol,
+        mode,
+        source_quality: result.source_quality ?? null,
+        validation_passed: validation?.passed ?? null,
+        unauthorized_count: validation?.unauthorized.length ?? 0,
+        numbers_authorized: validation?.authorizedCount ?? 0,
+        has_news: input.news_headlines.length > 0,
+        ts: new Date().toISOString()
+    }));
+}
+
+function withSourceQuality(output: NarrativeOutput, sourceQuality: NarrativeSourceQuality): NarrativeOutput {
+    return {
+        ...output,
+        source_quality: sourceQuality
+    };
 }
 
 function applyNarrativeOutputGuardrails(output: NarrativeOutput, input: NarrativeInput): NarrativeOutput {
