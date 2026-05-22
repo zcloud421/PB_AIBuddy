@@ -4588,7 +4588,13 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             void updateIdeaCandidateNarrative(cachedRow.run_id, normalizedSymbol, narrative);
         }
 
-        const needsNarrativeRefresh = !cachedRow.why_now || shouldRefreshStaleConferenceEvent;
+        const cachedNewsItemsEmpty = newsItems.length === 0;
+        const cachedKeyEventsEmpty = (cachedRow.key_events ?? []).length === 0;
+        const needsNarrativeRefresh =
+            !cachedRow.why_now ||
+            shouldRefreshStaleConferenceEvent ||
+            cachedNewsItemsEmpty ||
+            (cachedKeyEventsEmpty && Boolean(cachedRow.why_now));
         if (needsNarrativeRefresh) {
             void refreshNarrativeInBackground(normalizedSymbol, cachedRow, priceContext, effectiveFlags).catch(() => {});
         }
@@ -4878,7 +4884,10 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
                 }
 
                 if (narrative) {
-                    await updateIdeaCandidateNarrative(runId, symbol, narrative);
+                    await updateIdeaCandidateNarrative(runId, symbol, {
+                        ...narrative,
+                        news_items: newsItems
+                    });
                 }
 
                 await updateIdeaRunStatus(runId, 'completed');
@@ -6133,7 +6142,10 @@ async function refreshNarrativeInBackground(
     });
 
     if (narrative) {
-        await updateIdeaCandidateNarrative(cachedRow.run_id, symbol, narrative);
+        await updateIdeaCandidateNarrative(cachedRow.run_id, symbol, {
+            ...narrative,
+            news_items: newsItems
+        });
     }
 }
 

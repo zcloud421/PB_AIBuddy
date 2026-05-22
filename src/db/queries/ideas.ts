@@ -1092,6 +1092,7 @@ export async function updateIdeaCandidateNarrative(
         risk_note: string;
         sentiment_score: number;
         key_events: string[];
+        news_items?: NewsItem[];
     }
 ): Promise<void> {
     await pool.query(
@@ -1100,11 +1101,20 @@ export async function updateIdeaCandidateNarrative(
         SET why_now = $3,
             risk_note = $4,
             sentiment_score = $5,
-            key_events = $6::jsonb
+            key_events = $6::jsonb,
+            news_items = COALESCE($7::jsonb, news_items)
         WHERE run_id = $1
           AND symbol = $2
         `,
-        [runId, symbol, narrative.why_now, narrative.risk_note, narrative.sentiment_score, JSON.stringify(narrative.key_events ?? [])]
+        [
+            runId,
+            symbol,
+            narrative.why_now,
+            narrative.risk_note,
+            narrative.sentiment_score,
+            JSON.stringify(narrative.key_events ?? []),
+            narrative.news_items ? JSON.stringify(narrative.news_items) : null
+        ]
     );
 }
 

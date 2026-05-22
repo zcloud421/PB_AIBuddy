@@ -83,10 +83,12 @@ const KNOWN_CONFERENCE_WINDOWS: Partial<Record<string, ConferenceWindow>> = {
 };
 
 export async function generateNarrative(input: NarrativeInput): Promise<NarrativeOutput> {
+    logNarrativeInput(input);
 
     const fallback = buildFallbackNarrative(input);
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
+        logNarrativeOutput(input.symbol, fallback);
         return fallback;
     }
 
@@ -151,6 +153,7 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
         });
 
         if (!response.ok) {
+            logNarrativeOutput(input.symbol, fallback);
             return fallback;
         }
 
@@ -161,6 +164,7 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
         const content = payload.choices?.[0]?.message?.content ?? '';
         const parsed = safeParseJson(content);
         if (!parsed) {
+            logNarrativeOutput(input.symbol, fallback);
             return fallback;
         }
 
@@ -171,15 +175,37 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
             input.company_name
         );
 
-        return applyNarrativeOutputGuardrails({
+        const result = applyNarrativeOutputGuardrails({
             why_now: typeof parsed.why_now === 'string' ? parsed.why_now : fallback.why_now,
             risk_note: typeof parsed.risk_note === 'string' ? parsed.risk_note : fallback.risk_note,
             sentiment_score: parseSentimentScore(parsed.sentiment_score, fallback.sentiment_score),
             key_events: parsedKeyEvents
         }, input);
+        logNarrativeOutput(input.symbol, result);
+        return result;
     } catch {
+        logNarrativeOutput(input.symbol, fallback);
         return fallback;
     }
+}
+
+function logNarrativeInput(input: NarrativeInput): void {
+    console.log(`[narrative] ${input.symbol} input:`, {
+        news_headlines: input.news_headlines.length,
+        news_items: (input.news_items ?? []).length,
+        has_price_changes:
+            (input.change_1d_pct !== null && input.change_1d_pct !== undefined) ||
+            (input.change_5d_pct !== null && input.change_5d_pct !== undefined),
+        has_earnings_meta: input.days_since_earnings !== null && input.days_since_earnings !== undefined
+    });
+}
+
+function logNarrativeOutput(symbol: string, result: NarrativeOutput): void {
+    console.log(`[narrative] ${symbol} output:`, {
+        why_now_len: result.why_now.length,
+        key_events_len: result.key_events.length,
+        numbers_count: (result.why_now.match(/\d+\.?\d*\s*(?:%|\$|bp)/g) || []).length
+    });
 }
 
 function applyNarrativeOutputGuardrails(output: NarrativeOutput, input: NarrativeInput): NarrativeOutput {

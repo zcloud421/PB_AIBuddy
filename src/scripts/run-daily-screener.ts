@@ -156,6 +156,7 @@ export async function runDailyScreener(): Promise<void> {
                     flags: result.flags,
                     tenor_days: result.recommended_tenor_days ?? 90,
                     news_headlines: newsContext.narrativeItems.map((item) => item.title),
+                    news_items: newsContext.narrativeItems,
                     has_recent_earnings: newsContext.hasRecentEarnings,
                     earnings_weight: newsContext.earningsWeight,
                     days_to_earnings: null,
