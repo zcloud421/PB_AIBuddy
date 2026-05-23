@@ -4,7 +4,7 @@ import { buildTemplateNarrative } from './narrative-template';
 import { validateEventAnchors, type EventValidationResult } from './narrative-event-validator';
 import { validateNarrativeNumbers, type ValidationResult } from './narrative-validator';
 
-export type NarrativeSourceQuality = 'llm_validated' | 'template_fallback' | 'llm_failed_validation' | 'blocked';
+export type NarrativeSourceQuality = 'llm_validated' | 'llm_retry_validated' | 'template_fallback' | 'llm_failed_validation' | 'blocked';
 
 export interface NarrativeOutput {
     why_now: string;
@@ -169,86 +169,152 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
         );
         const userPrompt = buildUserPrompt(input, newsSection, recentEarningsContext, isEarningsWait);
 
-        const response = await fetch(`${baseUrl}/chat/completions`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${apiKey}`
-            },
-            body: JSON.stringify({
-                model: 'deepseek-chat',
-                messages: [
-                    {
-                        role: 'system',
-                        content: systemPrompt
-                    },
-                    {
-                        role: 'user',
-                        content: userPrompt
-                    }
-                ]
-            })
-        });
+        const runLlmAttempt = async (retryHint?: string): Promise<NarrativeOutput | null> => {
+            const finalSystemPrompt = retryHint
+                ? `${systemPrompt}\n\n--- 系统反馈 ---\n${retryHint}`
+                : systemPrompt;
+            const response = await fetch(`${baseUrl}/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({
+                    model: 'deepseek-chat',
+                    messages: [
+                        {
+                            role: 'system',
+                            content: finalSystemPrompt
+                        },
+                        {
+                            role: 'user',
+                            content: userPrompt
+                        }
+                    ]
+                })
+            });
 
-        if (!response.ok) {
-            logNarrativeOutput(input.symbol, fallback);
-            logNarrativeComplete(input, mode, fallback, null);
-            return fallback;
-        }
+            if (!response.ok) {
+                return null;
+            }
 
-        const payload = await response.json() as {
-            choices?: Array<{ message?: { content?: string } }>;
+            const payload = await response.json() as {
+                choices?: Array<{ message?: { content?: string } }>;
+            };
+
+            const content = payload.choices?.[0]?.message?.content ?? '';
+            const parsed = safeParseJson(content);
+            if (!parsed) {
+                return null;
+            }
+
+            const parsedKeyEvents = sanitizeKeyEvents(
+                parseKeyEvents(parsed.key_events),
+                input.news_items,
+                input.symbol,
+                input.company_name
+            );
+
+            return applyNarrativeOutputGuardrails({
+                why_now: typeof parsed.why_now === 'string' ? parsed.why_now : fallback.why_now,
+                risk_note: typeof parsed.risk_note === 'string' ? parsed.risk_note : fallback.risk_note,
+                sentiment_score: parseSentimentScore(parsed.sentiment_score, fallback.sentiment_score),
+                key_events: parsedKeyEvents
+            }, input);
         };
 
-        const content = payload.choices?.[0]?.message?.content ?? '';
-        const parsed = safeParseJson(content);
-        if (!parsed) {
+        let llmResult = await runLlmAttempt();
+        if (!llmResult) {
             logNarrativeOutput(input.symbol, fallback);
             logNarrativeComplete(input, mode, fallback, null);
             return fallback;
         }
 
-        const parsedKeyEvents = sanitizeKeyEvents(
-            parseKeyEvents(parsed.key_events),
-            input.news_items,
-            input.symbol,
-            input.company_name
-        );
+        let validation = validateNarrativeNumbers(llmResult.why_now, input);
+        let eventValidation = validateEventAnchors(llmResult.why_now, input.news_items ?? []);
+        const firstFailed = !validation.passed || !eventValidation.passed;
+        let retried = false;
 
-        const llmResult = applyNarrativeOutputGuardrails({
-            why_now: typeof parsed.why_now === 'string' ? parsed.why_now : fallback.why_now,
-            risk_note: typeof parsed.risk_note === 'string' ? parsed.risk_note : fallback.risk_note,
-            sentiment_score: parseSentimentScore(parsed.sentiment_score, fallback.sentiment_score),
-            key_events: parsedKeyEvents
-        }, input);
-
-        const validation = validateNarrativeNumbers(llmResult.why_now, input);
-        const eventValidation = validateEventAnchors(llmResult.why_now, input.news_items ?? []);
-        if (!validation.passed || !eventValidation.passed) {
-            console.warn(JSON.stringify({
-                tag: 'narrative_validation_failed',
+        if (firstFailed) {
+            console.log(JSON.stringify({
+                tag: 'narrative_retry_attempt',
                 symbol: input.symbol,
-                number_unauthorized: validation.unauthorized,
-                event_unanchored: eventValidation.unanchored,
+                first_number_unauthorized: validation.unauthorized,
+                first_event_unanchored: eventValidation.unanchored,
                 ts: new Date().toISOString()
             }));
-            const template = buildTemplateNarrative(input);
-            const result: NarrativeOutput = {
-                why_now: template.why_now,
-                risk_note: llmResult.risk_note,
-                sentiment_score: llmResult.sentiment_score,
-                key_events: llmResult.key_events,
-                source_quality: 'llm_failed_validation'
-            };
-            logNarrativeOutput(input.symbol, result);
-            logNarrativeComplete(input, mode, result, validation, eventValidation);
-            return result;
+
+            const retryHint = buildNarrativeRetryHint(validation, eventValidation);
+            const llmRetry = await runLlmAttempt(retryHint);
+            retried = true;
+
+            if (llmRetry) {
+                const retryNumberValidation = validateNarrativeNumbers(llmRetry.why_now, input);
+                const retryEventValidation = validateEventAnchors(llmRetry.why_now, input.news_items ?? []);
+                if (retryNumberValidation.passed && retryEventValidation.passed) {
+                    console.log(JSON.stringify({
+                        tag: 'narrative_retry_success',
+                        symbol: input.symbol,
+                        ts: new Date().toISOString()
+                    }));
+                    llmResult = llmRetry;
+                    validation = retryNumberValidation;
+                    eventValidation = retryEventValidation;
+                } else {
+                    console.log(JSON.stringify({
+                        tag: 'narrative_retry_failed',
+                        symbol: input.symbol,
+                        retry_number_unauthorized: retryNumberValidation.unauthorized,
+                        retry_event_unanchored: retryEventValidation.unanchored,
+                        ts: new Date().toISOString()
+                    }));
+                    const template = buildTemplateNarrative(input);
+                    const result: NarrativeOutput = {
+                        why_now: template.why_now,
+                        risk_note: llmRetry.risk_note,
+                        sentiment_score: llmRetry.sentiment_score,
+                        key_events: llmRetry.key_events,
+                        source_quality: 'llm_failed_validation'
+                    };
+                    logNarrativeOutput(input.symbol, result);
+                    logNarrativeComplete(input, mode, result, retryNumberValidation, retryEventValidation, {
+                        retried,
+                        retrySucceeded: false
+                    });
+                    return result;
+                }
+            } else {
+                console.log(JSON.stringify({
+                    tag: 'narrative_retry_failed',
+                    symbol: input.symbol,
+                    retry_number_unauthorized: validation.unauthorized,
+                    retry_event_unanchored: eventValidation.unanchored,
+                    ts: new Date().toISOString()
+                }));
+                const template = buildTemplateNarrative(input);
+                const result: NarrativeOutput = {
+                    why_now: template.why_now,
+                    risk_note: llmResult.risk_note,
+                    sentiment_score: llmResult.sentiment_score,
+                    key_events: llmResult.key_events,
+                    source_quality: 'llm_failed_validation'
+                };
+                logNarrativeOutput(input.symbol, result);
+                logNarrativeComplete(input, mode, result, validation, eventValidation, {
+                    retried,
+                    retrySucceeded: false
+                });
+                return result;
+            }
         }
 
         console.log(`[narrative] ${input.symbol} validation PASSED, ${validation.authorizedCount} numbers verified`);
-        const result = withSourceQuality(llmResult, 'llm_validated');
+        const result = withSourceQuality(llmResult, firstFailed ? 'llm_retry_validated' : 'llm_validated');
         logNarrativeOutput(input.symbol, result);
-        logNarrativeComplete(input, mode, result, validation, eventValidation);
+        logNarrativeComplete(input, mode, result, validation, eventValidation, {
+            retried,
+            retrySucceeded: retried
+        });
         return result;
     } catch {
         logNarrativeOutput(input.symbol, fallback);
@@ -281,7 +347,8 @@ function logNarrativeComplete(
     mode: NarrativeMode,
     result: NarrativeOutput,
     validation: ValidationResult | null,
-    eventValidation: EventValidationResult | null = null
+    eventValidation: EventValidationResult | null = null,
+    retryMeta: { retried?: boolean; retrySucceeded?: boolean } = {}
 ): void {
     console.log(JSON.stringify({
         tag: 'narrative_complete',
@@ -294,8 +361,39 @@ function logNarrativeComplete(
         event_unanchored_count: eventValidation?.unanchored.length ?? 0,
         numbers_authorized: validation?.authorizedCount ?? 0,
         has_news: input.news_headlines.length > 0,
+        retried: retryMeta.retried ?? false,
+        retry_succeeded: retryMeta.retrySucceeded ?? false,
         ts: new Date().toISOString()
     }));
+}
+
+export function buildNarrativeRetryHint(
+    numberValidation: ValidationResult,
+    eventValidation: EventValidationResult
+): string {
+    const lines: string[] = ['你上一次输出被系统拒绝。请重写 why_now,严格遵守以下要求:'];
+
+    if (numberValidation.unauthorized.length > 0) {
+        const examples = numberValidation.unauthorized
+            .map((item) => `"${item.raw}"`)
+            .join(', ');
+        lines.push(
+            `1. 数字 ${examples} 无法在结构化输入字段中找到来源。严禁使用任何无法从 input 派生的具体数字。如果某个数字你不确定,改用模糊表述(如"显著高于"/"较强")或干脆不提。`
+        );
+    }
+
+    if (eventValidation.unanchored.length > 0) {
+        const examples = eventValidation.unanchored
+            .map((item) => `"${item.snippet}" (${item.kind})`)
+            .join(', ');
+        lines.push(
+            `2. 以下事件断言无法在 news_items 标题中找到锚点:${examples}。请删除这些断言或改用 news_items 中实际出现的事件。`
+        );
+    }
+
+    lines.push('3. 宁可写短而真,不要补编造内容凑数。如果可证 claim 不足,允许只输出结构化数字部分。');
+
+    return lines.join('\n');
 }
 
 function withSourceQuality(output: NarrativeOutput, sourceQuality: NarrativeSourceQuality): NarrativeOutput {
