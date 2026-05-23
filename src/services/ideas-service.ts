@@ -4565,7 +4565,8 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
                       why_now: cachedRow.why_now,
                       risk_note: cachedRow.risk_note ?? '',
                       sentiment_score: toNullableNumber(cachedRow.sentiment_score) ?? 0.5,
-                      key_events: cachedRow.key_events ?? []
+                      key_events: cachedRow.key_events ?? [],
+                      source_quality: cachedRow.source_quality ?? undefined
                   }, newsItems, normalizedSymbol, cachedRow.company_name ?? getCompanyName(normalizedSymbol))
                 : null;
         narrative = normalizeEarningsWaitNarrative({
@@ -4769,7 +4770,8 @@ export async function getSymbolNarrative(symbol: string): Promise<SymbolNarrativ
             why_now: cachedRow.why_now,
             risk_note: cachedRow.risk_note ?? '',
             sentiment_score: toNullableNumber(cachedRow.sentiment_score) ?? 0.5,
-            key_events: cachedRow.key_events ?? []
+            key_events: cachedRow.key_events ?? [],
+            source_quality: cachedRow.source_quality ?? undefined
         }, newsItems, normalizedSymbol, cachedRow.company_name ?? getCompanyName(normalizedSymbol))
     };
 }
@@ -4874,6 +4876,7 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
                     whyNow: narrative?.why_now ?? null,
                     riskNote: narrative?.risk_note ?? null,
                     sentimentScore: narrative?.sentiment_score ?? null,
+                    sourceQuality: narrative?.source_quality ?? null,
                     keyEvents: narrative?.key_events ?? [],
                     newsItems,
                     reasoningText: scoring.reasoning_text

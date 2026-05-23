@@ -1,5 +1,5 @@
 import { pool } from '../client';
-import type { DailyBestCard, DailyMarketNarrative, DrawdownAttribution, Flag, NewsItem, SymbolIdeaResponse, TodayIdeasResponse } from '../../types/api';
+import type { DailyBestCard, DailyMarketNarrative, DrawdownAttribution, Flag, NarrativeOutput, NewsItem, SymbolIdeaResponse, TodayIdeasResponse } from '../../types/api';
 import type { DailyPriceBar } from '../../data/massive-fetcher';
 
 export interface LatestCompletedRun {
@@ -155,6 +155,7 @@ export interface TodayIdeaRow {
     why_now: string | null;
     risk_note: string | null;
     sentiment_score: number | null;
+    source_quality: NarrativeOutput['source_quality'] | null;
     key_events: string[] | null;
     news_items: NewsItem[] | null;
     reasoning_text: string;
@@ -192,6 +193,7 @@ export interface CachedIdeaRow {
     why_now: string | null;
     risk_note: string | null;
     sentiment_score: number | null;
+    source_quality: NarrativeOutput['source_quality'] | null;
     key_events: string[] | null;
     news_items: NewsItem[] | null;
     reasoning_text: string;
@@ -229,6 +231,7 @@ export interface SaveIdeaCandidateInput {
     whyNow?: string | null;
     riskNote?: string | null;
     sentimentScore?: number | null;
+    sourceQuality?: NarrativeOutput['source_quality'] | null;
     keyEvents?: string[] | null;
     newsItems?: NewsItem[] | null;
     reasoningText: string;
@@ -477,6 +480,7 @@ export async function getIdeasByRunId(runId: string): Promise<TodayIdeaRow[]> {
             ic.why_now,
             ic.risk_note,
             ic.sentiment_score,
+            ic.source_quality,
             ic.key_events,
             ic.news_items,
             ic.reasoning_text,
@@ -577,6 +581,7 @@ export async function getIdeaBySymbolAndDate(symbol: string, date: string): Prom
             ic.why_now,
             ic.risk_note,
             ic.sentiment_score,
+            ic.source_quality,
             ic.key_events,
             ic.news_items,
             ic.reasoning_text,
@@ -643,6 +648,8 @@ export async function getIdeaBySymbolAndRunId(symbol: string, runId: string): Pr
             ic.why_now,
             ic.risk_note,
             ic.sentiment_score,
+            ic.source_quality,
+            ic.key_events,
             ic.news_items,
             ic.reasoning_text,
             ic.current_price,
@@ -906,11 +913,12 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             why_now,
             risk_note,
             sentiment_score,
+            source_quality,
             key_events,
             news_items,
             reasoning_text
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::date, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24::jsonb, $25::jsonb, $26
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::date, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25::jsonb, $26::jsonb, $27
         )
         ON CONFLICT (run_id, symbol) DO UPDATE
         SET overall_grade = EXCLUDED.overall_grade,
@@ -934,6 +942,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             why_now = EXCLUDED.why_now,
             risk_note = EXCLUDED.risk_note,
             sentiment_score = EXCLUDED.sentiment_score,
+            source_quality = EXCLUDED.source_quality,
             key_events = EXCLUDED.key_events,
             news_items = EXCLUDED.news_items,
             reasoning_text = EXCLUDED.reasoning_text
@@ -962,6 +971,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             result.whyNow ?? null,
             result.riskNote ?? null,
             result.sentimentScore ?? null,
+            result.sourceQuality ?? null,
             JSON.stringify(result.keyEvents ?? []),
             JSON.stringify(result.newsItems ?? []),
             result.reasoningText
@@ -1019,7 +1029,15 @@ export async function ensureIdeaCandidatePriceColumns(): Promise<void> {
         ADD COLUMN IF NOT EXISTS pct_from_52w_high NUMERIC(10, 4),
         ADD COLUMN IF NOT EXISTS expiry_date DATE,
         ADD COLUMN IF NOT EXISTS key_events JSONB DEFAULT '[]'::jsonb,
-        ADD COLUMN IF NOT EXISTS news_items JSONB DEFAULT '[]'::jsonb
+        ADD COLUMN IF NOT EXISTS news_items JSONB DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS source_quality TEXT NULL
+    `);
+}
+
+export async function ensureSourceQualityColumn(): Promise<void> {
+    await pool.query(`
+        ALTER TABLE idea_candidates
+        ADD COLUMN IF NOT EXISTS source_quality TEXT NULL
     `);
 }
 
@@ -1091,6 +1109,7 @@ export async function updateIdeaCandidateNarrative(
         why_now: string;
         risk_note: string;
         sentiment_score: number;
+        source_quality?: NarrativeOutput['source_quality'];
         key_events: string[];
         news_items?: NewsItem[];
     }
@@ -1102,7 +1121,8 @@ export async function updateIdeaCandidateNarrative(
             risk_note = $4,
             sentiment_score = $5,
             key_events = $6::jsonb,
-            news_items = COALESCE($7::jsonb, news_items)
+            news_items = COALESCE($7::jsonb, news_items),
+            source_quality = COALESCE($8, source_quality)
         WHERE run_id = $1
           AND symbol = $2
         `,
@@ -1113,7 +1133,8 @@ export async function updateIdeaCandidateNarrative(
             narrative.risk_note,
             narrative.sentiment_score,
             JSON.stringify(narrative.key_events ?? []),
-            narrative.news_items ? JSON.stringify(narrative.news_items) : null
+            narrative.news_items ? JSON.stringify(narrative.news_items) : null,
+            narrative.source_quality ?? null
         ]
     );
 }
@@ -1796,7 +1817,8 @@ export function mapTodayIdeasResponse(
                           why_now: idea.why_now,
                           risk_note: idea.risk_note ?? '',
                           sentiment_score: parseNumeric(idea.sentiment_score) ?? 0.5,
-                          key_events: idea.key_events ?? []
+                          key_events: idea.key_events ?? [],
+                          source_quality: idea.source_quality ?? undefined
                       }
                     : null,
                 news_items: idea.news_items ?? [],
@@ -1838,7 +1860,8 @@ export function mapTodayIdeasResponse(
                           why_now: idea.why_now,
                           risk_note: idea.risk_note ?? '',
                           sentiment_score: parseNumeric(idea.sentiment_score) ?? 0.5,
-                          key_events: idea.key_events ?? []
+                          key_events: idea.key_events ?? [],
+                          source_quality: idea.source_quality ?? undefined
                       }
                     : null,
                 news_items: idea.news_items ?? [],

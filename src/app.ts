@@ -15,6 +15,7 @@ import {
     ensureIdeaCandidatePriceColumns,
     ensureRecommendationTrackerTable,
     ensureRiskFlagEnumValues,
+    ensureSourceQualityColumn,
     ensureUnderlyingCompanyNameColumn
 } from './db/queries/ideas';
 import { ideasRouter } from './routes/ideas';
@@ -134,6 +135,26 @@ export function createApp() {
         res.status(202).json({ status: 'attribution health check triggered (async)' });
     }));
 
+    app.post('/narrative-health/check', asyncHandler(async (req, res) => {
+        const rawSetupToken = process.env.SETUP_TOKEN?.trim() ?? null;
+        const rawProvided = req.header('x-setup-token')?.trim() ?? null;
+        if (!rawSetupToken || rawProvided !== rawSetupToken) {
+            res.status(403).json({ error: 'forbidden' });
+            return;
+        }
+
+        const { runNarrativeHealthCheck } = await import('./scripts/check-narrative-health');
+        runNarrativeHealthCheck()
+            .then((result) => {
+                console.log('[narrative-health-cron] completed', result);
+            })
+            .catch((error) => {
+                console.error('[narrative-health-cron] failed:', error);
+            });
+
+        res.status(202).json({ status: 'narrative health check triggered (async)' });
+    }));
+
     app.use('/ideas', ideasRouter);
     app.use('/device', deviceRouter);
     app.use('/tracker', trackerRouter);
@@ -152,6 +173,7 @@ async function ensureSchemaGuards(): Promise<void> {
     await ensureRiskFlagEnumValues();
     await ensureRecommendationTrackerTable();
     await ensureUnderlyingCompanyNameColumn();
+    await ensureSourceQualityColumn();
     await ensureDeviceTables();
     await ensureMacroRegimeSnapshotsTable();
     await ensureLateCyclePillarHistoryTable();

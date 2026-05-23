@@ -147,6 +147,7 @@ CREATE TABLE idea_candidates (
     why_now TEXT,
     risk_note TEXT,
     sentiment_score NUMERIC(10, 4),
+    source_quality TEXT,
     reasoning_text TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT idea_candidates_run_symbol_uniq UNIQUE (run_id, symbol)
@@ -421,5 +422,8 @@ CREATE TABLE IF NOT EXISTS theme_basket_results (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (slug, run_date)
 );
+
+ALTER TABLE idea_candidates
+    ADD COLUMN IF NOT EXISTS source_quality TEXT NULL;
 
 COMMIT;
