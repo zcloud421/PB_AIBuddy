@@ -76,6 +76,15 @@ export interface NarrativeInput {
     } | null;
 }
 
+interface NarrativeValidationBundle {
+    numberValidation: ValidationResult;
+    eventValidation: EventValidationResult;
+    failureLocation: {
+        whyNowFailed: boolean;
+        riskNoteFailed: boolean;
+    };
+}
+
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
 
 interface ConferenceWindow {
@@ -230,8 +239,9 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
             return fallback;
         }
 
-        let validation = validateNarrativeNumbers(llmResult.why_now, input);
-        let eventValidation = validateEventAnchors(llmResult.why_now, input.news_items ?? []);
+        let outputValidation = validateNarrativeOutputGrounding(llmResult, input);
+        let validation = outputValidation.numberValidation;
+        let eventValidation = outputValidation.eventValidation;
         const firstFailed = !validation.passed || !eventValidation.passed;
         let retried = false;
 
@@ -244,13 +254,14 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
                 ts: new Date().toISOString()
             }));
 
-            const retryHint = buildNarrativeRetryHint(validation, eventValidation);
+            const retryHint = buildNarrativeRetryHint(validation, eventValidation, llmResult.why_now, llmResult.risk_note);
             const llmRetry = await runLlmAttempt(retryHint);
             retried = true;
 
             if (llmRetry) {
-                const retryNumberValidation = validateNarrativeNumbers(llmRetry.why_now, input);
-                const retryEventValidation = validateEventAnchors(llmRetry.why_now, input.news_items ?? []);
+                const retryOutputValidation = validateNarrativeOutputGrounding(llmRetry, input);
+                const retryNumberValidation = retryOutputValidation.numberValidation;
+                const retryEventValidation = retryOutputValidation.eventValidation;
                 if (retryNumberValidation.passed && retryEventValidation.passed) {
                     console.log(JSON.stringify({
                         tag: 'narrative_retry_success',
@@ -260,6 +271,7 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
                     llmResult = llmRetry;
                     validation = retryNumberValidation;
                     eventValidation = retryEventValidation;
+                    outputValidation = retryOutputValidation;
                 } else {
                     console.log(JSON.stringify({
                         tag: 'narrative_retry_failed',
@@ -271,7 +283,7 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
                     const template = buildTemplateNarrative(input);
                     const result: NarrativeOutput = {
                         why_now: template.why_now,
-                        risk_note: llmRetry.risk_note,
+                        risk_note: template.risk_note,
                         sentiment_score: llmRetry.sentiment_score,
                         key_events: llmRetry.key_events,
                         source_quality: 'llm_failed_validation'
@@ -279,7 +291,8 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
                     logNarrativeOutput(input.symbol, result);
                     logNarrativeComplete(input, mode, result, retryNumberValidation, retryEventValidation, {
                         retried,
-                        retrySucceeded: false
+                        retrySucceeded: false,
+                        ...retryOutputValidation.failureLocation
                     });
                     return result;
                 }
@@ -294,7 +307,7 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
                 const template = buildTemplateNarrative(input);
                 const result: NarrativeOutput = {
                     why_now: template.why_now,
-                    risk_note: llmResult.risk_note,
+                    risk_note: template.risk_note,
                     sentiment_score: llmResult.sentiment_score,
                     key_events: llmResult.key_events,
                     source_quality: 'llm_failed_validation'
@@ -302,7 +315,8 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
                 logNarrativeOutput(input.symbol, result);
                 logNarrativeComplete(input, mode, result, validation, eventValidation, {
                     retried,
-                    retrySucceeded: false
+                    retrySucceeded: false,
+                    ...outputValidation.failureLocation
                 });
                 return result;
             }
@@ -313,7 +327,8 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
         logNarrativeOutput(input.symbol, result);
         logNarrativeComplete(input, mode, result, validation, eventValidation, {
             retried,
-            retrySucceeded: retried
+            retrySucceeded: retried,
+            ...outputValidation.failureLocation
         });
         return result;
     } catch {
@@ -348,7 +363,7 @@ function logNarrativeComplete(
     result: NarrativeOutput,
     validation: ValidationResult | null,
     eventValidation: EventValidationResult | null = null,
-    retryMeta: { retried?: boolean; retrySucceeded?: boolean } = {}
+    retryMeta: { retried?: boolean; retrySucceeded?: boolean; whyNowFailed?: boolean; riskNoteFailed?: boolean } = {}
 ): void {
     console.log(JSON.stringify({
         tag: 'narrative_complete',
@@ -360,38 +375,124 @@ function logNarrativeComplete(
         event_validation_passed: eventValidation?.passed ?? null,
         event_unanchored_count: eventValidation?.unanchored.length ?? 0,
         numbers_authorized: validation?.authorizedCount ?? 0,
-        has_news: input.news_headlines.length > 0,
+        has_news: (input.news_items ?? []).length > 0,
         retried: retryMeta.retried ?? false,
         retry_succeeded: retryMeta.retrySucceeded ?? false,
+        why_now_failed: retryMeta.whyNowFailed ?? false,
+        risk_note_failed: retryMeta.riskNoteFailed ?? false,
         ts: new Date().toISOString()
     }));
 }
 
+function validateNarrativeOutputGrounding(
+    output: NarrativeOutput,
+    input: NarrativeInput
+): NarrativeValidationBundle {
+    const combinedText = `${output.why_now}\n${output.risk_note}`;
+    const numberValidation = validateNarrativeNumbers(combinedText, input);
+    const eventValidation = validateEventAnchors(combinedText, input.news_items ?? []);
+    return {
+        numberValidation,
+        eventValidation,
+        failureLocation: getValidationFailureLocation(numberValidation, eventValidation, output.why_now, output.risk_note)
+    };
+}
+
+function getValidationFailureLocation(
+    numberValidation: ValidationResult,
+    eventValidation: EventValidationResult,
+    whyNow: string,
+    riskNote: string
+): { whyNowFailed: boolean; riskNoteFailed: boolean } {
+    const unauthorizedInWhyNow = numberValidation.unauthorized.some((item) => whyNow.includes(item.raw));
+    const unauthorizedInRiskNote = numberValidation.unauthorized.some((item) => riskNote.includes(item.raw));
+    const unanchoredInWhyNow = eventValidation.unanchored.some((item) => whyNow.includes(item.snippet));
+    const unanchoredInRiskNote = eventValidation.unanchored.some((item) => riskNote.includes(item.snippet));
+
+    return {
+        whyNowFailed: unauthorizedInWhyNow || unanchoredInWhyNow,
+        riskNoteFailed: unauthorizedInRiskNote || unanchoredInRiskNote
+    };
+}
+
 export function buildNarrativeRetryHint(
     numberValidation: ValidationResult,
-    eventValidation: EventValidationResult
+    eventValidation: EventValidationResult,
+    whyNow = '',
+    riskNote = ''
 ): string {
-    const lines: string[] = ['你上一次输出被系统拒绝。请重写 why_now,严格遵守以下要求:'];
+    const lines: string[] = ['你上一次输出被系统拒绝。请重写,严格遵守以下要求:'];
+    let index = 1;
 
     if (numberValidation.unauthorized.length > 0) {
-        const examples = numberValidation.unauthorized
-            .map((item) => `"${item.raw}"`)
-            .join(', ');
-        lines.push(
-            `1. 数字 ${examples} 无法在结构化输入字段中找到来源。严禁使用任何无法从 input 派生的具体数字。如果某个数字你不确定,改用模糊表述(如"显著高于"/"较强")或干脆不提。`
+        const unauthorizedInWhyNow = numberValidation.unauthorized.filter((item) => whyNow.includes(item.raw));
+        const unauthorizedInRiskNote = numberValidation.unauthorized.filter((item) => riskNote.includes(item.raw));
+        const unlocated = numberValidation.unauthorized.filter(
+            (item) => !whyNow.includes(item.raw) && !riskNote.includes(item.raw)
         );
+
+        if (unauthorizedInWhyNow.length > 0) {
+            const examples = unauthorizedInWhyNow
+                .map((item) => `"${item.raw}"`)
+                .join(', ');
+            lines.push(`${index}. why_now 中的数字 ${examples} 无法在输入中找到来源。`);
+            index += 1;
+        }
+
+        if (unauthorizedInRiskNote.length > 0) {
+            const examples = unauthorizedInRiskNote
+                .map((item) => `"${item.raw}"`)
+                .join(', ');
+            lines.push(`${index}. risk_note 中的数字 ${examples} 无法在输入中找到来源。`);
+            index += 1;
+        }
+
+        if (unlocated.length > 0) {
+            const examples = unlocated
+                .map((item) => `"${item.raw}"`)
+                .join(', ');
+            lines.push(`${index}. 数字 ${examples} 无法在结构化输入字段中找到来源。`);
+            index += 1;
+        }
+
+        lines.push('严禁使用任何无法从 input 派生的具体数字。如果某个数字你不确定,改用模糊表述(如"显著高于"/"较强")或干脆不提。');
     }
 
     if (eventValidation.unanchored.length > 0) {
-        const examples = eventValidation.unanchored
-            .map((item) => `"${item.snippet}" (${item.kind})`)
-            .join(', ');
-        lines.push(
-            `2. 以下事件断言无法在 news_items 标题中找到锚点:${examples}。请删除这些断言或改用 news_items 中实际出现的事件。`
+        const unanchoredInWhyNow = eventValidation.unanchored.filter((item) => whyNow.includes(item.snippet));
+        const unanchoredInRiskNote = eventValidation.unanchored.filter((item) => riskNote.includes(item.snippet));
+        const unlocated = eventValidation.unanchored.filter(
+            (item) => !whyNow.includes(item.snippet) && !riskNote.includes(item.snippet)
         );
+
+        if (unanchoredInWhyNow.length > 0) {
+            const examples = unanchoredInWhyNow
+                .map((item) => `"${item.snippet}" (${item.kind})`)
+                .join(', ');
+            lines.push(`${index}. why_now 中的事件断言 ${examples} 在 news_items 标题中找不到锚点。`);
+            index += 1;
+        }
+
+        if (unanchoredInRiskNote.length > 0) {
+            const examples = unanchoredInRiskNote
+                .map((item) => `"${item.snippet}" (${item.kind})`)
+                .join(', ');
+            lines.push(
+                `${index}. risk_note 中的政策/事件断言 ${examples} 在 news_items 标题中找不到锚点。严禁基于训练数据印象描述近期政策动向,如果 news_items 没有该事件,改用通用的结构性风险描述(敲入风险 / IV / 行业波动)。`
+            );
+            index += 1;
+        }
+
+        if (unlocated.length > 0) {
+            const examples = unlocated
+                .map((item) => `"${item.snippet}" (${item.kind})`)
+                .join(', ');
+            lines.push(`${index}. 以下事件断言无法在 news_items 标题中找到锚点:${examples}。请删除这些断言或改用 news_items 中实际出现的事件。`);
+            index += 1;
+        }
     }
 
-    lines.push('3. 宁可写短而真,不要补编造内容凑数。如果可证 claim 不足,允许只输出结构化数字部分。');
+    lines.push(`${index}. 宁可写短而真,不要补编造内容凑数。`);
 
     return lines.join('\n');
 }
@@ -632,6 +733,13 @@ ${recentEarningsContext}
        - 格式：[风险简称] 仍在持续，[说明对盈利预期或接股风险的具体影响]
        - 禁止直接复制 reason_zh 原文，必须改写为面向客户的简洁风险提示（1句）
        - 如果 active_attribution_rules 为空，跳过此规则，不要生成空泛风险提示
+   5.16 risk_note 政策/监管 / 出口管制 / 制裁 / 关税 / 禁令 等敏感事件 grounding（critical）：
+       - 凡涉及"禁令""制裁""限制""出口管制""关税""调查""审查""加征""放开""解除"等政策/监管词，必须能在 news_items 标题中找到同义锚点
+       - 严禁基于模型训练数据描述近期政策动向，因为训练 cutoff 滞后，政策可能已被新消息反转
+       - 如果 news_items 没有相关政策事件，严禁在 risk_note 提及政策/监管风险
+       - 政策类风险无锚点时，改用通用结构性风险描述，例如"高隐含波动率环境下敲入风险上升"、"短期趋势仍需确认"、"行业 cyclical 波动需关注"
+       - 错误示例（禁止）:"先进芯片禁令升级仍持续,影响对华订单预期"（若 news_items 没有相关 headline）
+       - 正确示例:"行业 cyclical 调整可能影响短期波动,敲入风险需关注"（无具体事件可锚定时）
    5.2 高IV或波动率风险
    5.3 行业或宏观风险
 6. 如果最近一次财报发布时间距今超过14天，不得使用“近期财报”“刚公布”“最新财报显示”等表述

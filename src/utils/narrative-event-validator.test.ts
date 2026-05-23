@@ -22,4 +22,20 @@ assert.equal(result3.passed, true, '营收 with earnings anchor should pass');
 const result4 = validateEventAnchors('近期纳入 Nasdaq-100', []);
 assert.equal(result4.passed, false, 'empty news should fail any claim');
 
+const policyNoAnchor = validateEventAnchors(
+    '先进芯片禁令升级仍持续,影响对华订单预期',
+    [{ title: 'Earnings beat expectations', published_at: '2026-05-22T00:00:00.000Z' }]
+);
+assert.equal(policyNoAnchor.passed, false, 'policy claim without anchor should fail');
+assert.equal(policyNoAnchor.unanchored.some((item) => item.snippet === '禁令'), true);
+
+const policyWithAnchor = validateEventAnchors(
+    '先进芯片禁令升级仍持续',
+    [{ title: 'US Tightens Chip Export Ban to China', published_at: '2026-05-20T00:00:00.000Z' }]
+);
+assert.equal(policyWithAnchor.passed, true, 'policy claim with ban/tighten anchor should pass');
+
+const genericRisk = validateEventAnchors('高隐含波动率环境下敲入风险上升', []);
+assert.equal(genericRisk.passed, true, 'generic structural risk should not need an event anchor');
+
 console.log('narrative-event-validator tests passed');

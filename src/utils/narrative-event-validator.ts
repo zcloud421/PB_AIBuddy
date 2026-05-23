@@ -23,7 +23,13 @@ const CORPORATE_ACTION_KEYWORDS = [
     '获批', '批准', '通过', '裁决', '诉讼', '反垄断',
     '下调', '上调', '维持', '上修', '下修',
     '发布', '推出', '签约', '合作', '战略合作', '续约',
-    '罢工', '召回', '停产', '关闭'
+    '罢工', '召回', '停产', '关闭',
+    '禁令', '制裁', '限制', '出口管制', '关税',
+    '起诉', '反诉',
+    '升级', '降级', '加码', '收紧', '放开', '解除', '解禁',
+    '调查', '审查', '处罚', '罚款',
+    '加密', '退市',
+    '订单', '取消订单', '中断', '断供', '缺货', '降价'
 ];
 
 const EARNINGS_TERMS = [
@@ -138,8 +144,35 @@ function corporateActionToEnglish(zh: string): string[] {
         '合作': ['partner', 'partnership', 'collaboration'],
         '战略合作': ['partner', 'partnership', 'collaboration'],
         '诉讼': ['lawsuit', 'sue', 'litigation'],
+        '起诉': ['lawsuit', 'sue', 'sues', 'sued', 'litigation'],
+        '反诉': ['countersue', 'countersuit', 'counterclaim'],
         '召回': ['recall'],
-        '罢工': ['strike']
+        '罢工': ['strike'],
+        '禁令': ['ban', 'bans', 'export control', 'restriction', 'restrictions'],
+        '制裁': ['sanction', 'sanctions'],
+        '限制': ['restriction', 'restrictions', 'restrict', 'limits', 'curbs'],
+        '出口管制': ['export control', 'export controls'],
+        '关税': ['tariff', 'tariffs', 'duties'],
+        '反垄断': ['antitrust'],
+        '升级': ['escalate', 'escalates', 'escalation', 'tighten', 'tightens', 'tightened', 'expand', 'expands'],
+        '降级': ['downgrade', 'downgrades', 'lower'],
+        '加码': ['escalate', 'tighten', 'expand'],
+        '收紧': ['tighten', 'tightens', 'tightened'],
+        '放开': ['lift', 'lifts', 'lifted', 'ease', 'eases', 'eased', 'approve', 'approves', 'approved'],
+        '解除': ['remove', 'removes', 'removed', 'lift', 'lifts', 'lifted'],
+        '解禁': ['lift', 'lifts', 'lifted', 'remove', 'removes', 'removed'],
+        '调查': ['investigation', 'probe', 'investigate', 'review'],
+        '审查': ['review', 'probe', 'investigation', 'scrutiny'],
+        '处罚': ['penalty', 'penalties', 'fine', 'fines'],
+        '罚款': ['fine', 'fines', 'penalty'],
+        '加密': ['crypto', 'cryptocurrency'],
+        '退市': ['delist', 'delisting'],
+        '订单': ['order', 'orders', 'booking', 'bookings'],
+        '取消订单': ['cancel order', 'canceled order', 'cancelled order', 'cancellation'],
+        '中断': ['disrupt', 'disruption', 'halt', 'suspend'],
+        '断供': ['supply halt', 'supply disruption', 'cut off'],
+        '缺货': ['shortage', 'shortages', 'out of stock'],
+        '降价': ['price cut', 'price cuts', 'discount', 'discounts']
     };
     return map[zh] ?? [];
 }

@@ -59,8 +59,13 @@ export function buildTemplateNarrative(input: NarrativeInput): {
 
     return {
         why_now: whyNow,
-        risk_note: '若标的跌破执行价,客户须按执行价买入股票;高隐含波动率环境下敲入风险上升。'
+        risk_note: buildTemplateRiskNote(input)
     };
+}
+
+function buildTemplateRiskNote(input: NarrativeInput): string {
+    const ivContext = input.iv_level === '高' ? '当前 IV 处高位,' : '';
+    return `${ivContext}若标的跌破执行价,客户须按执行价买入股票;高隐含波动率环境下敲入风险上升;具体行业 / 政策风险请参考机构 house view。`;
 }
 
 function truncate(value: string, maxLength: number): string {
