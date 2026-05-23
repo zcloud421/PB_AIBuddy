@@ -1,6 +1,7 @@
 import type { Flag } from '../types/api';
 import { classifyNarrativeMode, type NarrativeMode } from './narrative-confidence';
 import { buildTemplateNarrative } from './narrative-template';
+import { validateEventAnchors, type EventValidationResult } from './narrative-event-validator';
 import { validateNarrativeNumbers, type ValidationResult } from './narrative-validator';
 
 export type NarrativeSourceQuality = 'llm_validated' | 'template_fallback' | 'llm_failed_validation' | 'blocked';
@@ -222,11 +223,15 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
         }, input);
 
         const validation = validateNarrativeNumbers(llmResult.why_now, input);
-        if (!validation.passed) {
-            console.warn(
-                `[narrative] ${input.symbol} validation FAILED — unauthorized numbers:`,
-                validation.unauthorized
-            );
+        const eventValidation = validateEventAnchors(llmResult.why_now, input.news_items ?? []);
+        if (!validation.passed || !eventValidation.passed) {
+            console.warn(JSON.stringify({
+                tag: 'narrative_validation_failed',
+                symbol: input.symbol,
+                number_unauthorized: validation.unauthorized,
+                event_unanchored: eventValidation.unanchored,
+                ts: new Date().toISOString()
+            }));
             const template = buildTemplateNarrative(input);
             const result: NarrativeOutput = {
                 why_now: template.why_now,
@@ -236,14 +241,14 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
                 source_quality: 'llm_failed_validation'
             };
             logNarrativeOutput(input.symbol, result);
-            logNarrativeComplete(input, mode, result, validation);
+            logNarrativeComplete(input, mode, result, validation, eventValidation);
             return result;
         }
 
         console.log(`[narrative] ${input.symbol} validation PASSED, ${validation.authorizedCount} numbers verified`);
         const result = withSourceQuality(llmResult, 'llm_validated');
         logNarrativeOutput(input.symbol, result);
-        logNarrativeComplete(input, mode, result, validation);
+        logNarrativeComplete(input, mode, result, validation, eventValidation);
         return result;
     } catch {
         logNarrativeOutput(input.symbol, fallback);
@@ -275,7 +280,8 @@ function logNarrativeComplete(
     input: NarrativeInput,
     mode: NarrativeMode,
     result: NarrativeOutput,
-    validation: ValidationResult | null
+    validation: ValidationResult | null,
+    eventValidation: EventValidationResult | null = null
 ): void {
     console.log(JSON.stringify({
         tag: 'narrative_complete',
@@ -284,6 +290,8 @@ function logNarrativeComplete(
         source_quality: result.source_quality ?? null,
         validation_passed: validation?.passed ?? null,
         unauthorized_count: validation?.unauthorized.length ?? 0,
+        event_validation_passed: eventValidation?.passed ?? null,
+        event_unanchored_count: eventValidation?.unanchored.length ?? 0,
         numbers_authorized: validation?.authorizedCount ?? 0,
         has_news: input.news_headlines.length > 0,
         ts: new Date().toISOString()
@@ -590,6 +598,17 @@ ${isEarningsWait
    15.4 严禁使用竞争对手、同行、供应链或客户公司的新闻标题替代当前标的新闻
    15.5 严禁输出中文、严禁添加日期前缀、严禁添加来源、严禁输出半句
    15.6 key_events 的每个元素必须与输入新闻中的某一条英文原标题完全一致
+16. Claim Budget(critical):
+why_now 整段中最多包含:
+- 2 个结构化数字(必须来自 input 字段或派生:price / strike / moneyness / pct_from_52w_high / coupon range / IV / change pct)
+- 1 个具体新闻事件(必须能在 news_items.title 中找到锚点)
+- 1 个风险或结构判断(主观判断,不算 claim)
+合计不超过 4 个"可证伪 claim"。
+错误示例(claim 超额):
+"营收同比增 56%,股价单日涨近 24%,纳入 Nasdaq-100,毛利率达 35%,新产品 Y 系列出货量 +120%"
+正确示例:
+"作为 AI 算力光器件供应商,近期纳入 Nasdaq-100(2026-05-18 生效)。当前价 $964,执行价 $680(71% 进场价),高 IV 环境年化票息 25%-34%。"
+如果可证 claim 不足,宁可写短,不要补编造 claim 凑数。短而真 > 长而虚。
 
 请严格按JSON格式输出，不要有其他内容：
 {

@@ -8149,6 +8149,7 @@ type RefinedReasonRejectReason =
 interface RefinedReasonCheckResult {
     accepted: boolean;
     reject_reason?: RefinedReasonRejectReason;
+    details?: Record<string, unknown>;
 }
 
 function rejectRefinedReason(
@@ -8159,7 +8160,7 @@ function rejectRefinedReason(
         reject_reason: rejectReason,
         ...details
     }));
-    return { accepted: false, reject_reason: rejectReason };
+    return { accepted: false, reject_reason: rejectReason, details };
 }
 
 function checkRefinedReasonAcceptable(
@@ -8259,6 +8260,26 @@ interface RefineDrawdownLlmItem {
     news_titles: string[];
     news_count: number;
     market_structure: DrawdownMarketStructureFeatures | null;
+    retry_context?: {
+        reject_reason: Extract<RefinedReasonRejectReason, 'forbidden_marker' | 'low_confidence'>;
+        detected_markers?: string[];
+        previous_confidence?: number | null;
+    };
+}
+
+function buildAttributionRetryInstruction(item: RefineDrawdownLlmItem): string {
+    if (!item.retry_context) {
+        return 'NONE';
+    }
+
+    if (item.retry_context.reject_reason === 'forbidden_marker') {
+        const markers = item.retry_context.detected_markers?.filter(Boolean) ?? [];
+        return markers.length > 0
+            ? `你上一次输出被系统拒绝,原因:forbidden_marker。你使用了禁用短语:${markers.join(' / ')}。请重写,严禁出现这些表达。`
+            : '你上一次输出被系统拒绝,原因:forbidden_marker。请重写,严禁出现禁用短语。';
+    }
+
+    return '你上一次输出被系统拒绝,原因:low_confidence。你的 confidence < 0.55,说明证据不足。请重新评估:如果证据确实不足以支持具体归因,请把 reason_zh 置空(返回空字符串),不要强行编造。';
 }
 
 /**
@@ -8392,6 +8413,7 @@ async function refineDrawdownAttributionsWithLLMChunk(input: {
 ${input.items.map((item, index) => {
     const newsBlock = item.news_titles.length > 0 ? item.news_titles.map((title) => `- ${title}`).join('\n') : '- 无明确新闻标题';
     const market = item.market_structure;
+    const retryInstruction = buildAttributionRetryInstruction(item);
     return `${index + 1}. peak=${item.peak_date}, trough=${item.trough_date}, drawdown=${item.max_drawdown_pct.toFixed(1)}%, velocity=${market?.drawdown_velocity ?? 'N/A'}, duration=${market?.duration_days ?? 'N/A'}d
    market_structure:
      - real_rate_change: ${market?.real_rate_change_bps ?? 'N/A'} bps
@@ -8401,6 +8423,7 @@ ${input.items.map((item, index) => {
      - peer_sync: ${item.market_structure?.peer_sync_ratio !== null && item.market_structure?.peer_sync_ratio !== undefined ? `${Math.round((item.market_structure.peer_sync_ratio ?? 0) * 100)}%` : 'N/A'}, peer_avg_dd=${market?.peer_avg_drawdown_pct ?? 'N/A'}%
      - vix_change: ${market?.vix_change ?? 'N/A'}
    rule_hint: ${item.heuristic_reason ?? 'NONE'} (rule_id: ${item.rule_hint_id ?? 'NONE'})
+   retry_instruction: ${retryInstruction}
    news_titles (${item.news_count}):
 ${newsBlock}`;
 }).join('\n\n')}
@@ -8645,31 +8668,33 @@ async function buildEnrichedDrawdownAttributions(
         )
     );
 
+    const llmInputItems: RefineDrawdownLlmItem[] = newsByEpisode.map((item, index) => ({
+        peak_date: item.episode.peak_date,
+        trough_date: item.episode.trough_date,
+        max_drawdown_pct: item.episode.max_drawdown_pct,
+        background_regime: item.heuristicReason.background_regime,
+        primary_driver_type: item.heuristicReason.primary_driver_type,
+        primary_driver: item.heuristicReason.primary_driver,
+        secondary_driver: item.heuristicReason.secondary_driver,
+        heuristic_reason: item.heuristicReason.reason_zh,
+        rule_hint_id: isRuleHintId(item.heuristicReason.primary_rule_id)
+            ? item.heuristicReason.primary_rule_id
+            : null,
+        allowed_markers: collectRuleMarkers([
+            item.heuristicReason.primary_rule_id,
+            item.heuristicReason.background_rule_id
+        ]),
+        news_titles: item.newsItems.map((news) => news.title),
+        news_count: item.newsItems.length,
+        market_structure: marketStructureByEpisode[index]
+    }));
+
     const llmCallStart = Date.now();
     const llmReasons = await withSoftTimeout(
         refineDrawdownAttributionsWithLLM({
             symbol,
             companyName,
-            items: newsByEpisode.map((item, index) => ({
-                peak_date: item.episode.peak_date,
-                trough_date: item.episode.trough_date,
-                max_drawdown_pct: item.episode.max_drawdown_pct,
-                background_regime: item.heuristicReason.background_regime,
-                primary_driver_type: item.heuristicReason.primary_driver_type,
-                primary_driver: item.heuristicReason.primary_driver,
-                secondary_driver: item.heuristicReason.secondary_driver,
-                heuristic_reason: item.heuristicReason.reason_zh,
-                rule_hint_id: isRuleHintId(item.heuristicReason.primary_rule_id)
-                    ? item.heuristicReason.primary_rule_id
-                    : null,
-                allowed_markers: collectRuleMarkers([
-                    item.heuristicReason.primary_rule_id,
-                    item.heuristicReason.background_rule_id
-                ]),
-                news_titles: item.newsItems.map((news) => news.title),
-                news_count: item.newsItems.length,
-                market_structure: marketStructureByEpisode[index]
-            }))
+            items: llmInputItems
         }),
         new Map<string, LlmAttributionResult>(),
         DRAWDOWN_LLM_ENRICH_TIMEOUT_MS
@@ -8677,6 +8702,81 @@ async function buildEnrichedDrawdownAttributions(
     const llmCallDuration = Date.now() - llmCallStart;
     if (llmReasons.size === 0) {
         console.warn(`[drawdown-llm] outer_empty_map: duration_ms=${llmCallDuration} timeout_ms=${DRAWDOWN_LLM_ENRICH_TIMEOUT_MS} (likely soft-timeout fired before LLM completed)`);
+    }
+
+    const retryItems: RefineDrawdownLlmItem[] = [];
+    const retryMetadata = new Map<string, RefinedReasonCheckResult>();
+    for (const [index, item] of newsByEpisode.entries()) {
+        const key = `${item.episode.peak_date}::${item.episode.trough_date}`;
+        const llmResult = llmReasons.get(key);
+        if (!llmResult) {
+            continue;
+        }
+
+        const checkResult = checkRefinedReasonAcceptable(llmResult, item.heuristicReason, item.newsItems.map((news) => news.title));
+        if (checkResult.reject_reason !== 'forbidden_marker' && checkResult.reject_reason !== 'low_confidence') {
+            continue;
+        }
+
+        const matchedMarker = typeof checkResult.details?.matched_marker === 'string'
+            ? checkResult.details.matched_marker
+            : null;
+        retryMetadata.set(key, checkResult);
+        retryItems.push({
+            ...llmInputItems[index],
+            retry_context: {
+                reject_reason: checkResult.reject_reason,
+                detected_markers: matchedMarker ? [matchedMarker] : undefined,
+                previous_confidence: Number.isFinite(llmResult.confidence) ? llmResult.confidence : null
+            }
+        });
+    }
+
+    if (retryItems.length > 0) {
+        const retryResults = await withSoftTimeout(
+            refineDrawdownAttributionsWithLLM({
+                symbol,
+                companyName,
+                items: retryItems
+            }),
+            new Map<string, LlmAttributionResult>(),
+            DRAWDOWN_LLM_ENRICH_TIMEOUT_MS
+        );
+
+        for (const retryItem of retryItems) {
+            const key = `${retryItem.peak_date}::${retryItem.trough_date}`;
+            const retryResult = retryResults.get(key);
+            const episodeIndex = newsByEpisode.findIndex((item) => `${item.episode.peak_date}::${item.episode.trough_date}` === key);
+            const firstReject = retryMetadata.get(key);
+            if (episodeIndex === -1 || !firstReject) {
+                continue;
+            }
+
+            const item = newsByEpisode[episodeIndex];
+            const secondCheck = retryResult
+                ? checkRefinedReasonAcceptable(retryResult, item.heuristicReason, item.newsItems.map((news) => news.title))
+                : { accepted: false, reject_reason: 'no_llm_output' as const };
+
+            if (retryResult && secondCheck.accepted) {
+                llmReasons.set(key, retryResult);
+                console.log(JSON.stringify({
+                    tag: 'attribution_retry_success',
+                    symbol: symbol.toUpperCase(),
+                    peak_date: retryItem.peak_date,
+                    first_reject_reason: firstReject.reject_reason,
+                    ts: new Date().toISOString()
+                }));
+            } else {
+                console.log(JSON.stringify({
+                    tag: 'attribution_retry_failed',
+                    symbol: symbol.toUpperCase(),
+                    peak_date: retryItem.peak_date,
+                    first_reject: firstReject.reject_reason,
+                    second_reject: secondCheck.reject_reason ?? 'unknown',
+                    ts: new Date().toISOString()
+                }));
+            }
+        }
     }
 
     for (const [index, item] of newsByEpisode.entries()) {
