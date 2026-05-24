@@ -137,6 +137,7 @@ export async function runDailyScreener(): Promise<void> {
                     symbol,
                     theme: underlying?.themes?.[0] ?? 'Featured',
                     grade: result.overall_grade,
+                    composite_score: result.composite_score,
                     recommended_strike: result.recommended_strike ?? 0,
                     estimated_coupon_range: result.estimated_coupon_range ?? '',
                     current_price: result.current_price,

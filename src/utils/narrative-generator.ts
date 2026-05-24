@@ -3,8 +3,18 @@ import { classifyNarrativeMode, type NarrativeMode } from './narrative-confidenc
 import { buildTemplateNarrative } from './narrative-template';
 import { validateEventAnchors, type EventValidationResult } from './narrative-event-validator';
 import { validateNarrativeNumbers, type ValidationResult } from './narrative-validator';
+import { generateGoPitch } from './fcn-go-pitch';
 
-export type NarrativeSourceQuality = 'llm_validated' | 'llm_retry_validated' | 'template_fallback' | 'llm_failed_validation' | 'blocked';
+export type NarrativeSourceQuality =
+    | 'llm_validated'
+    | 'llm_retry_validated'
+    | 'template_fallback'
+    | 'llm_failed_validation'
+    | 'blocked'
+    | 'deterministic'
+    | 'go_pitch_llm_validated'
+    | 'go_pitch_template'
+    | 'go_pitch_minimal';
 
 export interface NarrativeOutput {
     why_now: string;
@@ -25,6 +35,7 @@ export interface NarrativeInput {
     company_name?: string | null;
     theme: string;
     grade: string;
+    composite_score?: number;
     recommended_strike: number;
     estimated_coupon_range: string;
     current_price: number | null;
@@ -129,6 +140,22 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
         logNarrativeOutput(input.symbol, result);
         logNarrativeComplete(input, mode, result, null);
         return result;
+    }
+
+    const goPitchEarningsWait =
+        input.grade === 'AVOID' &&
+        input.days_to_earnings !== null &&
+        input.days_to_earnings !== undefined &&
+        input.days_to_earnings >= 0 &&
+        input.days_to_earnings <= 3;
+
+    if (input.grade === 'GO' && !goPitchEarningsWait) {
+        const goPitch = await generateGoPitch(input);
+        if (goPitch) {
+            logNarrativeOutput(input.symbol, goPitch);
+            logNarrativeComplete(input, mode, goPitch, null);
+            return goPitch;
+        }
     }
 
     const fallback = withSourceQuality(buildFallbackNarrative(input), 'template_fallback');

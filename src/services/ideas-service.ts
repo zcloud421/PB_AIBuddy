@@ -4843,6 +4843,7 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
             flags: effectiveFlags,
             tenorDays: scoring.recommended_tenor_days,
             newsItems: newsContext.narrativeItems,
+            compositeScore: scoring.composite_score,
             daysToEarnings: symbolData.days_to_earnings ?? null,
             hasRecentEarnings: newsContext.hasRecentEarnings,
             earningsWeight: newsContext.earningsWeight,
@@ -6136,6 +6137,7 @@ async function refreshNarrativeInBackground(
         flags: cachedFlags,
         tenorDays: cachedRow.recommended_tenor_days,
         newsItems,
+        compositeScore: toNullableNumber(cachedRow.composite_score),
         daysToEarnings: priceContext?.days_to_earnings ?? cachedRow.days_to_earnings,
         hasRecentEarnings: newsContext.hasRecentEarnings,
         earningsWeight: newsContext.earningsWeight,
@@ -6171,6 +6173,7 @@ async function buildNarrative(input: {
     flags: Flag[];
     tenorDays: number | null;
     newsItems: NewsItem[];
+    compositeScore?: number | null;
     daysToEarnings: number | null;
     hasRecentEarnings: boolean;
     earningsWeight: number;
@@ -6210,6 +6213,7 @@ async function buildNarrative(input: {
         company_name: input.companyName,
         theme: input.theme,
         grade: input.grade,
+        composite_score: input.compositeScore ?? undefined,
         recommended_strike: input.recommendedStrike,
         estimated_coupon_range: input.estimatedCouponRange,
         current_price: input.currentPrice,

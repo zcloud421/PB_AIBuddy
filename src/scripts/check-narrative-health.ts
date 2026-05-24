@@ -11,7 +11,11 @@ type NarrativeSourceQuality =
     | 'llm_retry_validated'
     | 'llm_failed_validation'
     | 'template_fallback'
-    | 'blocked';
+    | 'blocked'
+    | 'deterministic'
+    | 'go_pitch_llm_validated'
+    | 'go_pitch_template'
+    | 'go_pitch_minimal';
 
 interface NarrativeMetrics {
     total_narratives: number;
@@ -84,6 +88,10 @@ async function computeNarrativeMetrics(): Promise<NarrativeMetrics> {
         llm_failed_validation: 0,
         template_fallback: 0,
         blocked: 0,
+        deterministic: 0,
+        go_pitch_llm_validated: 0,
+        go_pitch_template: 0,
+        go_pitch_minimal: 0,
         unknown: 0
     };
 

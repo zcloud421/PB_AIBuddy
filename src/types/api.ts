@@ -48,7 +48,16 @@ export interface NarrativeOutput {
     risk_note: string;
     sentiment_score: number;
     key_events: string[];
-    source_quality?: 'llm_validated' | 'llm_retry_validated' | 'template_fallback' | 'llm_failed_validation' | 'blocked';
+    source_quality?:
+        | 'llm_validated'
+        | 'llm_retry_validated'
+        | 'template_fallback'
+        | 'llm_failed_validation'
+        | 'blocked'
+        | 'deterministic'
+        | 'go_pitch_llm_validated'
+        | 'go_pitch_template'
+        | 'go_pitch_minimal';
 }
 
 export interface IdeaCard {
