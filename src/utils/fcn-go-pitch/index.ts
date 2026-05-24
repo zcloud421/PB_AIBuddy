@@ -6,6 +6,17 @@ import { detectLitTags, hasMinimumTagsForPitch } from './tag-detector';
 import { buildDeterministicPitch, buildMinimalPitch } from './template';
 import { validatePitch } from './validator';
 
+const CLICKBAIT_PATTERNS = [
+    /^Why .+\??$/i,
+    /should (investors|you) /i,
+    /(best|better) .+ to buy/i,
+    /^.+\s+vs\.?\s+.+\?$/i,
+    /^prediction:/i,
+    /secret weapon/i,
+    /skyrocket/i,
+    /everyone is talking/i
+];
+
 export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeOutput | null> {
     if (input.current_price === null || input.current_price <= 0 || input.recommended_strike <= 0) {
         return null;
@@ -18,7 +29,10 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
     const discount = Math.round(100 - (input.recommended_strike / input.current_price) * 100);
     const desc = await getCompanyDescription(input.symbol);
     const companyDesc = desc?.short_description ?? input.company_name ?? input.symbol;
-    const recentNewsTitles = (input.news_items ?? []).slice(0, 3).map((item) => item.title);
+    const recentNewsTitles = (input.news_items ?? [])
+        .map((item) => item.title)
+        .filter((title) => !isClickbait(title))
+        .slice(0, 3);
 
     const litTags = detectLitTags({
         symbol: input.symbol,
@@ -73,6 +87,20 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
                         ts: new Date().toISOString()
                     })
                 );
+                console.log(
+                    JSON.stringify({
+                        tag: 'go_pitch_validation_debug',
+                        symbol: input.symbol,
+                        reasons: validation.reasons,
+                        llm_text_length: llmOutput.paragraph.length,
+                        llm_text_preview: llmOutput.paragraph.slice(0, 80),
+                        used_holding_tags: llmOutput.used_holding_tags,
+                        used_timing_tags: llmOutput.used_timing_tags,
+                        lit_holding: litTags.holding,
+                        lit_timing: litTags.timing,
+                        ts: new Date().toISOString()
+                    })
+                );
             }
         } catch (error) {
             console.warn('[go_pitch] llm error', error);
@@ -80,6 +108,10 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
     }
 
     return wrapResult(buildDeterministicPitch(pitchInputs), 'go_pitch_template');
+}
+
+function isClickbait(title: string): boolean {
+    return CLICKBAIT_PATTERNS.some((pattern) => pattern.test(title));
 }
 
 function wrapResult(whyNow: string, sourceQuality: NarrativeSourceQuality): NarrativeOutput {

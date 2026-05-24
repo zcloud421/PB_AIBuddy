@@ -7,16 +7,16 @@ export function buildDeterministicPitch(p: PitchInputs): string {
     if (tagSupp.length > 0) combined.push(tagSupp[0]);
     combined.push(...whyNowParts.slice(0, 2));
 
-    const whyNowText = combined.length > 0 ? `${combined.join('、')}。` : '';
+    const whyNowText = combined.length > 0 ? `${combined.join('，')}。` : '';
 
-    return `${p.company_short_desc},${whyNowText}这只 FCN 让您以 $${p.recommended_strike}、较现价低 ${p.discount_pct}% 的水平承接${p.symbol},年化票息 ${p.coupon_low}%-${p.coupon_high}%、期限 ${p.tenor_label};若股价未跌破 $${p.recommended_strike},您收取票息并赎回本金;若跌破,则以 $${p.recommended_strike} 持有该标的。`;
+    return `${p.company_short_desc}，${whyNowText}这只 FCN 让您以 $${p.recommended_strike}，较现价低 ${p.discount_pct}% 的水平承接 ${p.symbol}，年化票息 ${p.coupon_low}%-${p.coupon_high}%，期限 ${p.tenor_label}；若股价未跌破 $${p.recommended_strike}，您收取票息并赎回本金；若跌破，则以 $${p.recommended_strike} 持有该标的。`;
 }
 
 export function buildMinimalPitch(p: PitchInputs): string {
     const signals = buildSpecificSignals(p).slice(0, 2);
-    const signalText = signals.length > 0 ? `${signals.join('、')}。` : '';
+    const signalText = signals.length > 0 ? `${signals.join('，')}。` : '';
 
-    return `${p.company_short_desc}。${signalText}这只 FCN 让您以 $${p.recommended_strike}、较现价低 ${p.discount_pct}% 的水平承接${p.symbol},年化票息 ${p.coupon_low}%-${p.coupon_high}%、期限 ${p.tenor_label};若股价未跌破 $${p.recommended_strike},您收取票息并赎回本金;若跌破,则以 $${p.recommended_strike} 持有该标的。`;
+    return `${p.company_short_desc}。${signalText}这只 FCN 让您以 $${p.recommended_strike}，较现价低 ${p.discount_pct}% 的水平承接 ${p.symbol}，年化票息 ${p.coupon_low}%-${p.coupon_high}%，期限 ${p.tenor_label}；若股价未跌破 $${p.recommended_strike}，您收取票息并赎回本金；若跌破，则以 $${p.recommended_strike} 持有该标的。`;
 }
 
 function buildSpecificSignals(p: PitchInputs): string[] {
@@ -42,7 +42,7 @@ function buildSpecificSignals(p: PitchInputs): string[] {
 
     const headline = p.recent_news_titles?.[0];
     if (headline && headline.length > 10) {
-        signals.push(`近期消息:${truncateHeadline(headline, 50)}`);
+        signals.push(`近期消息：${truncateHeadline(headline, 50)}`);
     }
 
     return signals;
