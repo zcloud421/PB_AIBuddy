@@ -4591,12 +4591,30 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
 
         const cachedNewsItemsEmpty = newsItems.length === 0;
         const cachedKeyEventsEmpty = (cachedRow.key_events ?? []).length === 0;
-        const needsNarrativeRefresh =
+        const isLegacyGoSourceQuality =
+            cachedRow.overall_grade === 'GO' &&
+            (cachedRow.source_quality === null ||
+                cachedRow.source_quality === undefined ||
+                !cachedRow.source_quality.startsWith('go_pitch_'));
+        const hasOtherNarrativeRefreshReason =
             !cachedRow.why_now ||
             shouldRefreshStaleConferenceEvent ||
             cachedNewsItemsEmpty ||
             (cachedKeyEventsEmpty && Boolean(cachedRow.why_now));
+        const needsNarrativeRefresh =
+            hasOtherNarrativeRefreshReason ||
+            isLegacyGoSourceQuality;
         if (needsNarrativeRefresh) {
+            if (isLegacyGoSourceQuality && !hasOtherNarrativeRefreshReason) {
+                console.log(
+                    JSON.stringify({
+                        tag: 'go_pitch_force_refresh',
+                        symbol: cachedRow.symbol,
+                        legacy_source_quality: cachedRow.source_quality,
+                        ts: new Date().toISOString()
+                    })
+                );
+            }
             void refreshNarrativeInBackground(normalizedSymbol, cachedRow, priceContext, effectiveFlags).catch(() => {});
         }
 
