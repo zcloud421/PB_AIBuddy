@@ -13,6 +13,7 @@ export type NarrativeSourceQuality =
     | 'blocked'
     | 'deterministic'
     | 'go_pitch_llm_validated'
+    | 'go_pitch_hybrid_validated'
     | 'go_pitch_template'
     | 'go_pitch_minimal';
 

@@ -26,56 +26,84 @@ export interface PitchInputs {
     days_since_earnings?: number | null;
 }
 
+export interface PitchNumericClaim {
+    value: number;
+    unit: string;
+    context?: string;
+}
+
 export interface PitchLLMOutput {
-    paragraph: string;
-    used_holding_tags: string[];
-    used_timing_tags: string[];
+    why_sentence: string;
+    used_tags: string[];
+    timing_signal: string;
     referenced_news_index?: number;
-    numeric_claims: string[];
+    numeric_claims: PitchNumericClaim[];
 }
 
 export function buildPitchPrompt(p: PitchInputs): string {
     const allTags = [...p.lit_tags.holding, ...p.lit_tags.timing];
     const litList = allTags.map((tag) => `- ${tag}: ${TAG_DESCRIPTIONS[tag]}`).join('\n');
+    const holdingList = p.lit_tags.holding.join(', ') || '(无)';
+    const timingList = p.lit_tags.timing.join(', ') || '(无)';
     const newsList = p.recent_news_titles && p.recent_news_titles.length > 0
-        ? p.recent_news_titles.map((title) => `- ${title}`).join('\n')
+        ? p.recent_news_titles.map((title, index) => `${index}. ${title}`).join('\n')
         : '(本期无新闻)';
 
-    return `你是私行 FCN 产品 RM 写作助手。请用中文 prose 写一段 100-180 字的 pitch text,RM 会直接 copy 给 HNW 客户。
+    return `你是私行 FCN 产品 RM 写作助手。你只负责写 why-sentence,不要写 FCN 条款。
 
 公司:${p.company_short_desc}
 
-已点亮的可用理由(只能从这里选,不许引入其他理由):
+已点亮 tags(只能从这里选,不许引入其他理由):
 ${litList}
+
+holding tags: ${holdingList}
+timing tags: ${timingList}
 
 近期新闻标题(可引用其中事件作为 why-now,但不许编造未列出的事件):
 ${newsList}
 
-数字事实(严禁修改任何数字,严禁编造新数字):
+可用数字事实(严禁修改任何数字,严禁编造新数字):
 - 当前价 $${p.current_price.toFixed(2)}
-- 执行价 $${p.recommended_strike}(较现价低 ${p.discount_pct}%)
+- 执行价 $${p.recommended_strike}
+- 较现价低 ${p.discount_pct}%
 - 年化票息 ${p.coupon_low}%-${p.coupon_high}%
 - 期限 ${p.tenor_label}
+${typeof p.change_5d_pct === 'number' ? `- 近 5 日 ${p.change_5d_pct.toFixed(1)}%` : ''}
+${typeof p.pct_from_52w_high === 'number' ? `- 距 52 周高点 ${Math.abs(p.pct_from_52w_high).toFixed(1)}%` : ''}
 
 写作要求:
-1. 一段连贯 prose,不分行不分段,不用 bullet
-2. 100-180 字
-3. 第二人称"您",中性语气
-4. 必须包含 1 个具体 why-now 信号,来源只能是新闻标题事件或已点亮 timing tag 派生的具体数字;严禁写"近期"/"刚刚"/"最近"等不带具体内容的空泛 timing 词
-5. 数字嵌入句子里(如"以 $95、较现价低 15% 的水平承接...")
-6. 严禁:"正是好时机" / "不过是" / "您本就看好" / "敲入" / "接货" / "安全垫" / "摊薄" 等用语
-7. 严禁在 pitch 中提风险(非保本 / 信用风险 / 流动性 等,由 product term sheet 单独承担)
-8. 必须用"若股价未跌破 $X,您收取票息并赎回本金;若跌破,则以 $X 持有..."条件句式收尾
-9. 严禁引入未在"已点亮理由"或"近期新闻标题"中的任何理由 / 任何具体新闻事件
-10. 严禁编造任何数字
+1. why_sentence 只写 35-90 字中文,解释为什么现在 sell put 这只股票
+2. why_sentence 必须包含 holding reason + timing reason,但不要写 strike / coupon / tenor / 若跌破 等 FCN 条款
+3. used_tags 必须只包含已点亮 tags,且至少 1 个 holding tag
+4. timing_signal 必填,不能只是"近期"/"最近"/"当前"/"市场关注"/"情绪改善"
+5. 数字必须来自可用数字事实;禁止补充背景知识里的数字
+6. 严禁:"正是好时机" / "不过是" / "您本就看好" / "敲入" / "接货" / "安全垫" / "摊薄" / 风险描述
+
+正例:
+{
+  "why_sentence": "订单可见度较高,同时股价距 52 周高点回调 12.8%,当前承接水平更有纪律。",
+  "used_tags": ["backlog", "quality_pullback"],
+  "timing_signal": "股价距 52 周高点回调 12.8%",
+  "referenced_news_index": -1,
+  "numeric_claims": [{"value": 12.8, "unit": "%", "context": "距 52 周高点"}]
+}
+
+反例(会被拒绝:把 timing tag 塞进 holding 或不写 timing_signal):
+{
+  "why_sentence": "订单可见度较高,公司基本面稳健。",
+  "used_tags": ["backlog", "quality_pullback"],
+  "timing_signal": "",
+  "referenced_news_index": -1,
+  "numeric_claims": []
+}
 
 输出 JSON:
 {
-  "paragraph": "...",
-  "used_holding_tags": [...],
-  "used_timing_tags": [...],
+  "why_sentence": "...",
+  "used_tags": [...],
+  "timing_signal": "...",
   "referenced_news_index": 0,
-  "numeric_claims": ["$95", "较现价低 15%", "12%-16%", "3 个月"]
+  "numeric_claims": [{"value": 12.8, "unit": "%", "context": "距52周高点"}]
 }
 `;
 }
@@ -94,7 +122,7 @@ export async function callDeepSeekForPitch(prompt: string): Promise<PitchLLMOutp
         body: JSON.stringify({
             model: process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
             temperature: 0.2,
-            max_tokens: 800,
+            max_tokens: 500,
             messages: [
                 {
                     role: 'system',
@@ -114,31 +142,47 @@ export async function callDeepSeekForPitch(prompt: string): Promise<PitchLLMOutp
 }
 
 function parsePitchOutput(content: string): PitchLLMOutput | null {
+    const parsed = parseJsonObject(content);
+    if (!parsed || typeof parsed.why_sentence !== 'string') return null;
+
+    return {
+        why_sentence: parsed.why_sentence,
+        used_tags: Array.isArray(parsed.used_tags) ? parsed.used_tags.map(String) : [],
+        timing_signal: typeof parsed.timing_signal === 'string' ? parsed.timing_signal : '',
+        referenced_news_index: typeof parsed.referenced_news_index === 'number' ? parsed.referenced_news_index : undefined,
+        numeric_claims: parseNumericClaims(parsed.numeric_claims)
+    };
+}
+
+function parseJsonObject(content: string): Record<string, unknown> | null {
     try {
-        const parsed = JSON.parse(content) as Partial<PitchLLMOutput>;
-        if (typeof parsed.paragraph !== 'string') return null;
-        return {
-            paragraph: parsed.paragraph,
-            used_holding_tags: Array.isArray(parsed.used_holding_tags) ? parsed.used_holding_tags.map(String) : [],
-            used_timing_tags: Array.isArray(parsed.used_timing_tags) ? parsed.used_timing_tags.map(String) : [],
-            referenced_news_index: typeof parsed.referenced_news_index === 'number' ? parsed.referenced_news_index : undefined,
-            numeric_claims: Array.isArray(parsed.numeric_claims) ? parsed.numeric_claims.map(String) : []
-        };
+        const parsed = JSON.parse(content) as Record<string, unknown>;
+        return parsed && typeof parsed === 'object' ? parsed : null;
     } catch {
         const match = content.match(/\{[\s\S]*\}/);
         if (!match) return null;
         try {
-            const parsed = JSON.parse(match[0]) as Partial<PitchLLMOutput>;
-            if (typeof parsed.paragraph !== 'string') return null;
-            return {
-                paragraph: parsed.paragraph,
-                used_holding_tags: Array.isArray(parsed.used_holding_tags) ? parsed.used_holding_tags.map(String) : [],
-                used_timing_tags: Array.isArray(parsed.used_timing_tags) ? parsed.used_timing_tags.map(String) : [],
-                referenced_news_index: typeof parsed.referenced_news_index === 'number' ? parsed.referenced_news_index : undefined,
-                numeric_claims: Array.isArray(parsed.numeric_claims) ? parsed.numeric_claims.map(String) : []
-            };
+            const parsed = JSON.parse(match[0]) as Record<string, unknown>;
+            return parsed && typeof parsed === 'object' ? parsed : null;
         } catch {
             return null;
         }
     }
+}
+
+function parseNumericClaims(value: unknown): PitchNumericClaim[] {
+    if (!Array.isArray(value)) return [];
+    const claims: PitchNumericClaim[] = [];
+    for (const item of value) {
+            if (typeof item !== 'object' || item === null) continue;
+            const record = item as Record<string, unknown>;
+            const numericValue = Number(record.value);
+            if (!Number.isFinite(numericValue)) continue;
+            claims.push({
+                value: numericValue,
+                unit: typeof record.unit === 'string' ? record.unit : '',
+                context: typeof record.context === 'string' ? record.context : undefined
+            });
+    }
+    return claims;
 }

@@ -3,7 +3,7 @@ import type { NarrativeInput, NarrativeOutput, NarrativeSourceQuality } from '..
 import { inferEarningsBeat, isHighIVString, parseCouponRange, parseTenorMonths } from './input-adapter';
 import { callDeepSeekForPitch, buildPitchPrompt, type PitchInputs } from './llm-stitcher';
 import { detectLitTags, hasMinimumTagsForPitch } from './tag-detector';
-import { buildDeterministicPitch, buildMinimalPitch } from './template';
+import { buildDeterministicPitch, buildHybridPitch, buildMinimalPitch, pickBridge } from './template';
 import { validatePitch } from './validator';
 
 const CLICKBAIT_PATTERNS = [
@@ -65,6 +65,10 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
         days_since_earnings: input.days_since_earnings
     };
 
+    if (coupon.low <= 0 || coupon.high <= 0 || discount <= 0 || discount > 60) {
+        return wrapResult(buildMinimalPitch(pitchInputs), 'go_pitch_minimal');
+    }
+
     if (!hasMinimumTagsForPitch(litTags)) {
         return wrapResult(buildMinimalPitch(pitchInputs), 'go_pitch_minimal');
     }
@@ -74,9 +78,11 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
         try {
             const llmOutput = await callDeepSeekForPitch(buildPitchPrompt(pitchInputs));
             if (llmOutput) {
-                const validation = validatePitch(llmOutput, litTags, pitchInputs);
+                const bridge = pickBridge(input.symbol);
+                const finalPitch = buildHybridPitch(llmOutput.why_sentence, pitchInputs, bridge);
+                const validation = validatePitch(llmOutput, litTags, pitchInputs, finalPitch);
                 if (validation.passed) {
-                    return wrapResult(llmOutput.paragraph, 'go_pitch_llm_validated');
+                    return wrapResult(finalPitch, 'go_pitch_hybrid_validated');
                 }
 
                 console.log(
@@ -92,10 +98,10 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
                         tag: 'go_pitch_validation_debug',
                         symbol: input.symbol,
                         reasons: validation.reasons,
-                        llm_text_length: llmOutput.paragraph.length,
-                        llm_text_preview: llmOutput.paragraph.slice(0, 80),
-                        used_holding_tags: llmOutput.used_holding_tags,
-                        used_timing_tags: llmOutput.used_timing_tags,
+                        llm_text_length: llmOutput.why_sentence.length,
+                        llm_text_preview: llmOutput.why_sentence.slice(0, 80),
+                        used_tags: llmOutput.used_tags,
+                        timing_signal: llmOutput.timing_signal,
                         lit_holding: litTags.holding,
                         lit_timing: litTags.timing,
                         ts: new Date().toISOString()

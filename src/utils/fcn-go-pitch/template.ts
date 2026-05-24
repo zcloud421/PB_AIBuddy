@@ -1,22 +1,37 @@
 import type { PitchInputs } from './llm-stitcher';
 
+const BRIDGES = ['在这个背景下，', '对应到结构上，', '条款上，'] as const;
+
+export function buildDealStructureSentence(p: PitchInputs): string {
+    return `让您以 $${p.recommended_strike}（较现价低 ${p.discount_pct}%）承接 ${p.symbol}，年化票息 ${p.coupon_low}%-${p.coupon_high}%，期限 ${p.tenor_label}；若股价未跌破 $${p.recommended_strike}，您收取票息并赎回本金，若跌破则以 $${p.recommended_strike} 持有该标的。`;
+}
+
+export function buildHybridPitch(whySentence: string, p: PitchInputs, bridge = pickBridge(p.symbol)): string {
+    return `${normalizeSentence(whySentence)}${bridge}${buildDealStructureSentence(p)}`;
+}
+
 export function buildDeterministicPitch(p: PitchInputs): string {
-    const whyNowParts = buildSpecificSignals(p);
-    const tagSupp = buildTagSupplements(p);
-    const combined: string[] = [];
-    if (tagSupp.length > 0) combined.push(tagSupp[0]);
-    combined.push(...whyNowParts.slice(0, 2));
-
-    const whyNowText = combined.length > 0 ? `${combined.join('，')}。` : '';
-
-    return `${p.company_short_desc}，${whyNowText}这只 FCN 让您以 $${p.recommended_strike}，较现价低 ${p.discount_pct}% 的水平承接 ${p.symbol}，年化票息 ${p.coupon_low}%-${p.coupon_high}%，期限 ${p.tenor_label}；若股价未跌破 $${p.recommended_strike}，您收取票息并赎回本金；若跌破，则以 $${p.recommended_strike} 持有该标的。`;
+    return buildHybridPitch(buildTemplateWhySentence(p, true), p);
 }
 
 export function buildMinimalPitch(p: PitchInputs): string {
-    const signals = buildSpecificSignals(p).slice(0, 2);
-    const signalText = signals.length > 0 ? `${signals.join('，')}。` : '';
+    return buildHybridPitch(buildTemplateWhySentence(p, false), p);
+}
 
-    return `${p.company_short_desc}。${signalText}这只 FCN 让您以 $${p.recommended_strike}，较现价低 ${p.discount_pct}% 的水平承接 ${p.symbol}，年化票息 ${p.coupon_low}%-${p.coupon_high}%，期限 ${p.tenor_label}；若股价未跌破 $${p.recommended_strike}，您收取票息并赎回本金；若跌破，则以 $${p.recommended_strike} 持有该标的。`;
+export function pickBridge(symbol: string): string {
+    const hash = Array.from(symbol).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+    return BRIDGES[hash % BRIDGES.length];
+}
+
+function buildTemplateWhySentence(p: PitchInputs, includeTags: boolean): string {
+    const parts: string[] = [];
+    if (includeTags) {
+        parts.push(...buildTagSupplements(p).slice(0, 1));
+    }
+    parts.push(...buildSpecificSignals(p).slice(0, 2));
+    return parts.length > 0
+        ? `${p.company_short_desc}，${parts.join('，')}。`
+        : `${p.company_short_desc}。`;
 }
 
 function buildSpecificSignals(p: PitchInputs): string[] {
@@ -30,7 +45,7 @@ function buildSpecificSignals(p: PitchInputs): string[] {
     if (typeof p.pct_from_52w_high === 'number') {
         const distance = Math.abs(p.pct_from_52w_high);
         if (distance < 5) {
-            signals.push(`接近 52 周高点(距高 ${distance.toFixed(1)}%)`);
+            signals.push(`接近 52 周高点（距高 ${distance.toFixed(1)}%）`);
         } else if (distance <= 25) {
             signals.push(`距 52 周高点 ${distance.toFixed(1)}%`);
         }
@@ -55,6 +70,12 @@ function buildTagSupplements(p: PitchInputs): string[] {
     if (p.lit_tags.holding.includes('backlog')) tags.push('订单可见度较高');
     if (p.lit_tags.timing.includes('momentum_intact')) tags.push('技术形态稳健');
     return tags;
+}
+
+function normalizeSentence(text: string): string {
+    const trimmed = text.trim();
+    if (!trimmed) return '';
+    return /[。！？.!?]$/.test(trimmed) ? trimmed : `${trimmed}。`;
 }
 
 function truncateHeadline(headline: string, maxChars: number): string {

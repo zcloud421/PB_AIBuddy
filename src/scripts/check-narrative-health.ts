@@ -14,6 +14,7 @@ type NarrativeSourceQuality =
     | 'blocked'
     | 'deterministic'
     | 'go_pitch_llm_validated'
+    | 'go_pitch_hybrid_validated'
     | 'go_pitch_template'
     | 'go_pitch_minimal';
 
@@ -90,6 +91,7 @@ async function computeNarrativeMetrics(): Promise<NarrativeMetrics> {
         blocked: 0,
         deterministic: 0,
         go_pitch_llm_validated: 0,
+        go_pitch_hybrid_validated: 0,
         go_pitch_template: 0,
         go_pitch_minimal: 0,
         unknown: 0
@@ -156,6 +158,7 @@ function formatReport(metrics: NarrativeMetrics, forceReport: boolean): string |
             `• Total narratives: ${metrics.total_narratives}`,
             `• LLM validated: ${dist.llm_validated} (${pct(dist.llm_validated, metrics.total_narratives)})`,
             `• Retry validated: ${dist.llm_retry_validated} (${pct(dist.llm_retry_validated, metrics.total_narratives)})`,
+            `• GO hybrid validated: ${dist.go_pitch_hybrid_validated} (${pct(dist.go_pitch_hybrid_validated, metrics.total_narratives)})`,
             `• Template fallback rate: ${metrics.template_fallback_rate_pct.toFixed(1)}%`
         ].join('\n');
     }
@@ -178,6 +181,7 @@ function formatReport(metrics: NarrativeMetrics, forceReport: boolean): string |
         `• Total narratives: ${metrics.total_narratives}`,
         `• LLM validated (first try): ${dist.llm_validated} (${pct(dist.llm_validated, metrics.total_narratives)})`,
         `• LLM retry validated: ${dist.llm_retry_validated} (${pct(dist.llm_retry_validated, metrics.total_narratives)})`,
+        `• GO hybrid validated: ${dist.go_pitch_hybrid_validated} (${pct(dist.go_pitch_hybrid_validated, metrics.total_narratives)})`,
         `• LLM failed → template: ${dist.llm_failed_validation} (${pct(dist.llm_failed_validation, metrics.total_narratives)})`,
         `• Template only (sparse): ${dist.template_fallback} (${pct(dist.template_fallback, metrics.total_narratives)})`,
         `• Blocked: ${dist.blocked} (${pct(dist.blocked, metrics.total_narratives)})`,
