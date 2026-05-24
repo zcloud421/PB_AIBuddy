@@ -18,6 +18,7 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
     const discount = Math.round(100 - (input.recommended_strike / input.current_price) * 100);
     const desc = await getCompanyDescription(input.symbol);
     const companyDesc = desc?.short_description ?? input.company_name ?? input.symbol;
+    const recentNewsTitles = (input.news_items ?? []).slice(0, 3).map((item) => item.title);
 
     const litTags = detectLitTags({
         symbol: input.symbol,
@@ -43,7 +44,11 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
         coupon_low: coupon.low,
         coupon_high: coupon.high,
         tenor_label: tenorLabel,
-        lit_tags: litTags
+        lit_tags: litTags,
+        recent_news_titles: recentNewsTitles,
+        change_5d_pct: input.change_5d_pct,
+        pct_from_52w_high: input.pct_from_52w_high,
+        days_since_earnings: input.days_since_earnings
     };
 
     if (!hasMinimumTagsForPitch(litTags)) {

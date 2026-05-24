@@ -20,25 +20,36 @@ export interface PitchInputs {
     coupon_high: number;
     tenor_label: string;
     lit_tags: LitTags;
+    recent_news_titles?: string[];
+    change_5d_pct?: number | null;
+    pct_from_52w_high?: number | null;
+    days_since_earnings?: number | null;
 }
 
 export interface PitchLLMOutput {
     paragraph: string;
     used_holding_tags: string[];
     used_timing_tags: string[];
+    referenced_news_index?: number;
     numeric_claims: string[];
 }
 
 export function buildPitchPrompt(p: PitchInputs): string {
     const allTags = [...p.lit_tags.holding, ...p.lit_tags.timing];
     const litList = allTags.map((tag) => `- ${tag}: ${TAG_DESCRIPTIONS[tag]}`).join('\n');
+    const newsList = p.recent_news_titles && p.recent_news_titles.length > 0
+        ? p.recent_news_titles.map((title) => `- ${title}`).join('\n')
+        : '(本期无新闻)';
 
-    return `你是私行 FCN 产品 RM 写作助手。请用中文 prose 写一段 100-130 字的 pitch text,RM 会直接 copy 给 HNW 客户。
+    return `你是私行 FCN 产品 RM 写作助手。请用中文 prose 写一段 100-180 字的 pitch text,RM 会直接 copy 给 HNW 客户。
 
 公司:${p.company_short_desc}
 
 已点亮的可用理由(只能从这里选,不许引入其他理由):
 ${litList}
+
+近期新闻标题(可引用其中事件作为 why-now,但不许编造未列出的事件):
+${newsList}
 
 数字事实(严禁修改任何数字,严禁编造新数字):
 - 当前价 $${p.current_price.toFixed(2)}
@@ -48,20 +59,22 @@ ${litList}
 
 写作要求:
 1. 一段连贯 prose,不分行不分段,不用 bullet
-2. 100-130 字
+2. 100-180 字
 3. 第二人称"您",中性语气
-4. 数字嵌入句子里(如"以 $95、较现价低 15% 的水平承接...")
-5. 严禁:"正是好时机" / "不过是" / "您本就看好" / "敲入" / "接货" / "安全垫" / "摊薄" 等用语
-6. 严禁在 pitch 中提风险(非保本 / 信用风险 / 流动性 等,由 product term sheet 单独承担)
-7. 必须用"若股价未跌破 $X,您收取票息并赎回本金;若跌破,则以 $X 持有..."条件句式收尾
-8. 严禁引入未在"已点亮理由"中的任何理由 / 任何具体新闻事件
-9. 严禁编造任何数字
+4. 必须包含 1 个具体 why-now 信号,来源只能是新闻标题事件或已点亮 timing tag 派生的具体数字;严禁写"近期"/"刚刚"/"最近"等不带具体内容的空泛 timing 词
+5. 数字嵌入句子里(如"以 $95、较现价低 15% 的水平承接...")
+6. 严禁:"正是好时机" / "不过是" / "您本就看好" / "敲入" / "接货" / "安全垫" / "摊薄" 等用语
+7. 严禁在 pitch 中提风险(非保本 / 信用风险 / 流动性 等,由 product term sheet 单独承担)
+8. 必须用"若股价未跌破 $X,您收取票息并赎回本金;若跌破,则以 $X 持有..."条件句式收尾
+9. 严禁引入未在"已点亮理由"或"近期新闻标题"中的任何理由 / 任何具体新闻事件
+10. 严禁编造任何数字
 
 输出 JSON:
 {
   "paragraph": "...",
   "used_holding_tags": [...],
   "used_timing_tags": [...],
+  "referenced_news_index": 0,
   "numeric_claims": ["$95", "较现价低 15%", "12%-16%", "3 个月"]
 }
 `;
@@ -108,6 +121,7 @@ function parsePitchOutput(content: string): PitchLLMOutput | null {
             paragraph: parsed.paragraph,
             used_holding_tags: Array.isArray(parsed.used_holding_tags) ? parsed.used_holding_tags.map(String) : [],
             used_timing_tags: Array.isArray(parsed.used_timing_tags) ? parsed.used_timing_tags.map(String) : [],
+            referenced_news_index: typeof parsed.referenced_news_index === 'number' ? parsed.referenced_news_index : undefined,
             numeric_claims: Array.isArray(parsed.numeric_claims) ? parsed.numeric_claims.map(String) : []
         };
     } catch {
@@ -120,6 +134,7 @@ function parsePitchOutput(content: string): PitchLLMOutput | null {
                 paragraph: parsed.paragraph,
                 used_holding_tags: Array.isArray(parsed.used_holding_tags) ? parsed.used_holding_tags.map(String) : [],
                 used_timing_tags: Array.isArray(parsed.used_timing_tags) ? parsed.used_timing_tags.map(String) : [],
+                referenced_news_index: typeof parsed.referenced_news_index === 'number' ? parsed.referenced_news_index : undefined,
                 numeric_claims: Array.isArray(parsed.numeric_claims) ? parsed.numeric_claims.map(String) : []
             };
         } catch {

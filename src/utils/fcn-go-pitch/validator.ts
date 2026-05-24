@@ -1,5 +1,6 @@
 import type { PitchInputs, PitchLLMOutput } from './llm-stitcher';
 import type { HoldingTag, LitTags, TimingTag } from './tag-detector';
+import { validateEventAnchors } from '../narrative-event-validator';
 
 export interface PitchValidationResult {
     passed: boolean;
@@ -28,7 +29,7 @@ export function validatePitch(
     const reasons: string[] = [];
     const paragraph = output.paragraph ?? '';
     const len = paragraph.replace(/\s+/g, '').length;
-    if (len < 100 || len > 130) reasons.push(`字数 ${len} 不在 100-130 范围`);
+    if (len < 100 || len > 180) reasons.push(`字数 ${len} 不在 100-180 范围`);
 
     for (const tag of output.used_holding_tags) {
         if (!litTags.holding.includes(tag as HoldingTag)) reasons.push(`未点亮 holding tag: ${tag}`);
@@ -41,6 +42,19 @@ export function validatePitch(
 
     for (const phrase of FORBIDDEN_PHRASES) {
         if (paragraph.includes(phrase)) reasons.push(`含禁词: ${phrase}`);
+    }
+
+    if (pitchInputs.recent_news_titles && pitchInputs.recent_news_titles.length > 0) {
+        const eventValidation = validateEventAnchors(
+            paragraph,
+            pitchInputs.recent_news_titles.map((title) => ({
+                title,
+                published_at: new Date().toISOString()
+            }))
+        );
+        if (!eventValidation.passed) {
+            reasons.push(`含未锚定事件: ${eventValidation.unanchored.map((item) => item.snippet).join(', ')}`);
+        }
     }
 
     const allowed = [
