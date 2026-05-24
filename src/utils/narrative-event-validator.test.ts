@@ -38,4 +38,17 @@ assert.equal(policyWithAnchor.passed, true, 'policy claim with ban/tighten ancho
 const genericRisk = validateEventAnchors('高隐含波动率环境下敲入风险上升', []);
 assert.equal(genericRisk.passed, true, 'generic structural risk should not need an event anchor');
 
+const incomeExpectation = validateEventAnchors('高 IV 环境下,可能影响中国区收入预期', []);
+assert.equal(incomeExpectation.passed, true, '收入 should not be treated as an earnings claim');
+
+const genericRestriction = validateEventAnchors('高 IV 限制风险定价空间', []);
+assert.equal(genericRestriction.passed, true, '限制 should not be treated as a policy claim');
+
+const retainedPolicyKeyword = validateEventAnchors(
+    '先进芯片禁令升级仍持续',
+    [{ title: 'Earnings beat', published_at: '2026-05-22T00:00:00.000Z' }]
+);
+assert.equal(retainedPolicyKeyword.passed, false, '禁令 should still require a news anchor');
+assert.equal(retainedPolicyKeyword.unanchored.some((item) => item.snippet === '禁令'), true);
+
 console.log('narrative-event-validator tests passed');

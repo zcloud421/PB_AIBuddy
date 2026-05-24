@@ -19,21 +19,29 @@ const DATE_PATTERNS: RegExp[] = [
 ];
 
 const CORPORATE_ACTION_KEYWORDS = [
+    // M&A / 资本动作
     '纳入', '剔除', '收购', '并购', '分拆', '回购', '增持', '减持',
-    '获批', '批准', '通过', '裁决', '诉讼', '反垄断',
-    '下调', '上调', '维持', '上修', '下修',
+
+    // 法律 / 监管(具体动作)
+    '获批', '批准', '通过', '裁决',
+    '诉讼', '起诉', '反诉', '调查', '审查', '处罚', '罚款',
+
+    // 政策 / 出口管制(NVDA-style 幻觉拦截)
+    '禁令', '制裁', '出口管制', '关税', '反垄断',
+
+    // 财报指引(具体指引动作)
+    '上调', '下调', '上修', '下修', '维持',
+
+    // 业务动作(具体)
     '发布', '推出', '签约', '合作', '战略合作', '续约',
     '罢工', '召回', '停产', '关闭',
-    '禁令', '制裁', '限制', '出口管制', '关税',
-    '起诉', '反诉',
-    '升级', '降级', '加码', '收紧', '放开', '解除', '解禁',
-    '调查', '审查', '处罚', '罚款',
-    '加密', '退市',
-    '订单', '取消订单', '中断', '断供', '缺货', '降价'
+
+    // 其他具体
+    '加密', '退市'
 ];
 
 const EARNINGS_TERMS = [
-    '营收', '收入', '净利润', '净利', 'EPS', '每股收益',
+    '营收', '净利润', '净利', 'EPS', '每股收益',
     '毛利率', '净利率', '运营利润率',
     '指引', '展望', 'guidance',
     '同比', 'YoY', '环比', 'QoQ',
@@ -150,29 +158,15 @@ function corporateActionToEnglish(zh: string): string[] {
         '罢工': ['strike'],
         '禁令': ['ban', 'bans', 'export control', 'restriction', 'restrictions'],
         '制裁': ['sanction', 'sanctions'],
-        '限制': ['restriction', 'restrictions', 'restrict', 'limits', 'curbs'],
         '出口管制': ['export control', 'export controls'],
         '关税': ['tariff', 'tariffs', 'duties'],
         '反垄断': ['antitrust'],
-        '升级': ['escalate', 'escalates', 'escalation', 'tighten', 'tightens', 'tightened', 'expand', 'expands'],
-        '降级': ['downgrade', 'downgrades', 'lower'],
-        '加码': ['escalate', 'tighten', 'expand'],
-        '收紧': ['tighten', 'tightens', 'tightened'],
-        '放开': ['lift', 'lifts', 'lifted', 'ease', 'eases', 'eased', 'approve', 'approves', 'approved'],
-        '解除': ['remove', 'removes', 'removed', 'lift', 'lifts', 'lifted'],
-        '解禁': ['lift', 'lifts', 'lifted', 'remove', 'removes', 'removed'],
         '调查': ['investigation', 'probe', 'investigate', 'review'],
         '审查': ['review', 'probe', 'investigation', 'scrutiny'],
         '处罚': ['penalty', 'penalties', 'fine', 'fines'],
         '罚款': ['fine', 'fines', 'penalty'],
         '加密': ['crypto', 'cryptocurrency'],
-        '退市': ['delist', 'delisting'],
-        '订单': ['order', 'orders', 'booking', 'bookings'],
-        '取消订单': ['cancel order', 'canceled order', 'cancelled order', 'cancellation'],
-        '中断': ['disrupt', 'disruption', 'halt', 'suspend'],
-        '断供': ['supply halt', 'supply disruption', 'cut off'],
-        '缺货': ['shortage', 'shortages', 'out of stock'],
-        '降价': ['price cut', 'price cuts', 'discount', 'discounts']
+        '退市': ['delist', 'delisting']
     };
     return map[zh] ?? [];
 }

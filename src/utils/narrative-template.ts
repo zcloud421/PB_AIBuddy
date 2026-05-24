@@ -47,7 +47,7 @@ export function buildTemplateNarrative(input: NarrativeInput): {
     let whyNow: string;
     if (tier.hasPrice && tier.hasStrike && tier.hasCoupon && tier.hasNews) {
         const latestHeadline = input.news_items?.[0]?.title ?? '';
-        const catalystLine = latestHeadline ? `近期新闻提及:${truncate(latestHeadline, 40)}。` : '';
+        const catalystLine = latestHeadline ? `近期新闻提及:${truncate(latestHeadline, 60)}。` : '';
         whyNow = `${catalystLine}当前价 ${price},FCN 执行价 ${strike}(${moneyness} 进场价)${fromHigh ? `,${fromHigh}` : ''}。高 IV 环境年化票息 ${couponRange}${protection ? `,下行保护约 ${protection}` : ''}。`;
     } else if (tier.hasPrice && tier.hasStrike && tier.hasCoupon && tier.hasEarnings) {
         whyNow = `近期处于财报窗口期。当前价 ${price},FCN 执行价 ${strike}(${moneyness} 进场价)${fromHigh ? `,${fromHigh}` : ''}。高 IV 环境年化票息 ${couponRange}${protection ? `,下行保护约 ${protection}` : ''}。`;
