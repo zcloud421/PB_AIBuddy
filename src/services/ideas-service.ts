@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { fetchTickerMarketCap, fetchTickerReferenceSnapshot, MassiveDataFetcher } from '../data/massive-fetcher';
 import { getChinaGoldReserveTrend } from '../data/macro-china-fetcher';
 import { getGldFlowTrend } from '../data/spdr-gold-flow-fetcher';
@@ -38,6 +40,7 @@ import {
     getRiskFlagsByRunId,
     getUpcomingEarningsBySymbol,
     getUnderlyingBySymbol,
+    getActiveHouseOverrideBySymbol,
     mapTodayIdeasResponse,
     recordDrawdownAttributionDecision,
     saveIdeaCandidate,
@@ -52,6 +55,7 @@ import { getLatestMacroRegimeSnapshot } from '../db/queries/macro-regime';
 import { HttpError } from '../lib/http-error';
 import { buildThemeNarrative } from './theme-narrative';
 import { generateNarrative, sanitizeNarrativeOutput } from '../utils/narrative-generator';
+import { buildNarrativeInput } from '../utils/narrative-input-builder';
 import { PITCH_ENGINE_VERSION, getPitchNarrativeStaleReason } from '../utils/fcn-shared/pitch-engine-version';
 import type {
     AsyncScoringAcceptedResponse,
@@ -76,6 +80,19 @@ import type {
     TodayIdeasResponse
 } from '../types/api';
 import { enqueueSymbolScoringJob, getSymbolScoringJob } from './scoring-queue';
+
+interface EligibilityResult {
+    eligible: boolean;
+    reason?: 'outside_universe' | 'status_suspended' | 'status_under_review' | 'status_deprecated' | 'restricted';
+    message?: string;
+}
+
+interface RestrictedSymbolEntry {
+    symbol: string;
+    reason?: string;
+    added_at?: string;
+    reviewed_by?: string;
+}
 
 interface FreshSymbolAnalysis {
     exchange: string;
@@ -4187,6 +4204,71 @@ function buildDataFetcher(): DataFetcherInterface {
     return sharedDataFetcher;
 }
 
+async function checkSymbolEligibility(symbol: string): Promise<EligibilityResult> {
+    const normalized = symbol.toUpperCase();
+    const underlying = await getUnderlyingBySymbol(normalized);
+    if (!underlying) {
+        return {
+            eligible: false,
+            reason: 'outside_universe',
+            message: '该标的未在私行 FCN 推荐池中，需 IC 审批后加入'
+        };
+    }
+
+    if (underlying.status !== 'active') {
+        return {
+            eligible: false,
+            reason: `status_${underlying.status}` as EligibilityResult['reason'],
+            message: getStatusMessage(underlying.status)
+        };
+    }
+
+    const restricted = getRestrictedSymbols().get(normalized);
+    if (restricted) {
+        return {
+            eligible: false,
+            reason: 'restricted',
+            message: restricted.reason ? `该标的暂受限，不可推介：${restricted.reason}` : '该标的暂受限，不可推介'
+        };
+    }
+
+    return { eligible: true };
+}
+
+function getStatusMessage(status: string): string {
+    switch (status) {
+        case 'suspended':
+            return '该标的当前处于暂停状态，暂不可推介';
+        case 'under_review':
+            return '该标的正在 IC 审阅中，审阅完成前暂不可推介';
+        case 'deprecated':
+            return '该标的已从私行 FCN 推荐池移除，暂不可推介';
+        default:
+            return '该标的当前不可推介';
+    }
+}
+
+let restrictedSymbolsCache: Map<string, RestrictedSymbolEntry> | null = null;
+
+function getRestrictedSymbols(): Map<string, RestrictedSymbolEntry> {
+    if (restrictedSymbolsCache) {
+        return restrictedSymbolsCache;
+    }
+    const restrictedPath = path.join(__dirname, '../../data/restricted-symbols.json');
+    try {
+        const raw = fs.readFileSync(restrictedPath, 'utf8');
+        const parsed = JSON.parse(raw) as RestrictedSymbolEntry[];
+        restrictedSymbolsCache = new Map(
+            (Array.isArray(parsed) ? parsed : [])
+                .filter((entry) => typeof entry.symbol === 'string')
+                .map((entry) => [entry.symbol.toUpperCase(), { ...entry, symbol: entry.symbol.toUpperCase() }])
+        );
+    } catch {
+        restrictedSymbolsCache = new Map();
+    }
+    return restrictedSymbolsCache;
+}
+
 export async function getTodayIdeas(): Promise<TodayIdeasResponse> {
     const latestRun = await getActiveCompletedRun();
     console.log('[debug] getActiveCompletedRun result:', latestRun);
@@ -4478,6 +4560,10 @@ export async function selectDailyRecommendationShowcase(
 export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse | AsyncScoringAcceptedResponse> {
     const normalizedSymbol = symbol.toUpperCase();
     const runDate = todayIsoDate();
+    const eligibility = await checkSymbolEligibility(normalizedSymbol);
+    if (!eligibility.eligible) {
+        return buildNotRecommendableIdeaResponse(normalizedSymbol, eligibility);
+    }
 
     let cachedRow = null as Awaited<ReturnType<typeof getIdeaBySymbolAndDate>>;
     let cachedFlags: Flag[] = [];
@@ -4699,6 +4785,11 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
         }
 
         scheduleDrawdownAttributionPrewarm([normalizedSymbol]);
+        const activeOverride = await withSoftTimeout(
+            getActiveHouseOverrideBySymbol(normalizedSymbol).catch(() => null),
+            null,
+            300
+        );
 
         return {
             symbol: cachedRow.symbol,
@@ -4723,6 +4814,14 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             moneyness_pct: toNullableNumber(cachedRow.moneyness_pct),
             reasoning_text: cachedRow.reasoning_text,
             narrative,
+            house_override: activeOverride
+                ? {
+                      action: activeOverride.override_type,
+                      reason: activeOverride.reason,
+                      set_by: activeOverride.created_by,
+                      set_at: activeOverride.created_at
+                  }
+                : undefined,
             news_items: newsItems,
             flags: effectiveFlags,
             actionable_caution: hasActionableCaution(effectiveFlags),
@@ -5010,7 +5109,7 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
             }
         }
 
-        return mapScoringResultToSymbolIdea(
+        const response = mapScoringResultToSymbolIdea(
             symbol,
             scoring,
             symbolData,
@@ -5021,6 +5120,16 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
             newsItems,
             effectiveFlags
         );
+        const activeOverride = await getActiveHouseOverrideBySymbol(symbol).catch(() => null);
+        if (activeOverride) {
+            response.house_override = {
+                action: activeOverride.override_type,
+                reason: activeOverride.reason,
+                set_by: activeOverride.created_by,
+                set_at: activeOverride.created_at
+            };
+        }
+        return response;
     } catch (error) {
         if (runId && shouldPersist) {
             try {
@@ -5066,6 +5175,58 @@ function buildUnavailableIdeaResponse(symbol: string): SymbolIdeaResponse {
         flags: [],
         signals: [],
         sentiment_score: 0.3,
+        price_context: {
+            current_price: null,
+            ma20: null,
+            ma50: null,
+            ma200: null,
+            pct_from_52w_high: null,
+            implied_volatility: null,
+            data_date: null,
+            earnings_date: null,
+            days_to_earnings: null,
+            days_since_earnings: null,
+            earnings_phase: 'NONE',
+            extended_price: null,
+            extended_move_pct: null
+        }
+    };
+}
+
+function buildNotRecommendableIdeaResponse(symbol: string, eligibility: EligibilityResult): SymbolIdeaResponse {
+    const message = eligibility.message ?? '该标的当前不可推介';
+    return {
+        symbol,
+        exchange: 'UNKNOWN',
+        company_name: null,
+        run_date: todayIsoDate(),
+        cached: false,
+        grade: 'NOT_RECOMMENDABLE',
+        eligibility: {
+            passed: false,
+            reason: eligibility.reason,
+            message
+        },
+        composite_score: 0,
+        risk_reward_score: null,
+        trend_score: null,
+        event_risk_score: null,
+        iv_premium_score: null,
+        verdict_headline: '不可推介',
+        verdict_sub: message,
+        data_as_of_date: null,
+        recommended_strike: null,
+        recommended_tenor_days: null,
+        recommended_expiry_date: null,
+        estimated_coupon_range: null,
+        coupon_note: '需 IC 审批后再评估',
+        moneyness_pct: null,
+        reasoning_text: message,
+        narrative: null,
+        news_items: [],
+        flags: [],
+        signals: [],
+        sentiment_score: null,
         price_context: {
             current_price: null,
             ma20: null,
@@ -6332,44 +6493,15 @@ async function buildNarrative(input: {
           ])
         : [null, null, null];
 
-    const narrative = await generateNarrative({
-        symbol: input.symbol,
-        company_name: input.companyName,
-        theme: input.theme,
-        grade: input.grade,
-        composite_score: input.compositeScore ?? undefined,
-        recommended_strike: input.recommendedStrike,
-        estimated_coupon_range: input.estimatedCouponRange,
-        current_price: input.currentPrice,
-        change_1d_pct: input.change1dPct ?? null,
-        change_5d_pct: input.change5dPct ?? null,
-        change_ytd_pct: input.changeYtdPct ?? null,
-        pct_from_52w_high: input.pctFrom52wHigh,
-        ma20: input.ma20,
-        ma50: input.ma50,
-        ma200: input.ma200,
-        iv_level:
-            input.impliedVolatility !== null
-                ? input.impliedVolatility >= 0.6
-                    ? '高'
-                    : input.impliedVolatility >= 0.3
-                      ? '中'
-                      : '低'
-                : '中',
-        flags: input.flags,
-        tenor_days: input.tenorDays,
-        news_headlines: input.newsItems.map((item) => item.title),
-        news_items: input.newsItems,
-        has_recent_earnings: input.hasRecentEarnings,
-        earnings_weight: input.earningsWeight,
-        days_to_earnings: input.daysToEarnings,
-        days_since_earnings: input.daysSinceEarnings,
-        active_attribution_rules: input.activeAttributionRules?.slice(0, 3) ?? [],
-        refresh_reason: input.refreshReason ?? 'first_gen',
-        china_gold_reserve_trend: chinaGoldReserveTrend,
-        gld_flow_trend: gldFlowTrend,
-        breakeven_inflation_trend: breakevenInflationTrend
-    });
+    const narrative = await generateNarrative(buildNarrativeInput({
+        ...input,
+        recommendedStrike: input.recommendedStrike,
+        estimatedCouponRange: input.estimatedCouponRange,
+        tenorDays: input.tenorDays,
+        chinaGoldReserveTrend,
+        gldFlowTrend,
+        breakevenInflationTrend
+    }));
 
     void fetchTickerMarketCap(input.symbol).catch(() => null);
 

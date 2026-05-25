@@ -16,6 +16,7 @@ import {
     ensureRecommendationTrackerTable,
     ensureRiskFlagEnumValues,
     ensureUnderlyingCompanyNameColumn,
+    ensureUnderlyingsGovernanceColumns,
     deleteRecommendationTrackerForDate,
     getUnderlyingBySymbol,
     getRecentPriceHistoryBySymbol,
@@ -34,6 +35,7 @@ import { runDailyScreener as scoreDailyScreenerSymbols } from '../scoring-engine
 import { selectDailyBest, selectDailyRecommendationShowcase } from '../services/ideas-service';
 import { runPriceTracker } from '../services/tracker-service';
 import { generateNarrative } from '../utils/narrative-generator';
+import { buildNarrativeInput } from '../utils/narrative-input-builder';
 import { sendDowngradeNotifications } from '../utils/push-notifications';
 import { ensureDeviceTables } from '../db/queries/devices';
 
@@ -64,11 +66,12 @@ export async function runDailyScreener(): Promise<void> {
     const runDate = todayInHongKongIsoDate();
 
     try {
+        await ensureUnderlyingsGovernanceColumns();
         const symbolResult = await client.query<ActiveUnderlyingRow>(
             `
             SELECT symbol
             FROM underlyings
-            WHERE active = TRUE
+            WHERE status = 'active'
             ORDER BY tier ASC, symbol ASC
             `
         );
@@ -88,6 +91,7 @@ export async function runDailyScreener(): Promise<void> {
         await ensureRiskFlagEnumValues();
         await ensureRecommendationTrackerTable();
         await ensureUnderlyingCompanyNameColumn();
+        await ensureUnderlyingsGovernanceColumns();
         await ensureDeviceTables();
 
         const previousGradesResult = await client.query<{ symbol: string; grade: string }>(
@@ -137,43 +141,35 @@ export async function runDailyScreener(): Promise<void> {
                           getBreakevenInflationTrend().catch(() => null)
                       ])
                     : [null, null, null];
-                const narrative = await generateNarrative({
+                const narrative = await generateNarrative(buildNarrativeInput({
                     symbol,
+                    companyName: underlying?.company_name ?? undefined,
                     theme: underlying?.themes?.[0] ?? 'Featured',
                     grade: result.overall_grade,
-                    composite_score: result.composite_score,
-                    recommended_strike: result.recommended_strike ?? 0,
-                    estimated_coupon_range: result.estimated_coupon_range ?? '',
-                    current_price: result.current_price,
-                    change_1d_pct: priceMomentum.change1dPct,
-                    change_5d_pct: priceMomentum.change5dPct,
-                    change_ytd_pct: priceMomentum.changeYtdPct,
-                    pct_from_52w_high: result.pct_from_52w_high,
+                    compositeScore: result.composite_score,
+                    recommendedStrike: result.recommended_strike ?? 0,
+                    estimatedCouponRange: result.estimated_coupon_range ?? '',
+                    currentPrice: result.current_price,
+                    change1dPct: priceMomentum.change1dPct,
+                    change5dPct: priceMomentum.change5dPct,
+                    changeYtdPct: priceMomentum.changeYtdPct,
+                    pctFrom52wHigh: result.pct_from_52w_high,
                     ma20: result.ma20,
                     ma50: result.ma50,
                     ma200: result.ma200,
-                    iv_level:
-                        result.selected_implied_volatility !== null &&
-                        result.selected_implied_volatility !== undefined
-                            ? result.selected_implied_volatility >= 0.6
-                                ? '高'
-                                : result.selected_implied_volatility >= 0.3
-                                  ? '中'
-                                  : '低'
-                            : '中',
+                    impliedVolatility: result.selected_implied_volatility,
                     flags: result.flags,
-                    tenor_days: result.recommended_tenor_days ?? 90,
-                    news_headlines: newsContext.narrativeItems.map((item) => item.title),
-                    news_items: newsContext.narrativeItems,
-                    has_recent_earnings: newsContext.hasRecentEarnings,
-                    earnings_weight: newsContext.earningsWeight,
-                    days_to_earnings: null,
-                    days_since_earnings: newsContext.daysSinceEarnings,
-                    refresh_reason: 'first_gen',
-                    china_gold_reserve_trend: chinaGoldReserveTrend,
-                    gld_flow_trend: gldFlowTrend,
-                    breakeven_inflation_trend: breakevenInflationTrend
-                });
+                    tenorDays: result.recommended_tenor_days ?? 90,
+                    newsItems: newsContext.narrativeItems,
+                    hasRecentEarnings: newsContext.hasRecentEarnings,
+                    earningsWeight: newsContext.earningsWeight,
+                    daysToEarnings: null,
+                    daysSinceEarnings: newsContext.daysSinceEarnings,
+                    refreshReason: 'first_gen',
+                    chinaGoldReserveTrend,
+                    gldFlowTrend,
+                    breakevenInflationTrend
+                }));
                 results.push(result);
                 await saveIdeaCandidate({
                     runId,

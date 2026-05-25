@@ -16,13 +16,15 @@ import {
     ensureRecommendationTrackerTable,
     ensureRiskFlagEnumValues,
     ensureSourceQualityColumn,
-    ensureUnderlyingCompanyNameColumn
+    ensureUnderlyingCompanyNameColumn,
+    ensureUnderlyingsGovernanceColumns
 } from './db/queries/ideas';
 import { ideasRouter } from './routes/ideas';
 import { deviceRouter } from './routes/device';
 import { trackerRouter } from './routes/tracker';
 import { pairAnalysisRouter } from './routes/pair-analysis';
 import { macroRegimeRouter } from './routes/macro-regime';
+import { adminRouter } from './routes/admin';
 import { ensureDeviceTables } from './db/queries/devices';
 import {
     ensureIndicatorPersistenceTable,
@@ -160,6 +162,7 @@ export function createApp() {
     app.use('/tracker', trackerRouter);
     app.use('/api/pair-analysis', pairAnalysisRouter);
     app.use('/macro-regime', macroRegimeRouter);
+    app.use('/admin', adminRouter);
     app.use(errorHandler);
 
     return app;
@@ -173,6 +176,7 @@ async function ensureSchemaGuards(): Promise<void> {
     await ensureRiskFlagEnumValues();
     await ensureRecommendationTrackerTable();
     await ensureUnderlyingCompanyNameColumn();
+    await ensureUnderlyingsGovernanceColumns();
     await ensureSourceQualityColumn();
     await ensureDeviceTables();
     await ensureMacroRegimeSnapshotsTable();

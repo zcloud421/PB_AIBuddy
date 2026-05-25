@@ -48,10 +48,16 @@ CREATE TABLE underlyings (
     themes TEXT[] NOT NULL DEFAULT '{}',
     tier INTEGER NOT NULL DEFAULT 1,
     active BOOLEAN NOT NULL DEFAULT TRUE,
+    status TEXT NOT NULL DEFAULT 'active',
+    status_reason TEXT,
+    reviewed_by TEXT,
+    reviewed_at TIMESTAMPTZ,
     added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    removed_at TIMESTAMPTZ,
     CONSTRAINT underlyings_symbol_format_chk CHECK (symbol = UPPER(symbol)),
     CONSTRAINT underlyings_currency_format_chk CHECK (currency = UPPER(currency)),
-    CONSTRAINT underlyings_tier_chk CHECK (tier IN (1, 2))
+    CONSTRAINT underlyings_tier_chk CHECK (tier IN (1, 2)),
+    CONSTRAINT underlyings_status_chk CHECK (status IN ('active', 'suspended', 'under_review', 'deprecated'))
 );
 
 COMMENT ON TABLE underlyings IS
@@ -187,6 +193,16 @@ CREATE TABLE house_overrides (
 
 COMMENT ON TABLE house_overrides IS
 'Admin-driven policy overrides that can force caution, block a symbol, or restrict recommendations to whitelisted names.';
+
+CREATE TABLE IF NOT EXISTS underlying_status_log (
+    id BIGSERIAL PRIMARY KEY,
+    symbol TEXT NOT NULL REFERENCES underlyings(symbol) ON UPDATE CASCADE ON DELETE CASCADE,
+    old_status TEXT,
+    new_status TEXT NOT NULL,
+    reason TEXT,
+    changed_by TEXT NOT NULL,
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 CREATE TABLE earnings_calendar (
     earnings_calendar_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -429,5 +445,45 @@ ALTER TABLE idea_candidates
     ADD COLUMN IF NOT EXISTS source_quality TEXT NULL,
     ADD COLUMN IF NOT EXISTS narrative_engine_version TEXT NULL,
     ADD COLUMN IF NOT EXISTS iv_premium_score NUMERIC(8, 4);
+
+ALTER TABLE underlyings
+    ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active',
+    ADD COLUMN IF NOT EXISTS status_reason TEXT,
+    ADD COLUMN IF NOT EXISTS reviewed_by TEXT,
+    ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS added_at TIMESTAMPTZ DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ;
+
+UPDATE underlyings
+SET status = 'deprecated'
+WHERE active = FALSE
+  AND status = 'active';
+
+UPDATE underlyings
+SET active = (status = 'active')
+WHERE active <> (status = 'active');
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'underlyings_status_chk'
+    ) THEN
+        ALTER TABLE underlyings
+            ADD CONSTRAINT underlyings_status_chk
+            CHECK (status IN ('active', 'suspended', 'under_review', 'deprecated'));
+    END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS underlying_status_log (
+    id BIGSERIAL PRIMARY KEY,
+    symbol TEXT NOT NULL REFERENCES underlyings(symbol) ON UPDATE CASCADE ON DELETE CASCADE,
+    old_status TEXT,
+    new_status TEXT NOT NULL,
+    reason TEXT,
+    changed_by TEXT NOT NULL,
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 COMMIT;

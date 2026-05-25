@@ -1,4 +1,4 @@
-export type Grade = 'GO' | 'CAUTION' | 'AVOID';
+export type Grade = 'GO' | 'CAUTION' | 'AVOID' | 'NOT_RECOMMENDABLE';
 export type SignalColor = 'green' | 'amber' | 'red' | 'gray';
 export type FlagSeverity = 'INFO' | 'WARN' | 'BLOCK';
 export type WaitReason = 'WAIT_EARNINGS_RISK' | 'WAIT_POST_EARNINGS_SHOCK' | 'WAIT_SETUP_RESET';
@@ -63,6 +63,19 @@ export interface NarrativeOutput {
         | 'caution_pitch_template'
         | 'avoid_pitch_deterministic';
     engine_version?: string;
+}
+
+export interface EligibilityStatus {
+    passed: boolean;
+    reason?: 'outside_universe' | 'status_suspended' | 'status_under_review' | 'status_deprecated' | 'restricted';
+    message?: string;
+}
+
+export interface HouseOverrideStatus {
+    action: 'FORCE_AVOID' | 'FORCE_CAUTION' | 'WHITELIST_ONLY';
+    reason: string;
+    set_by: string;
+    set_at: string;
 }
 
 export interface IdeaCard {
@@ -588,6 +601,7 @@ export interface SymbolIdeaResponse {
     run_date: string;
     cached: boolean;
     grade: Grade;
+    eligibility?: EligibilityStatus;
     composite_score: number;
     risk_reward_score: number | null;
     trend_score?: number | null;
@@ -604,6 +618,7 @@ export interface SymbolIdeaResponse {
     moneyness_pct: number | null;
     reasoning_text: string;
     narrative: NarrativeOutput | null;
+    house_override?: HouseOverrideStatus;
     news_items: NewsItem[];
     flags: Flag[];
     actionable_caution?: boolean;

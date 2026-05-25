@@ -16,7 +16,26 @@ export interface UnderlyingRow {
     sector: string | null;
     themes: string[];
     tier: number;
+    active: boolean;
+    status: 'active' | 'suspended' | 'under_review' | 'deprecated';
+    status_reason: string | null;
+    reviewed_by: string | null;
+    reviewed_at: string | null;
+    added_at: string | null;
+    removed_at: string | null;
 }
+
+export interface HouseOverrideRow {
+    override_id: string;
+    symbol: string;
+    override_type: 'FORCE_AVOID' | 'FORCE_CAUTION' | 'WHITELIST_ONLY';
+    reason: string;
+    expires_at: string | null;
+    created_by: string;
+    created_at: string;
+}
+
+export interface UniverseAdminRow extends UnderlyingRow {}
 
 export interface EarningsCalendarRow {
     symbol: string;
@@ -341,7 +360,20 @@ export async function getLatestCompletedScheduledRun(): Promise<LatestCompletedR
 export async function getUnderlyingBySymbol(symbol: string): Promise<UnderlyingRow | null> {
     const result = await pool.query<UnderlyingRow>(
         `
-        SELECT symbol, exchange, company_name, sector, themes, tier
+        SELECT
+            symbol,
+            exchange,
+            company_name,
+            sector,
+            themes,
+            tier,
+            active,
+            COALESCE(status, CASE WHEN active THEN 'active' ELSE 'deprecated' END)::text AS status,
+            status_reason,
+            reviewed_by,
+            reviewed_at::text AS reviewed_at,
+            added_at::text AS added_at,
+            removed_at::text AS removed_at
         FROM underlyings
         WHERE symbol = $1
         LIMIT 1
@@ -350,6 +382,190 @@ export async function getUnderlyingBySymbol(symbol: string): Promise<UnderlyingR
     );
 
     return result.rows[0] ?? null;
+}
+
+export async function getActiveHouseOverrideBySymbol(symbol: string): Promise<HouseOverrideRow | null> {
+    const result = await pool.query<HouseOverrideRow>(
+        `
+        SELECT
+            override_id::text AS override_id,
+            symbol,
+            override_type::text AS override_type,
+            reason,
+            expires_at::text AS expires_at,
+            created_by,
+            created_at::text AS created_at
+        FROM house_overrides
+        WHERE symbol = $1
+          AND (expires_at IS NULL OR expires_at >= NOW())
+        ORDER BY created_at DESC, override_id DESC
+        LIMIT 1
+        `,
+        [symbol]
+    );
+
+    return result.rows[0] ?? null;
+}
+
+export async function listActiveHouseOverrides(): Promise<HouseOverrideRow[]> {
+    const result = await pool.query<HouseOverrideRow>(`
+        SELECT
+            override_id::text AS override_id,
+            symbol,
+            override_type::text AS override_type,
+            reason,
+            expires_at::text AS expires_at,
+            created_by,
+            created_at::text AS created_at
+        FROM house_overrides
+        WHERE expires_at IS NULL OR expires_at >= NOW()
+        ORDER BY created_at DESC, symbol ASC
+    `);
+
+    return result.rows;
+}
+
+export async function createHouseOverride(input: {
+    symbol: string;
+    action: HouseOverrideRow['override_type'];
+    reason: string;
+    setBy: string;
+    expiresAt?: string | null;
+}): Promise<HouseOverrideRow> {
+    const result = await pool.query<HouseOverrideRow>(
+        `
+        INSERT INTO house_overrides (symbol, override_type, reason, expires_at, created_by)
+        VALUES ($1, $2::override_type, $3, $4::timestamptz, $5)
+        RETURNING
+            override_id::text AS override_id,
+            symbol,
+            override_type::text AS override_type,
+            reason,
+            expires_at::text AS expires_at,
+            created_by,
+            created_at::text AS created_at
+        `,
+        [input.symbol, input.action, input.reason, input.expiresAt ?? null, input.setBy]
+    );
+
+    return result.rows[0];
+}
+
+export async function revokeHouseOverride(symbol: string): Promise<number> {
+    const result = await pool.query(
+        `
+        DELETE FROM house_overrides
+        WHERE symbol = $1
+          AND (expires_at IS NULL OR expires_at >= NOW())
+        `,
+        [symbol]
+    );
+    return result.rowCount ?? 0;
+}
+
+export async function listUniverse(): Promise<UniverseAdminRow[]> {
+    const result = await pool.query<UniverseAdminRow>(`
+        SELECT
+            symbol,
+            exchange,
+            company_name,
+            sector,
+            themes,
+            tier,
+            active,
+            COALESCE(status, CASE WHEN active THEN 'active' ELSE 'deprecated' END)::text AS status,
+            status_reason,
+            reviewed_by,
+            reviewed_at::text AS reviewed_at,
+            added_at::text AS added_at,
+            removed_at::text AS removed_at
+        FROM underlyings
+        ORDER BY tier ASC, symbol ASC
+    `);
+    return result.rows;
+}
+
+export async function updateUnderlyingStatus(input: {
+    symbol: string;
+    newStatus: UnderlyingRow['status'];
+    reason: string | null;
+    changedBy: string;
+}): Promise<UnderlyingRow | null> {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const existing = await client.query<UnderlyingRow>(
+            `
+            SELECT
+                symbol,
+                exchange,
+                company_name,
+                sector,
+                themes,
+                tier,
+                active,
+                COALESCE(status, CASE WHEN active THEN 'active' ELSE 'deprecated' END)::text AS status,
+                status_reason,
+                reviewed_by,
+                reviewed_at::text AS reviewed_at,
+                added_at::text AS added_at,
+                removed_at::text AS removed_at
+            FROM underlyings
+            WHERE symbol = $1
+            FOR UPDATE
+            `,
+            [input.symbol]
+        );
+        const oldRow = existing.rows[0];
+        if (!oldRow) {
+            await client.query('ROLLBACK');
+            return null;
+        }
+
+        const active = input.newStatus === 'active';
+        const updated = await client.query<UnderlyingRow>(
+            `
+            UPDATE underlyings
+            SET status = $2,
+                active = $3,
+                status_reason = $4,
+                reviewed_by = $5,
+                reviewed_at = NOW(),
+                removed_at = CASE WHEN $2 = 'active' THEN NULL ELSE COALESCE(removed_at, NOW()) END
+            WHERE symbol = $1
+            RETURNING
+                symbol,
+                exchange,
+                company_name,
+                sector,
+                themes,
+                tier,
+                active,
+                status,
+                status_reason,
+                reviewed_by,
+                reviewed_at::text AS reviewed_at,
+                added_at::text AS added_at,
+                removed_at::text AS removed_at
+            `,
+            [input.symbol, input.newStatus, active, input.reason, input.changedBy]
+        );
+
+        await client.query(
+            `
+            INSERT INTO underlying_status_log (symbol, old_status, new_status, reason, changed_by)
+            VALUES ($1, $2, $3, $4, $5)
+            `,
+            [input.symbol, oldRow.status, input.newStatus, input.reason, input.changedBy]
+        );
+        await client.query('COMMIT');
+        return updated.rows[0] ?? null;
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
 }
 
 export async function getUpcomingEarningsBySymbol(symbol: string): Promise<EarningsCalendarRow | null> {
@@ -832,7 +1048,8 @@ export async function upsertPriceHistory(input: UpsertPriceHistoryInput): Promis
                 currency,
                 themes,
                 tier,
-                active
+                active,
+                status
             )
             VALUES (
                 $1,
@@ -843,7 +1060,8 @@ export async function upsertPriceHistory(input: UpsertPriceHistoryInput): Promis
                 'USD',
                 '{}'::text[],
                 2,
-                false
+                false,
+                'deprecated'
             )
             ON CONFLICT (symbol) DO NOTHING
             `,
@@ -1078,6 +1296,58 @@ export async function ensureUnderlyingCompanyNameColumn(): Promise<void> {
     await pool.query(`
         ALTER TABLE underlyings
         ADD COLUMN IF NOT EXISTS company_name VARCHAR(100)
+    `);
+}
+
+export async function ensureUnderlyingsGovernanceColumns(): Promise<void> {
+    await pool.query(`
+        ALTER TABLE underlyings
+        ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active',
+        ADD COLUMN IF NOT EXISTS status_reason TEXT,
+        ADD COLUMN IF NOT EXISTS reviewed_by TEXT,
+        ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS added_at TIMESTAMPTZ DEFAULT NOW(),
+        ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ
+    `);
+
+    await pool.query(`
+        UPDATE underlyings
+        SET status = 'deprecated'
+        WHERE active = FALSE
+          AND status = 'active'
+    `);
+
+    await pool.query(`
+        UPDATE underlyings
+        SET active = (status = 'active')
+        WHERE active <> (status = 'active')
+    `);
+
+    await pool.query(`
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_constraint
+                WHERE conname = 'underlyings_status_chk'
+            ) THEN
+                ALTER TABLE underlyings
+                    ADD CONSTRAINT underlyings_status_chk
+                    CHECK (status IN ('active', 'suspended', 'under_review', 'deprecated'));
+            END IF;
+        END $$;
+    `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS underlying_status_log (
+            id BIGSERIAL PRIMARY KEY,
+            symbol TEXT NOT NULL REFERENCES underlyings(symbol) ON UPDATE CASCADE ON DELETE CASCADE,
+            old_status TEXT,
+            new_status TEXT NOT NULL,
+            reason TEXT,
+            changed_by TEXT NOT NULL,
+            changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
     `);
 }
 
@@ -1396,7 +1666,8 @@ export async function upsertUnderlyingReference(input: {
             currency,
             themes,
             tier,
-            active
+            active,
+            status
         )
         VALUES (
             $1,
@@ -1407,7 +1678,8 @@ export async function upsertUnderlyingReference(input: {
             'USD',
             '{}'::text[],
             2,
-            false
+            false,
+            'deprecated'
         )
         ON CONFLICT (symbol) DO UPDATE
         SET exchange = COALESCE(EXCLUDED.exchange, underlyings.exchange),

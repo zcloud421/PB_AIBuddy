@@ -2,6 +2,9 @@ import type { ChainData, DataFetcherInterface, StrikeData, SymbolData } from '..
 import { MassiveClient } from './massive-client';
 import { getRecentEarningsBySymbol, getUpcomingEarningsBySymbol, getUpcomingEarningsForSymbolWithinDays } from '../db/queries/ideas';
 
+const SNAPSHOT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const MAX_SNAPSHOT_PAGES = 4;
+
 interface MassiveOptionChainResponse {
     next_url?: string;
     results?: Array<Record<string, unknown>>;
@@ -33,6 +36,8 @@ interface MassiveTickerReferenceResponse {
     };
 }
 
+const optionSnapshotCache = new Map<string, { rows: Array<Record<string, unknown>>; expires: number }>();
+
 export interface DailyPriceBar {
     date: string;
     open: number;
@@ -54,7 +59,7 @@ export class MassiveDataFetcher implements DataFetcherInterface {
         const maxExpiry = isoDateOffsetDays(195);
         const maxStrike = Math.floor(currentPrice * 0.90);
         const eligibleContracts = await this.fetchEligibleContracts(symbol, minExpiry, maxExpiry, maxStrike);
-        const rows = await this.fetchOptionSnapshotFirstPage(symbol, minExpiry, maxStrike);
+        const rows = await this.fetchOptionSnapshotPaginated(symbol, minExpiry, maxStrike);
         const eligibleTickers = new Set(eligibleContracts);
 
         const result = rows
@@ -214,13 +219,19 @@ export class MassiveDataFetcher implements DataFetcherInterface {
         return tickers;
     }
 
-    private async fetchOptionSnapshotFirstPage(
+    private async fetchOptionSnapshotPaginated(
         symbol: string,
         minExpiry: string,
         maxStrike: number
     ): Promise<Array<Record<string, unknown>>> {
-        const path = `/v3/snapshot/options/${symbol}`;
-        const params: Record<string, string | number | boolean | undefined> = {
+        const cacheKey = `${symbol}:${todayIsoDate()}:${minExpiry}:${maxStrike}`;
+        const cached = optionSnapshotCache.get(cacheKey);
+        if (cached && cached.expires > Date.now()) {
+            return cached.rows;
+        }
+
+        let nextPath: string | null = `/v3/snapshot/options/${symbol}`;
+        let nextParams: Record<string, string | number | boolean | undefined> | undefined = {
             contract_type: 'put',
             limit: 250,
             'expiration_date.gte': minExpiry,
@@ -228,10 +239,34 @@ export class MassiveDataFetcher implements DataFetcherInterface {
             sort: 'expiration_date',
             order: 'asc'
         };
+        const rows: Array<Record<string, unknown>> = [];
+        let pages = 0;
 
-        const response: MassiveOptionChainResponse = await this.client.get<MassiveOptionChainResponse>(path, params);
+        while (nextPath && pages < MAX_SNAPSHOT_PAGES) {
+            const response: MassiveOptionChainResponse =
+                await this.client.get<MassiveOptionChainResponse>(nextPath, nextParams);
+            rows.push(...(response.results ?? []));
+            pages += 1;
 
-        return response.results ?? [];
+            if (!response.next_url) {
+                nextPath = null;
+                continue;
+            }
+
+            const nextUrl = new URL(response.next_url);
+            nextPath = `${nextUrl.pathname}${nextUrl.search}`;
+            nextParams = undefined;
+        }
+
+        if (nextPath) {
+            console.warn(`[massive] ${symbol} snapshot hit max pages (${MAX_SNAPSHOT_PAGES}), possible strike truncation`);
+        }
+        if (pages > 1) {
+            console.log(`[massive] ${symbol} snapshot pages=${pages} rows=${rows.length}`);
+        }
+
+        optionSnapshotCache.set(cacheKey, { rows, expires: Date.now() + SNAPSHOT_CACHE_TTL_MS });
+        return rows;
     }
 }
 
