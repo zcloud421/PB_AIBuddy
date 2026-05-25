@@ -50,6 +50,7 @@ import {
 import { HttpError } from '../lib/http-error';
 import { buildThemeNarrative } from './theme-narrative';
 import { generateNarrative, sanitizeNarrativeOutput } from '../utils/narrative-generator';
+import { PITCH_ENGINE_VERSION, getPitchNarrativeStaleReason } from '../utils/fcn-shared/pitch-engine-version';
 import type {
     AsyncScoringAcceptedResponse,
     AsyncScoringStatusResponse,
@@ -4057,6 +4058,18 @@ function buildNarrativePriceMomentum(symbolData: SymbolData | null | undefined):
     };
 }
 
+function buildNarrativePriceMomentumFromHistory(
+    history: Array<{ date: string; close: number }>,
+    currentPrice: number | null
+): NarrativePriceMomentum {
+    return {
+        change1dPct: calculateNarrativePctChange(history, currentPrice, 1),
+        change5dPct: calculateNarrativePctChange(history, currentPrice, 5),
+        changeYtdPct: calculateNarrativeYtdChange(history, currentPrice)
+    };
+}
+
+
 class CachedDataFetcher implements DataFetcherInterface {
     private readonly inner: DataFetcherInterface;
     private readonly symbolCache = new Map<string, Promise<SymbolData>>();
@@ -4591,11 +4604,10 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
 
         const cachedNewsItemsEmpty = newsItems.length === 0;
         const cachedKeyEventsEmpty = (cachedRow.key_events ?? []).length === 0;
-        const isLegacyGoSourceQuality =
-            cachedRow.overall_grade === 'GO' &&
-            (cachedRow.source_quality === null ||
-                cachedRow.source_quality === undefined ||
-                !cachedRow.source_quality.startsWith('go_pitch_'));
+        const stalePitchNarrativeReason = getPitchNarrativeStaleReason({
+            source_quality: cachedRow.source_quality,
+            why_now: cachedRow.why_now
+        });
         const hasOtherNarrativeRefreshReason =
             !cachedRow.why_now ||
             shouldRefreshStaleConferenceEvent ||
@@ -4603,19 +4615,28 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             (cachedKeyEventsEmpty && Boolean(cachedRow.why_now));
         const needsNarrativeRefresh =
             hasOtherNarrativeRefreshReason ||
-            isLegacyGoSourceQuality;
+            Boolean(stalePitchNarrativeReason);
         if (needsNarrativeRefresh) {
-            if (isLegacyGoSourceQuality && !hasOtherNarrativeRefreshReason) {
+            if (stalePitchNarrativeReason && !hasOtherNarrativeRefreshReason) {
                 console.log(
                     JSON.stringify({
-                        tag: 'go_pitch_force_refresh',
+                        tag: 'pitch_engine_force_refresh',
                         symbol: cachedRow.symbol,
-                        legacy_source_quality: cachedRow.source_quality,
+                        grade: cachedRow.overall_grade,
+                        reason: stalePitchNarrativeReason,
+                        source_quality: cachedRow.source_quality,
+                        pitch_engine_version: PITCH_ENGINE_VERSION,
                         ts: new Date().toISOString()
                     })
                 );
             }
-            void refreshNarrativeInBackground(normalizedSymbol, cachedRow, priceContext, effectiveFlags).catch(() => {});
+            void refreshNarrativeInBackground(
+                normalizedSymbol,
+                cachedRow,
+                priceContext,
+                effectiveFlags,
+                extendedTradeContext?.movePct ?? null
+            ).catch(() => {});
         }
 
         scheduleDrawdownAttributionPrewarm([normalizedSymbol]);
@@ -6118,7 +6139,8 @@ async function refreshNarrativeInBackground(
     symbol: string,
     cachedRow: NonNullable<Awaited<ReturnType<typeof getIdeaBySymbolAndDate>>>,
     priceContext: Awaited<ReturnType<typeof getPriceContextBySymbol>>,
-    cachedFlags: Flag[]
+    cachedFlags: Flag[],
+    extendedMovePct: number | null = null
 ): Promise<void> {
     if (
         cachedRow.recommended_strike === null ||
@@ -6137,6 +6159,9 @@ async function refreshNarrativeInBackground(
             symbol,
             underlying?.company_name ?? getCompanyName(symbol)
         );
+    const effectiveCurrentPrice = toNullableNumber(priceContext?.current_price ?? cachedRow.current_price);
+    const priceHistory = await getRecentPriceHistoryBySymbol(symbol, 260).catch(() => []);
+    const priceMomentum = buildNarrativePriceMomentumFromHistory(priceHistory, effectiveCurrentPrice);
     const today = new Date().toISOString().split('T')[0];
     const activeAttributionRules = getActiveAttributionRulesForSymbol(symbol, today);
     const narrative = await buildNarrative({
@@ -6146,7 +6171,10 @@ async function refreshNarrativeInBackground(
         grade: cachedRow.overall_grade,
         recommendedStrike: toNullableNumber(cachedRow.recommended_strike),
         estimatedCouponRange: formatEstimatedCouponRange(cachedRow.ref_coupon_pct),
-        currentPrice: toNullableNumber(priceContext?.current_price ?? cachedRow.current_price),
+        currentPrice: effectiveCurrentPrice,
+        change1dPct: priceMomentum.change1dPct,
+        change5dPct: priceMomentum.change5dPct,
+        changeYtdPct: priceMomentum.changeYtdPct,
         pctFrom52wHigh: toNullableNumber(priceContext?.pct_from_52w_high ?? cachedRow.pct_from_52w_high),
         ma20: toNullableNumber(priceContext?.ma20 ?? cachedRow.ma20),
         ma50: toNullableNumber(priceContext?.ma50 ?? cachedRow.ma50),
@@ -6160,7 +6188,7 @@ async function refreshNarrativeInBackground(
         hasRecentEarnings: newsContext.hasRecentEarnings,
         earningsWeight: newsContext.earningsWeight,
         daysSinceEarnings: newsContext.daysSinceEarnings,
-        extendedMovePct: null,
+        extendedMovePct,
         activeAttributionRules
     });
 
@@ -9501,6 +9529,12 @@ async function mapDailyBestCard(
         ref_coupon_pct: number | null;
         moneyness_pct: number | null;
         selected_implied_volatility?: number | null;
+        current_price?: number | null;
+        pct_from_52w_high?: number | null;
+        ma20?: number | null;
+        ma50?: number | null;
+        ma200?: number | null;
+        source_quality?: NarrativeOutput['source_quality'] | null;
         reasoning_text: string;
     }>,
     flagsBySymbol: Map<string, Flag[]>
@@ -9520,46 +9554,72 @@ async function mapDailyBestCard(
         return null;
     }
 
+    const themeNarrative = buildThemeNarrative(idea.themes ?? [theme], flagsBySymbol.get(symbol) ?? []);
     const narrative = idea.why_now
         ? {
               why_now: idea.why_now,
               risk_note: idea.risk_note ?? '',
               sentiment_score: parseNullableNumber(idea.sentiment_score ?? null) ?? 0.5,
-              key_events: idea.key_events ?? []
+              key_events: idea.key_events ?? [],
+              source_quality: idea.source_quality ?? undefined
           }
-        : await buildNarrative({
-              ...(await (async () => {
-                  const newsContext = await fetchStockNewsContext(symbol, idea.company_name ?? undefined);
-                  return {
-                      newsItems: newsContext.narrativeItems,
-                      hasRecentEarnings: newsContext.hasRecentEarnings,
-                      earningsWeight: newsContext.earningsWeight,
-                      daysSinceEarnings: newsContext.daysSinceEarnings
-                  };
-              })()),
-              symbol,
-              companyName: idea.company_name ?? getCompanyName(symbol),
-              theme,
-              grade: 'GO',
-              recommendedStrike,
-              estimatedCouponRange: formatEstimatedCouponRange(idea.ref_coupon_pct),
-              currentPrice: 0,
-              pctFrom52wHigh: 0,
-              ma20: 0,
-              ma50: 0,
-              ma200: 0,
-              impliedVolatility: parseNullableNumber(idea.selected_implied_volatility ?? null),
-              flags: flagsBySymbol.get(symbol) ?? [],
-              tenorDays: recommendedTenorDays,
-              daysToEarnings: null,
-              extendedMovePct: null
-          });
+        : await (async () => {
+              const currentPrice = parseNullableNumber(idea.current_price ?? null);
+              const missingFields = [
+                  currentPrice !== null && currentPrice > 0 ? null : 'current_price',
+                  recommendedStrike > 0 ? null : 'recommended_strike'
+              ].filter((field): field is string => Boolean(field));
+
+              if (missingFields.length > 0) {
+                  console.log(JSON.stringify({
+                      tag: 'daily_best_narrative_skipped',
+                      symbol,
+                      reason: 'missing_core_fields',
+                      missing_fields: missingFields,
+                      ts: new Date().toISOString()
+                  }));
+                  return null;
+              }
+
+              const [newsContext, priceHistory, recentEarnings] = await Promise.all([
+                  fetchStockNewsContext(symbol, idea.company_name ?? undefined),
+                  getRecentPriceHistoryBySymbol(symbol, 260).catch(() => []),
+                  getRecentEarningsBySymbol(symbol).catch(() => null)
+              ]);
+              const priceMomentum = buildNarrativePriceMomentumFromHistory(priceHistory, currentPrice);
+
+              return buildNarrative({
+                  newsItems: newsContext.narrativeItems,
+                  hasRecentEarnings: newsContext.hasRecentEarnings,
+                  earningsWeight: newsContext.earningsWeight,
+                  daysSinceEarnings: newsContext.daysSinceEarnings ?? recentEarnings?.days_since ?? null,
+                  symbol,
+                  companyName: idea.company_name ?? getCompanyName(symbol),
+                  theme,
+                  grade: 'GO',
+                  recommendedStrike,
+                  estimatedCouponRange: formatEstimatedCouponRange(idea.ref_coupon_pct),
+                  currentPrice,
+                  change1dPct: priceMomentum.change1dPct,
+                  change5dPct: priceMomentum.change5dPct,
+                  changeYtdPct: priceMomentum.changeYtdPct,
+                  pctFrom52wHigh: parseNullableNumber(idea.pct_from_52w_high ?? null),
+                  ma20: parseNullableNumber(idea.ma20 ?? null),
+                  ma50: parseNullableNumber(idea.ma50 ?? null),
+                  ma200: parseNullableNumber(idea.ma200 ?? null),
+                  impliedVolatility: parseNullableNumber(idea.selected_implied_volatility ?? null),
+                  flags: flagsBySymbol.get(symbol) ?? [],
+                  tenorDays: recommendedTenorDays,
+                  daysToEarnings: null,
+                  extendedMovePct: null
+              });
+          })();
 
     return {
         symbol,
         company_name: idea.company_name ?? null,
         theme,
-        theme_narrative: buildThemeNarrative(idea.themes ?? [theme], flagsBySymbol.get(symbol) ?? []),
+        theme_narrative: themeNarrative,
         grade: 'GO',
         recommended_strike: recommendedStrike,
         recommended_tenor_days: recommendedTenorDays,

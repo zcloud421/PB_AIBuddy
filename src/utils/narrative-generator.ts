@@ -3,8 +3,8 @@ import { classifyNarrativeMode, type NarrativeMode } from './narrative-confidenc
 import { buildTemplateNarrative } from './narrative-template';
 import { validateEventAnchors, type EventValidationResult } from './narrative-event-validator';
 import { validateNarrativeNumbers, type ValidationResult } from './narrative-validator';
-import { generateGoPitch } from './fcn-go-pitch';
-import { generateConcernPitch } from './fcn-concern-pitch';
+import { buildGoPitchFailClosed, generateGoPitch } from './fcn-go-pitch';
+import { buildConcernPitchFailClosed, generateConcernPitch } from './fcn-concern-pitch';
 
 export type NarrativeSourceQuality =
     | 'llm_validated'
@@ -133,7 +133,9 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
         return result;
     }
 
-    if (mode === 'template_only') {
+    const isPitchGrade = ['GO', 'CAUTION', 'AVOID'].includes(input.grade);
+
+    if (mode === 'template_only' && !isPitchGrade) {
         const template = buildTemplateNarrative(input);
         const result: NarrativeOutput = {
             why_now: template.why_now,
@@ -161,6 +163,19 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
             logNarrativeComplete(input, mode, goPitch, null);
             return goPitch;
         }
+        const fallback = await buildGoPitchFailClosed(input);
+        console.log(JSON.stringify({
+            tag: 'engine_null_fallback',
+            symbol: input.symbol,
+            grade: input.grade,
+            reason: fallback ? 'engine_returned_null' : 'engine_returned_null_no_core_fields',
+            ts: new Date().toISOString()
+        }));
+        if (fallback) {
+            logNarrativeOutput(input.symbol, fallback);
+            logNarrativeComplete(input, mode, fallback, null);
+            return fallback;
+        }
     }
 
     if ((input.grade === 'CAUTION' || input.grade === 'AVOID') && !goPitchEarningsWait) {
@@ -170,6 +185,28 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
             logNarrativeComplete(input, mode, concernPitch, null);
             return concernPitch;
         }
+        const fallback = await buildConcernPitchFailClosed(input);
+        console.log(JSON.stringify({
+            tag: 'engine_null_fallback',
+            symbol: input.symbol,
+            grade: input.grade,
+            reason: fallback ? 'engine_returned_null' : 'engine_returned_null_no_core_fields',
+            ts: new Date().toISOString()
+        }));
+        if (fallback) {
+            logNarrativeOutput(input.symbol, fallback);
+            logNarrativeComplete(input, mode, fallback, null);
+            return fallback;
+        }
+    }
+
+    if (!isPitchGrade) {
+        console.log(JSON.stringify({
+            tag: 'unknown_grade_legacy_path',
+            symbol: input.symbol,
+            grade: input.grade,
+            ts: new Date().toISOString()
+        }));
     }
 
     const fallback = withSourceQuality(buildFallbackNarrative(input), 'template_fallback');

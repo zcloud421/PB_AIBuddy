@@ -8,33 +8,11 @@ import { buildAvoidPitch, buildCautionPitch, buildCautionTemplate, type ConcernP
 import { validateConcernPitch } from './validator';
 
 export async function generateConcernPitch(input: NarrativeInput): Promise<NarrativeOutput | null> {
-    if (input.current_price === null || input.current_price <= 0 || input.recommended_strike <= 0) return null;
-    const coupon = parseCouponRange(input.estimated_coupon_range);
-    if (!coupon || coupon.low <= 0 || coupon.high <= 0) return null;
-    const discount = Math.round(100 - (input.recommended_strike / input.current_price) * 100);
-    if (discount <= 0 || discount > 60) return null;
+    const built = await buildConcernPitchInputsFromNarrativeInput(input);
+    if (!built || !built.mode) return null;
+    const { p, mode } = built;
 
-    const tags = detectConcernTags(input);
-    if (!tags.eligible_mode) return null;
-
-    const desc = await getCompanyDescription(input.symbol);
-    const displayDescription = await getDisplayDescription(input.symbol, input.company_name);
-    const p: ConcernPitchInputs = {
-        symbol: input.symbol,
-        company_short_desc: desc?.short_description ?? input.company_name ?? input.symbol,
-        display_description: displayDescription,
-        current_price: input.current_price,
-        recommended_strike: input.recommended_strike,
-        discount_pct: discount,
-        coupon_low: coupon.low,
-        coupon_high: coupon.high,
-        tenor_label: parseTenorMonths(input.tenor_days),
-        caution_tags: tags.caution_tags,
-        avoid_tags: tags.avoid_tags,
-        input
-    };
-
-    if (tags.eligible_mode === 'AVOID') {
+    if (mode === 'AVOID') {
         const text = buildAvoidPitch(p);
         const validation = validateConcernPitch('AVOID', text, p);
         if (!validation.passed) logValidationFailure(input.symbol, 'AVOID', validation.reasons, text);
@@ -63,6 +41,54 @@ export async function generateConcernPitch(input: NarrativeInput): Promise<Narra
     const text = buildCautionTemplate(p);
     logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
     return wrapResult(text, 'caution_pitch_template');
+}
+
+export async function buildConcernPitchFailClosed(input: NarrativeInput): Promise<NarrativeOutput | null> {
+    const built = await buildConcernPitchInputsFromNarrativeInput(input, true);
+    if (!built) return null;
+    const { p, mode } = built;
+    const text = mode === 'AVOID' ? buildAvoidPitch(p) : buildCautionTemplate(p);
+    logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
+    return wrapResult(text, mode === 'AVOID' ? 'avoid_pitch_deterministic' : 'caution_pitch_template');
+}
+
+async function buildConcernPitchInputsFromNarrativeInput(
+    input: NarrativeInput,
+    allowEmptyTags = false
+): Promise<{ p: ConcernPitchInputs; mode: 'CAUTION' | 'AVOID' | null } | null> {
+    if (input.current_price === null || input.current_price <= 0 || input.recommended_strike <= 0) return null;
+    const coupon = parseCouponRange(input.estimated_coupon_range);
+    if (!coupon || coupon.low <= 0 || coupon.high <= 0) return null;
+    const discount = Math.round(100 - (input.recommended_strike / input.current_price) * 100);
+    if (discount <= 0 || discount > 60) return null;
+
+    const tags = detectConcernTags(input);
+    const mode = tags.eligible_mode ?? (allowEmptyTags
+        ? input.grade === 'AVOID'
+            ? 'AVOID'
+            : 'CAUTION'
+        : null);
+    if (!mode) return null;
+
+    const desc = await getCompanyDescription(input.symbol);
+    const displayDescription = await getDisplayDescription(input.symbol, input.company_name);
+    return {
+        mode,
+        p: {
+            symbol: input.symbol,
+            company_short_desc: desc?.short_description ?? input.company_name ?? input.symbol,
+            display_description: displayDescription,
+            current_price: input.current_price,
+            recommended_strike: input.recommended_strike,
+            discount_pct: discount,
+            coupon_low: coupon.low,
+            coupon_high: coupon.high,
+            tenor_label: parseTenorMonths(input.tenor_days),
+            caution_tags: tags.caution_tags,
+            avoid_tags: tags.avoid_tags,
+            input
+        }
+    };
 }
 
 function logValidationFailure(symbol: string, mode: string, reasons: string[], text: string): void {

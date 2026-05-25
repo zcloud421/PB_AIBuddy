@@ -19,63 +19,21 @@ const CLICKBAIT_PATTERNS = [
 ];
 
 export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeOutput | null> {
-    if (input.current_price === null || input.current_price <= 0 || input.recommended_strike <= 0) {
-        return null;
-    }
+    const pitchInputs = await buildPitchInputsFromNarrativeInput(input);
+    if (!pitchInputs) return null;
 
-    const coupon = parseCouponRange(input.estimated_coupon_range);
-    if (!coupon) return null;
-
-    const tenorLabel = parseTenorMonths(input.tenor_days);
-    const discount = Math.round(100 - (input.recommended_strike / input.current_price) * 100);
-    const desc = await getCompanyDescription(input.symbol);
-    const displayDescription = await getDisplayDescription(input.symbol, input.company_name);
-    const companyDesc = desc?.short_description ?? input.company_name ?? input.symbol;
-    const recentNewsTitles = (input.news_items ?? [])
-        .map((item) => item.title)
-        .filter((title) => !isClickbait(title))
-        .slice(0, 3);
-
-    const litTags = detectLitTags({
-        symbol: input.symbol,
-        current_price: input.current_price,
-        ma50: input.ma50,
-        ma200: input.ma200,
-        change_5d_pct: input.change_5d_pct,
-        pct_from_52w_high: input.pct_from_52w_high,
-        days_since_earnings: input.days_since_earnings,
-        earnings_beat: inferEarningsBeat(input),
-        composite_score: input.composite_score,
-        sector: desc?.sector ?? null,
-        industry: desc?.industry ?? null,
-        is_high_iv: isHighIVString(input.iv_level),
-        news_headlines: input.news_headlines ?? []
-    });
-
-    const pitchInputs: PitchInputs = {
-        symbol: input.symbol,
-        company_short_desc: companyDesc,
-        display_description: displayDescription,
-        current_price: input.current_price,
-        recommended_strike: input.recommended_strike,
-        discount_pct: discount,
-        coupon_low: coupon.low,
-        coupon_high: coupon.high,
-        tenor_label: tenorLabel,
-        lit_tags: litTags,
-        recent_news_titles: recentNewsTitles,
-        change_5d_pct: input.change_5d_pct,
-        pct_from_52w_high: input.pct_from_52w_high,
-        days_since_earnings: input.days_since_earnings
-    };
-
-    if (coupon.low <= 0 || coupon.high <= 0 || discount <= 0 || discount > 60) {
+    if (
+        pitchInputs.coupon_low <= 0 ||
+        pitchInputs.coupon_high <= 0 ||
+        pitchInputs.discount_pct <= 0 ||
+        pitchInputs.discount_pct > 60
+    ) {
         const text = buildMinimalPitch(pitchInputs);
         logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
         return wrapResult(text, 'go_pitch_minimal');
     }
 
-    if (!hasMinimumTagsForPitch(litTags)) {
+    if (!hasMinimumTagsForPitch(pitchInputs.lit_tags)) {
         const text = buildMinimalPitch(pitchInputs);
         logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
         return wrapResult(text, 'go_pitch_minimal');
@@ -88,7 +46,7 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
             if (llmOutput) {
                 const bridge = pickBridge(input.symbol);
                 const finalPitch = buildHybridPitch(llmOutput.why_sentence, pitchInputs, bridge);
-                const validation = validatePitch(llmOutput, litTags, pitchInputs, finalPitch);
+                const validation = validatePitch(llmOutput, pitchInputs.lit_tags, pitchInputs, finalPitch);
                 if (validation.passed) {
                     logStyleRepetitionWarning(input.symbol, finalPitch, checkRepetitionStyle(finalPitch));
                     return wrapResult(finalPitch, 'go_pitch_hybrid_validated');
@@ -111,8 +69,8 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
                         llm_text_preview: llmOutput.why_sentence.slice(0, 80),
                         used_tags: llmOutput.used_tags,
                         timing_signal: llmOutput.timing_signal,
-                        lit_holding: litTags.holding,
-                        lit_timing: litTags.timing,
+                        lit_holding: pitchInputs.lit_tags.holding,
+                        lit_timing: pitchInputs.lit_tags.timing,
                         ts: new Date().toISOString()
                     })
                 );
@@ -125,6 +83,62 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
     const text = buildDeterministicPitch(pitchInputs);
     logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
     return wrapResult(text, 'go_pitch_template');
+}
+
+export async function buildGoPitchFailClosed(input: NarrativeInput): Promise<NarrativeOutput | null> {
+    const pitchInputs = await buildPitchInputsFromNarrativeInput(input);
+    if (!pitchInputs) return null;
+    const text = buildMinimalPitch(pitchInputs);
+    logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
+    return wrapResult(text, 'go_pitch_minimal');
+}
+
+async function buildPitchInputsFromNarrativeInput(input: NarrativeInput): Promise<PitchInputs | null> {
+    if (input.current_price === null || input.current_price <= 0 || input.recommended_strike <= 0) {
+        return null;
+    }
+
+    const coupon = parseCouponRange(input.estimated_coupon_range);
+    if (!coupon) return null;
+
+    const discount = Math.round(100 - (input.recommended_strike / input.current_price) * 100);
+    const desc = await getCompanyDescription(input.symbol);
+    const displayDescription = await getDisplayDescription(input.symbol, input.company_name);
+    const litTags = detectLitTags({
+        symbol: input.symbol,
+        current_price: input.current_price,
+        ma50: input.ma50,
+        ma200: input.ma200,
+        change_5d_pct: input.change_5d_pct,
+        pct_from_52w_high: input.pct_from_52w_high,
+        days_since_earnings: input.days_since_earnings,
+        earnings_beat: inferEarningsBeat(input),
+        composite_score: input.composite_score,
+        sector: desc?.sector ?? null,
+        industry: desc?.industry ?? null,
+        is_high_iv: isHighIVString(input.iv_level),
+        news_headlines: input.news_headlines ?? []
+    });
+
+    return {
+        symbol: input.symbol,
+        company_short_desc: desc?.short_description ?? input.company_name ?? input.symbol,
+        display_description: displayDescription,
+        current_price: input.current_price,
+        recommended_strike: input.recommended_strike,
+        discount_pct: discount,
+        coupon_low: coupon.low,
+        coupon_high: coupon.high,
+        tenor_label: parseTenorMonths(input.tenor_days),
+        lit_tags: litTags,
+        recent_news_titles: (input.news_items ?? [])
+            .map((item) => item.title)
+            .filter((title) => !isClickbait(title))
+            .slice(0, 3),
+        change_5d_pct: input.change_5d_pct,
+        pct_from_52w_high: input.pct_from_52w_high,
+        days_since_earnings: input.days_since_earnings
+    };
 }
 
 function isClickbait(title: string): boolean {
