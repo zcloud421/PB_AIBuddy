@@ -4579,7 +4579,8 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
                       risk_note: cachedRow.risk_note ?? '',
                       sentiment_score: toNullableNumber(cachedRow.sentiment_score) ?? 0.5,
                       key_events: cachedRow.key_events ?? [],
-                      source_quality: cachedRow.source_quality ?? undefined
+                      source_quality: cachedRow.source_quality ?? undefined,
+                      engine_version: cachedRow.narrative_engine_version ?? undefined
                   }, newsItems, normalizedSymbol, cachedRow.company_name ?? getCompanyName(normalizedSymbol))
                 : null;
         narrative = normalizeEarningsWaitNarrative({
@@ -4635,7 +4636,18 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
                 cachedRow,
                 priceContext,
                 effectiveFlags,
-                extendedTradeContext?.movePct ?? null
+                extendedTradeContext?.movePct ?? null,
+                stalePitchNarrativeReason ?? (
+                    !cachedRow.why_now
+                        ? 'missing_narrative'
+                        : cachedNewsItemsEmpty
+                          ? 'missing_news_items'
+                          : cachedKeyEventsEmpty
+                            ? 'missing_key_events'
+                            : shouldRefreshStaleConferenceEvent
+                              ? 'stale_conference_event'
+                              : 'background_refresh'
+                )
             ).catch(() => {});
         }
 
@@ -4810,7 +4822,8 @@ export async function getSymbolNarrative(symbol: string): Promise<SymbolNarrativ
             risk_note: cachedRow.risk_note ?? '',
             sentiment_score: toNullableNumber(cachedRow.sentiment_score) ?? 0.5,
             key_events: cachedRow.key_events ?? [],
-            source_quality: cachedRow.source_quality ?? undefined
+            source_quality: cachedRow.source_quality ?? undefined,
+            engine_version: cachedRow.narrative_engine_version ?? undefined
         }, newsItems, normalizedSymbol, cachedRow.company_name ?? getCompanyName(normalizedSymbol))
     };
 }
@@ -4887,7 +4900,8 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
             hasRecentEarnings: newsContext.hasRecentEarnings,
             earningsWeight: newsContext.earningsWeight,
             daysSinceEarnings: newsContext.daysSinceEarnings,
-            extendedMovePct: symbolData.extended_move_pct ?? null
+            extendedMovePct: symbolData.extended_move_pct ?? null,
+            refreshReason: 'first_gen'
         });
 
         if (runId && shouldPersist) {
@@ -4917,6 +4931,7 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
                     riskNote: narrative?.risk_note ?? null,
                     sentimentScore: narrative?.sentiment_score ?? null,
                     sourceQuality: narrative?.source_quality ?? null,
+                    narrativeEngineVersion: narrative?.engine_version ?? null,
                     keyEvents: narrative?.key_events ?? [],
                     newsItems,
                     reasoningText: scoring.reasoning_text
@@ -6140,7 +6155,8 @@ async function refreshNarrativeInBackground(
     cachedRow: NonNullable<Awaited<ReturnType<typeof getIdeaBySymbolAndDate>>>,
     priceContext: Awaited<ReturnType<typeof getPriceContextBySymbol>>,
     cachedFlags: Flag[],
-    extendedMovePct: number | null = null
+    extendedMovePct: number | null = null,
+    refreshReason = 'background_refresh'
 ): Promise<void> {
     if (
         cachedRow.recommended_strike === null ||
@@ -6189,7 +6205,8 @@ async function refreshNarrativeInBackground(
         earningsWeight: newsContext.earningsWeight,
         daysSinceEarnings: newsContext.daysSinceEarnings,
         extendedMovePct,
-        activeAttributionRules
+        activeAttributionRules,
+        refreshReason
     });
 
     if (narrative) {
@@ -6225,6 +6242,7 @@ async function buildNarrative(input: {
     earningsWeight: number;
     daysSinceEarnings: number | null;
     extendedMovePct?: number | null;
+    refreshReason?: string;
     activeAttributionRules?: Array<{
         id: string;
         reason_zh: string;
@@ -6287,6 +6305,7 @@ async function buildNarrative(input: {
         days_to_earnings: input.daysToEarnings,
         days_since_earnings: input.daysSinceEarnings,
         active_attribution_rules: input.activeAttributionRules?.slice(0, 3) ?? [],
+        refresh_reason: input.refreshReason ?? 'first_gen',
         china_gold_reserve_trend: chinaGoldReserveTrend,
         gld_flow_trend: gldFlowTrend,
         breakeven_inflation_trend: breakevenInflationTrend
@@ -9535,6 +9554,7 @@ async function mapDailyBestCard(
         ma50?: number | null;
         ma200?: number | null;
         source_quality?: NarrativeOutput['source_quality'] | null;
+        narrative_engine_version?: string | null;
         reasoning_text: string;
     }>,
     flagsBySymbol: Map<string, Flag[]>
@@ -9561,7 +9581,8 @@ async function mapDailyBestCard(
               risk_note: idea.risk_note ?? '',
               sentiment_score: parseNullableNumber(idea.sentiment_score ?? null) ?? 0.5,
               key_events: idea.key_events ?? [],
-              source_quality: idea.source_quality ?? undefined
+              source_quality: idea.source_quality ?? undefined,
+              engine_version: idea.narrative_engine_version ?? undefined
           }
         : await (async () => {
               const currentPrice = parseNullableNumber(idea.current_price ?? null);
@@ -9611,7 +9632,8 @@ async function mapDailyBestCard(
                   flags: flagsBySymbol.get(symbol) ?? [],
                   tenorDays: recommendedTenorDays,
                   daysToEarnings: null,
-                  extendedMovePct: null
+                  extendedMovePct: null,
+                  refreshReason: 'daily_best'
               });
           })();
 

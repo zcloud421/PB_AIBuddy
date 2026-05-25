@@ -1,6 +1,7 @@
 import { getCompanyDescription, getDisplayDescription } from '../../data/company-description';
 import type { NarrativeInput, NarrativeOutput, NarrativeSourceQuality } from '../narrative-generator';
 import { checkRepetitionStyle, logStyleRepetitionWarning } from '../fcn-shared/style-repetition';
+import { PITCH_ENGINE_VERSION } from '../fcn-shared/pitch-engine-version';
 import { parseCouponRange, parseTenorMonths } from '../fcn-go-pitch/input-adapter';
 import { detectConcernTags } from './tag-detector';
 import { buildConcernPrompt, callDeepSeekForConcern } from './llm-stitcher';
@@ -108,6 +109,7 @@ function wrapResult(whyNow: string, sourceQuality: NarrativeSourceQuality): Narr
         risk_note: '',
         sentiment_score: 0.45,
         key_events: [],
-        source_quality: sourceQuality
+        source_quality: sourceQuality,
+        engine_version: PITCH_ENGINE_VERSION
     };
 }

@@ -1,11 +1,21 @@
 import assert from 'node:assert/strict';
-import { getPitchNarrativeStaleReason, hasCompanyIntroPrepend, isCurrentPitchSourceQuality } from './pitch-engine-version';
+import {
+    getPitchNarrativeStaleReason,
+    hasCompanyIntroPrepend,
+    isCurrentPitchSourceQuality,
+    narrativeSourceQualityPriority
+} from './pitch-engine-version';
 
 assert.equal(isCurrentPitchSourceQuality('go_pitch_hybrid_validated'), true);
 assert.equal(isCurrentPitchSourceQuality('caution_pitch_template'), true);
 assert.equal(isCurrentPitchSourceQuality('avoid_pitch_deterministic'), true);
 assert.equal(isCurrentPitchSourceQuality('llm_validated'), false);
 assert.equal(isCurrentPitchSourceQuality(null), false);
+assert.ok(narrativeSourceQualityPriority('go_pitch_hybrid_validated') > narrativeSourceQualityPriority('go_pitch_template'));
+assert.ok(narrativeSourceQualityPriority('go_pitch_template') > narrativeSourceQualityPriority('go_pitch_minimal'));
+assert.ok(narrativeSourceQualityPriority('go_pitch_minimal') > narrativeSourceQualityPriority('deterministic'));
+assert.ok(narrativeSourceQualityPriority('deterministic') > narrativeSourceQualityPriority('template_fallback'));
+assert.ok(narrativeSourceQualityPriority('template_fallback') > narrativeSourceQualityPriority('blocked'));
 
 assert.equal(hasCompanyIntroPrepend('NVIDIA 是 AI 算力 GPU 全球龙头供应商。条款上...'), true);
 assert.equal(hasCompanyIntroPrepend('订单可见度较高，当前结构可看。'), false);

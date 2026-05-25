@@ -46,6 +46,12 @@ export function validatePitch(
     const timingSignalResult = validateTimingSignal(output, litTags, pitchInputs);
     reasons.push(...timingSignalResult);
     reasons.push(...validateSpecificity(output, litTags, pitchInputs));
+    if (
+        output.referenced_news_index !== undefined &&
+        output.referenced_news_index >= (pitchInputs.recent_news_titles?.length ?? 0)
+    ) {
+        reasons.push(`referenced_news_index 越界: ${output.referenced_news_index}`);
+    }
 
     const textForForbiddenScan = `${whySentence}\n${finalParagraph ?? ''}`;
     for (const phrase of FORBIDDEN_PHRASES) {
@@ -170,11 +176,18 @@ function extractNumbers(text: string): ExtractedNumber[] {
 }
 
 function isStructuralWindowNumber(num: ExtractedNumber, text: string): boolean {
-    const context = text.slice(Math.max(0, num.index - 4), num.index + num.raw.length + 8);
+    const context = text.slice(Math.max(0, num.index - 10), num.index + num.raw.length + 12);
+    const escapedRaw = num.raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const isCalendarYear =
+        /^20\d{2}$/.test(num.raw) &&
+        new RegExp(
+            `(?:FY|fiscal|Q[1-4]|H[12]|财年|上半年|下半年)\\s*${escapedRaw}|${escapedRaw}\\s*(?:年|财年|指引|上半年|下半年|H[12]|Q[1-4])`,
+            'i'
+        ).test(context);
     return (
         (num.value === 52 && /52\s*周/.test(context)) ||
         (num.value === 5 && /近\s*5\s*日/.test(context)) ||
-        (num.value >= 2000 && num.value <= 2099 && /20\d{2}/.test(context)) ||
+        isCalendarYear ||
         (num.value >= 1 && num.value <= 4 && new RegExp(`Q\\s*${num.raw}|${num.raw}\\s*季`, 'i').test(context))
     );
 }

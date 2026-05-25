@@ -1,6 +1,7 @@
 import { getCompanyDescription, getDisplayDescription } from '../../data/company-description';
 import type { NarrativeInput, NarrativeOutput, NarrativeSourceQuality } from '../narrative-generator';
 import { checkRepetitionStyle, logStyleRepetitionWarning } from '../fcn-shared/style-repetition';
+import { PITCH_ENGINE_VERSION } from '../fcn-shared/pitch-engine-version';
 import { inferEarningsBeat, isHighIVString, parseCouponRange, parseTenorMonths } from './input-adapter';
 import { callDeepSeekForPitch, buildPitchPrompt, type PitchInputs } from './llm-stitcher';
 import { detectLitTags, hasMinimumTagsForPitch } from './tag-detector';
@@ -151,6 +152,7 @@ function wrapResult(whyNow: string, sourceQuality: NarrativeSourceQuality): Narr
         risk_note: '',
         sentiment_score: 0.6,
         key_events: [],
-        source_quality: sourceQuality
+        source_quality: sourceQuality,
+        engine_version: PITCH_ENGINE_VERSION
     };
 }

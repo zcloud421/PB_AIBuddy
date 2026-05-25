@@ -95,7 +95,7 @@ export async function callDeepSeekForConcern(prompt: string): Promise<ConcernLLM
     return parseConcernOutput(data.choices?.[0]?.message?.content ?? '');
 }
 
-function parseConcernOutput(content: string): ConcernLLMOutput | null {
+export function parseConcernOutput(content: string): ConcernLLMOutput | null {
     const parsed = parseJsonObject(content);
     if (!parsed || typeof parsed.concern_sentence !== 'string') return null;
     return {

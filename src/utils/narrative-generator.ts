@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Flag } from '../types/api';
 import { classifyNarrativeMode, type NarrativeMode } from './narrative-confidence';
 import { buildTemplateNarrative } from './narrative-template';
@@ -5,6 +6,7 @@ import { validateEventAnchors, type EventValidationResult } from './narrative-ev
 import { validateNarrativeNumbers, type ValidationResult } from './narrative-validator';
 import { buildGoPitchFailClosed, generateGoPitch } from './fcn-go-pitch';
 import { buildConcernPitchFailClosed, generateConcernPitch } from './fcn-concern-pitch';
+import { PITCH_ENGINE_VERSION } from './fcn-shared/pitch-engine-version';
 
 export type NarrativeSourceQuality =
     | 'llm_validated'
@@ -27,6 +29,7 @@ export interface NarrativeOutput {
     sentiment_score: number;
     key_events: string[];
     source_quality?: NarrativeSourceQuality;
+    engine_version?: string;
 }
 
 interface NarrativeNewsItem {
@@ -66,6 +69,7 @@ export interface NarrativeInput {
         driver_type: string;
         family: string;
     }>;
+    refresh_reason?: string;
     china_gold_reserve_trend?: {
         latest_period: string;
         latest_gold_reserve_tonnes: number;
@@ -126,7 +130,8 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
             risk_note: '',
             sentiment_score: 0.5,
             key_events: [],
-            source_quality: 'blocked'
+            source_quality: 'blocked',
+            engine_version: PITCH_ENGINE_VERSION
         };
         logNarrativeOutput(input.symbol, result);
         logNarrativeComplete(input, mode, result, null);
@@ -142,7 +147,8 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
             risk_note: template.risk_note,
             sentiment_score: 0.5,
             key_events: [],
-            source_quality: 'template_fallback'
+            source_quality: 'template_fallback',
+            engine_version: PITCH_ENGINE_VERSION
         };
         logNarrativeOutput(input.symbol, result);
         logNarrativeComplete(input, mode, result, null);
@@ -364,7 +370,8 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
                         risk_note: template.risk_note,
                         sentiment_score: llmRetry.sentiment_score,
                         key_events: llmRetry.key_events,
-                        source_quality: 'llm_failed_validation'
+                        source_quality: 'llm_failed_validation',
+                        engine_version: PITCH_ENGINE_VERSION
                     };
                     logNarrativeOutput(input.symbol, result);
                     logNarrativeComplete(input, mode, result, retryNumberValidation, retryEventValidation, {
@@ -388,7 +395,8 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
                     risk_note: template.risk_note,
                     sentiment_score: llmResult.sentiment_score,
                     key_events: llmResult.key_events,
-                    source_quality: 'llm_failed_validation'
+                    source_quality: 'llm_failed_validation',
+                    engine_version: PITCH_ENGINE_VERSION
                 };
                 logNarrativeOutput(input.symbol, result);
                 logNarrativeComplete(input, mode, result, validation, eventValidation, {
@@ -448,6 +456,19 @@ function logNarrativeComplete(
         symbol: input.symbol,
         mode,
         source_quality: result.source_quality ?? null,
+        engine_version: result.engine_version ?? PITCH_ENGINE_VERSION,
+        text_hash: createHash('sha256').update(result.why_now).digest('hex').slice(0, 12),
+        input_completeness: {
+            has_current_price: typeof input.current_price === 'number' && input.current_price > 0,
+            has_change_5d: typeof input.change_5d_pct === 'number',
+            has_change_ytd: typeof input.change_ytd_pct === 'number',
+            has_ma50: typeof input.ma50 === 'number',
+            has_ma200: typeof input.ma200 === 'number',
+            has_news: (input.news_items ?? []).length > 0,
+            has_days_since_earnings: typeof input.days_since_earnings === 'number',
+            has_iv: Boolean(input.iv_level)
+        },
+        refresh_reason: input.refresh_reason ?? 'first_gen',
         validation_passed: validation?.passed ?? null,
         unauthorized_count: validation?.unauthorized.length ?? 0,
         event_validation_passed: eventValidation?.passed ?? null,
@@ -578,7 +599,8 @@ export function buildNarrativeRetryHint(
 function withSourceQuality(output: NarrativeOutput, sourceQuality: NarrativeSourceQuality): NarrativeOutput {
     return {
         ...output,
-        source_quality: sourceQuality
+        source_quality: sourceQuality,
+        engine_version: output.engine_version ?? PITCH_ENGINE_VERSION
     };
 }
 

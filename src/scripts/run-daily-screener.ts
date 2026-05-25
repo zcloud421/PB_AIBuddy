@@ -162,6 +162,7 @@ export async function runDailyScreener(): Promise<void> {
                     earnings_weight: newsContext.earningsWeight,
                     days_to_earnings: null,
                     days_since_earnings: newsContext.daysSinceEarnings,
+                    refresh_reason: 'first_gen',
                     china_gold_reserve_trend: chinaGoldReserveTrend,
                     gld_flow_trend: gldFlowTrend,
                     breakeven_inflation_trend: breakevenInflationTrend
@@ -191,6 +192,7 @@ export async function runDailyScreener(): Promise<void> {
                     riskNote: narrative?.risk_note ?? null,
                     sentimentScore: narrative?.sentiment_score ?? null,
                     sourceQuality: narrative?.source_quality ?? null,
+                    narrativeEngineVersion: narrative?.engine_version ?? null,
                     keyEvents: narrative?.key_events ?? [],
                     newsItems: newsContext.displayItems,
                     reasoningText: result.reasoning_text

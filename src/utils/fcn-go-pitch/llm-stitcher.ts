@@ -150,7 +150,7 @@ export async function callDeepSeekForPitch(prompt: string): Promise<PitchLLMOutp
     return parsePitchOutput(content);
 }
 
-function parsePitchOutput(content: string): PitchLLMOutput | null {
+export function parsePitchOutput(content: string): PitchLLMOutput | null {
     const parsed = parseJsonObject(content);
     if (!parsed || typeof parsed.why_sentence !== 'string') return null;
 

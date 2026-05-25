@@ -185,13 +185,35 @@ function formatDisplayDescription(text: string, symbol: string): string {
         .replace(/’/g, "'")
         .trim();
     if (cleaned.length >= 18 && cleaned.length <= 28) return cleaned;
-    if (cleaned.length > 28) return cleaned.slice(0, 28);
+    if (cleaned.length > 28) return truncateDisplayDescription(cleaned);
 
-    if (cleaned.includes('龙头')) return `${cleaned}标的`.slice(0, 28);
-    if (cleaned.includes('供应商')) return `${cleaned}核心标的`.slice(0, 28);
-    if (cleaned.includes('平台')) return `${cleaned}核心标的`.slice(0, 28);
-    if (cleaned.includes('公司')) return `${cleaned}核心标的`.slice(0, 28);
-    return `${cleaned || symbol} 是美股核心标的`.slice(0, 28);
+    if (cleaned.includes('龙头')) return truncateDisplayDescription(`${cleaned}标的`);
+    if (cleaned.includes('供应商')) return truncateDisplayDescription(`${cleaned}核心标的`);
+    if (cleaned.includes('平台')) return truncateDisplayDescription(`${cleaned}核心标的`);
+    if (cleaned.includes('公司')) return truncateDisplayDescription(`${cleaned}核心标的`);
+    return truncateDisplayDescription(`${cleaned || symbol} 是美股核心标的`);
+}
+
+function truncateDisplayDescription(text: string): string {
+    if (text.length <= 28) return text;
+
+    const punctuationWindow = text.slice(20, 28);
+    const punctuationMatch = [...punctuationWindow.matchAll(/[，。、；;,\s]/g)].pop();
+    if (punctuationMatch && punctuationMatch.index !== undefined) {
+        const cutAt = 20 + punctuationMatch.index;
+        const byPunctuation = text.slice(0, cutAt).replace(/[，。、；;,\s]+$/g, '');
+        if (byPunctuation.length >= 18) return byPunctuation;
+    }
+
+    const protectedTerms = ['供应商', '标的', '龙头', '平台', '厂商', '公司'];
+    let sliced = text.slice(0, 28);
+    for (const term of protectedTerms) {
+        if (sliced.endsWith(term[0]) && text.slice(0, 29).endsWith(term)) {
+            sliced = sliced.slice(0, -1);
+            break;
+        }
+    }
+    return `${sliced.replace(/[，。、；;,\s]+$/g, '')}…`;
 }
 
 function compactCompanyName(name: string, symbol: string): string {

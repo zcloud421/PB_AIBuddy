@@ -62,6 +62,7 @@ export interface NarrativeOutput {
         | 'caution_pitch_hybrid_validated'
         | 'caution_pitch_template'
         | 'avoid_pitch_deterministic';
+    engine_version?: string;
 }
 
 export interface IdeaCard {

@@ -15,6 +15,34 @@ export function isCurrentPitchSourceQuality(sourceQuality: NarrativeSourceQualit
     return Boolean(sourceQuality && CURRENT_PITCH_SOURCE_QUALITIES.has(sourceQuality));
 }
 
+export function narrativeSourceQualityPriority(sourceQuality: NarrativeSourceQuality | null | undefined): number {
+    switch (sourceQuality) {
+        case 'go_pitch_hybrid_validated':
+        case 'caution_pitch_hybrid_validated':
+            return 60;
+        case 'go_pitch_template':
+        case 'caution_pitch_template':
+            return 50;
+        case 'go_pitch_minimal':
+            return 45;
+        case 'avoid_pitch_deterministic':
+            return 40;
+        case 'deterministic':
+            return 35;
+        case 'llm_validated':
+        case 'llm_retry_validated':
+        case 'go_pitch_llm_validated':
+            return 30;
+        case 'template_fallback':
+        case 'llm_failed_validation':
+            return 20;
+        case 'blocked':
+            return 0;
+        default:
+            return 0;
+    }
+}
+
 export function hasCompanyIntroPrepend(whyNow: string | null | undefined): boolean {
     if (!whyNow) return false;
     const firstSentence = whyNow.split(/[。！？.!?]/)[0] ?? '';

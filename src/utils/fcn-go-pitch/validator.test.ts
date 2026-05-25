@@ -49,6 +49,15 @@ assert.ok(validate({ why_sentence: '太短', timing_signal: '回调' }).reasons.
 assert.ok(validate({ why_sentence: `${output().why_sentence}${'补充说明'.repeat(20)}` }).reasons.some((reason) => reason.includes('35-90')));
 assert.ok(validate({ why_sentence: `${output().why_sentence} 敲入。` }).reasons.some((reason) => reason.includes('禁词')));
 assert.ok(validate({ why_sentence: `${output().why_sentence} 目标价 800。` }).reasons.some((reason) => reason.includes('未授权数字')));
+assert.equal(
+    validate({ why_sentence: `${output().why_sentence} 2026 年指引仍是主要观察点。` }).passed,
+    true
+);
+assert.ok(
+    validate({ why_sentence: `${output().why_sentence} 营收 2026 亿元仍需观察。` }).reasons.some((reason) =>
+        reason.includes('未授权数字')
+    )
+);
 
 const tooLongFinal = `${buildHybridPitch(output().why_sentence, pitchInputs)}${'补充说明。'.repeat(40)}`;
 assert.ok(validatePitch(output(), pitchInputs.lit_tags, pitchInputs, tooLongFinal).reasons.some((reason) => reason.includes('100-220')));

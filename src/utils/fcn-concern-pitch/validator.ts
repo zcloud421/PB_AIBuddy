@@ -39,6 +39,7 @@ export function validateConcernPitch(
         for (const tag of llmOutput.used_tags) {
             if (!allTags.has(tag as ConcernTag)) reasons.push(`未点亮 tag: ${tag}`);
         }
+        if (llmOutput.used_tags.length === 0) reasons.push('未使用任何 concern tag');
         const sentenceLen = llmOutput.concern_sentence.replace(/\s+/g, '').length;
         if (sentenceLen < 25 || sentenceLen > 90) reasons.push(`concern_sentence 字数 ${sentenceLen} 不在 25-90 范围`);
         reasons.push(...validateConcernSpecificity(llmOutput.concern_sentence, p));
