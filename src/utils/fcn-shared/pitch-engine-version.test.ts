@@ -23,9 +23,18 @@ assert.equal(hasCompanyIntroPrepend('订单可见度较高，当前结构可看�
 assert.equal(
     getPitchNarrativeStaleReason({
         source_quality: 'go_pitch_hybrid_validated',
-        why_now: 'NVIDIA 是 AI 算力 GPU 全球龙头供应商。条款上...'
+        why_now: 'NVIDIA 是 AI 算力 GPU 全球龙头供应商。条款上...',
+        engine_version: '2026-05-25-finalcheck-v1'
     }),
     null
+);
+assert.match(
+    getPitchNarrativeStaleReason({
+        source_quality: 'go_pitch_hybrid_validated',
+        why_now: 'NVIDIA 是 AI 算力 GPU 全球龙头供应商。条款上...',
+        engine_version: '2026-05-25-company-desc-v1'
+    }) ?? '',
+    /^stale_engine_version:/
 );
 assert.match(
     getPitchNarrativeStaleReason({
@@ -37,7 +46,8 @@ assert.match(
 assert.match(
     getPitchNarrativeStaleReason({
         source_quality: 'caution_pitch_template',
-        why_now: '订单可见度较高，当前结构可看。'
+        why_now: '订单可见度较高，当前结构可看。',
+        engine_version: '2026-05-25-finalcheck-v1'
     }) ?? '',
     /^missing_company_intro:/
 );

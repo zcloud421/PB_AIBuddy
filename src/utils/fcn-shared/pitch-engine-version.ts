@@ -1,6 +1,6 @@
 import type { NarrativeSourceQuality } from '../narrative-generator';
 
-export const PITCH_ENGINE_VERSION = '2026-05-25-company-desc-v1';
+export const PITCH_ENGINE_VERSION = '2026-05-25-finalcheck-v1';
 
 const CURRENT_PITCH_SOURCE_QUALITIES = new Set<NarrativeSourceQuality>([
     'go_pitch_hybrid_validated',
@@ -52,9 +52,13 @@ export function hasCompanyIntroPrepend(whyNow: string | null | undefined): boole
 export function getPitchNarrativeStaleReason(input: {
     source_quality: NarrativeSourceQuality | null | undefined;
     why_now: string | null | undefined;
+    engine_version?: string | null | undefined;
 }): string | null {
     if (!isCurrentPitchSourceQuality(input.source_quality)) {
         return `stale_source_quality:${input.source_quality ?? 'null'}`;
+    }
+    if (input.engine_version !== PITCH_ENGINE_VERSION) {
+        return `stale_engine_version:${input.engine_version ?? 'null'}->${PITCH_ENGINE_VERSION}`;
     }
     if (!hasCompanyIntroPrepend(input.why_now)) {
         return `missing_company_intro:${PITCH_ENGINE_VERSION}`;

@@ -7,18 +7,8 @@ import { inferEarningsBeat, isHighIVString, parseCouponRange, parseTenorMonths }
 import { callDeepSeekForPitch, buildPitchPrompt, type PitchInputs } from './llm-stitcher';
 import { detectLitTags, hasMinimumTagsForPitch } from './tag-detector';
 import { buildDeterministicPitch, buildHybridPitch, buildMinimalPitch, pickBridge } from './template';
-import { validatePitch } from './validator';
-
-const CLICKBAIT_PATTERNS = [
-    /^Why .+\??$/i,
-    /should (investors|you) /i,
-    /(best|better) .+ to buy/i,
-    /^.+\s+vs\.?\s+.+\?$/i,
-    /^prediction:/i,
-    /secret weapon/i,
-    /skyrocket/i,
-    /everyone is talking/i
-];
+import { isClickbait } from './headline-filter';
+import { validateGeneratedPitchText, validatePitch } from './validator';
 
 export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeOutput | null> {
     const pitchInputs = await buildPitchInputsFromNarrativeInput(input);
@@ -30,13 +20,13 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
         pitchInputs.discount_pct <= 0 ||
         pitchInputs.discount_pct > 60
     ) {
-        const text = buildMinimalPitch(pitchInputs);
+        const text = finalizeTemplateText(input.symbol, buildMinimalPitch(pitchInputs), pitchInputs, 'go_pitch_minimal');
         logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
         return wrapResult(text, 'go_pitch_minimal');
     }
 
     if (!hasMinimumTagsForPitch(pitchInputs.lit_tags)) {
-        const text = buildMinimalPitch(pitchInputs);
+        const text = finalizeTemplateText(input.symbol, buildMinimalPitch(pitchInputs), pitchInputs, 'go_pitch_minimal');
         logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
         return wrapResult(text, 'go_pitch_minimal');
     }
@@ -82,7 +72,7 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
         }
     }
 
-    const text = buildDeterministicPitch(pitchInputs);
+    const text = finalizeTemplateText(input.symbol, buildDeterministicPitch(pitchInputs), pitchInputs, 'go_pitch_template');
     logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
     return wrapResult(text, 'go_pitch_template');
 }
@@ -90,7 +80,7 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
 export async function buildGoPitchFailClosed(input: NarrativeInput): Promise<NarrativeOutput | null> {
     const pitchInputs = await buildPitchInputsFromNarrativeInput(input);
     if (!pitchInputs) return null;
-    const text = buildMinimalPitch(pitchInputs);
+    const text = finalizeTemplateText(input.symbol, buildMinimalPitch(pitchInputs), pitchInputs, 'go_pitch_minimal');
     logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
     return wrapResult(text, 'go_pitch_minimal');
 }
@@ -153,8 +143,35 @@ async function buildPitchInputsFromNarrativeInput(input: NarrativeInput): Promis
     };
 }
 
-function isClickbait(title: string): boolean {
-    return CLICKBAIT_PATTERNS.some((pattern) => pattern.test(title));
+function finalizeTemplateText(
+    symbol: string,
+    text: string,
+    pitchInputs: PitchInputs,
+    sourceQuality: NarrativeSourceQuality
+): string {
+    const validation = validateGeneratedPitchText(text, pitchInputs);
+    if (validation.passed) return text;
+
+    console.warn(
+        JSON.stringify({
+            tag: 'go_pitch_template_validation_failed',
+            symbol,
+            source_quality: sourceQuality,
+            reasons: validation.reasons,
+            text_preview: text.slice(0, 120),
+            ts: new Date().toISOString()
+        })
+    );
+
+    const safeInputs: PitchInputs = {
+        ...pitchInputs,
+        recent_news_titles: [],
+        change_5d_pct: null,
+        pct_from_52w_high: null,
+        days_since_earnings: null,
+        earnings_surprise: null
+    };
+    return buildMinimalPitch(safeInputs);
 }
 
 function wrapResult(whyNow: string, sourceQuality: NarrativeSourceQuality): NarrativeOutput {

@@ -98,6 +98,7 @@ export interface IdeaCard {
 
 export interface AvoidEntry {
     symbol: string;
+    narrative: NarrativeOutput | null;
     primary_flag_type: FlagType;
     primary_flag_detail: string;
     wait_reason?: WaitReason | null;

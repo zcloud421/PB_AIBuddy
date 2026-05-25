@@ -64,12 +64,14 @@ async function buildConcernPitchInputsFromNarrativeInput(
     if (discount <= 0 || discount > 60) return null;
 
     const tags = detectConcernTags(input);
-    const mode = tags.eligible_mode ?? (allowEmptyTags
+    let mode = tags.eligible_mode ?? (allowEmptyTags
         ? input.grade === 'AVOID'
             ? 'AVOID'
             : 'CAUTION'
         : null);
     if (!mode) return null;
+    if (input.grade === 'CAUTION' && mode === 'AVOID') mode = 'CAUTION';
+    if (input.grade === 'AVOID' && mode === 'CAUTION') mode = 'AVOID';
 
     const desc = await getCompanyDescription(input.symbol);
     const displayDescription = await getDisplayDescription(input.symbol, input.company_name);

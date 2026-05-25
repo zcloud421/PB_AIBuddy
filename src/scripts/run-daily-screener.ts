@@ -18,6 +18,7 @@ import {
     ensureUnderlyingCompanyNameColumn,
     deleteRecommendationTrackerForDate,
     getUnderlyingBySymbol,
+    getRecentPriceHistoryBySymbol,
     saveIdeaCandidate,
     saveDailyBest,
     saveDailyRecommendations,
@@ -27,6 +28,7 @@ import {
     upsertEarningsCalendar,
     updateIdeaRunStatus
 } from '../db/queries/ideas';
+import type { PriceHistoryPointRow } from '../db/queries/ideas';
 import type { ScoringResult } from '../scoring-engine';
 import { runDailyScreener as scoreDailyScreenerSymbols } from '../scoring-engine';
 import { selectDailyBest, selectDailyRecommendationShowcase } from '../services/ideas-service';
@@ -126,6 +128,8 @@ export async function runDailyScreener(): Promise<void> {
                     throw new Error(`No scoring result returned for ${symbol}`);
                 }
                 const newsContext = await fetchStockNewsContext(symbol, underlying?.company_name ?? undefined);
+                const priceHistory = await getRecentPriceHistoryBySymbol(symbol, 260).catch(() => []);
+                const priceMomentum = calculateNarrativePriceMomentum(priceHistory, result.current_price);
                 const [chinaGoldReserveTrend, gldFlowTrend, breakevenInflationTrend] = GOLD_RELATED_NARRATIVE_SYMBOLS.has(symbol.toUpperCase())
                     ? await Promise.all([
                           getChinaGoldReserveTrend().catch(() => null),
@@ -141,6 +145,9 @@ export async function runDailyScreener(): Promise<void> {
                     recommended_strike: result.recommended_strike ?? 0,
                     estimated_coupon_range: result.estimated_coupon_range ?? '',
                     current_price: result.current_price,
+                    change_1d_pct: priceMomentum.change1dPct,
+                    change_5d_pct: priceMomentum.change5dPct,
+                    change_ytd_pct: priceMomentum.changeYtdPct,
                     pct_from_52w_high: result.pct_from_52w_high,
                     ma20: result.ma20,
                     ma50: result.ma50,
@@ -327,4 +334,39 @@ function delay(ms: number): Promise<void> {
     return new Promise((resolve) => {
         setTimeout(resolve, ms);
     });
+}
+
+function calculateNarrativePriceMomentum(
+    history: PriceHistoryPointRow[],
+    currentPrice: number | null | undefined
+): {
+    change1dPct: number | null;
+    change5dPct: number | null;
+    changeYtdPct: number | null;
+} {
+    if (!currentPrice || currentPrice <= 0 || history.length === 0) {
+        return { change1dPct: null, change5dPct: null, changeYtdPct: null };
+    }
+
+    const sorted = history
+        .filter((point) => typeof point.close === 'number' && Number.isFinite(point.close) && point.close > 0)
+        .sort((a, b) => a.date.localeCompare(b.date));
+    const changeFromIndex = (indexFromEnd: number) => {
+        const point = sorted[sorted.length - 1 - indexFromEnd];
+        if (!point) return null;
+        return roundPctChange(currentPrice, point.close);
+    };
+    const currentYear = new Date().getUTCFullYear().toString();
+    const ytdAnchor = sorted.find((point) => point.date.startsWith(currentYear));
+
+    return {
+        change1dPct: changeFromIndex(1),
+        change5dPct: changeFromIndex(5),
+        changeYtdPct: ytdAnchor ? roundPctChange(currentPrice, ytdAnchor.close) : null
+    };
+}
+
+function roundPctChange(currentPrice: number, anchorPrice: number): number | null {
+    if (!anchorPrice || anchorPrice <= 0) return null;
+    return Math.round(((currentPrice - anchorPrice) / anchorPrice) * 1000) / 10;
 }

@@ -4607,7 +4607,8 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
         const cachedKeyEventsEmpty = (cachedRow.key_events ?? []).length === 0;
         const stalePitchNarrativeReason = getPitchNarrativeStaleReason({
             source_quality: cachedRow.source_quality,
-            why_now: cachedRow.why_now
+            why_now: cachedRow.why_now,
+            engine_version: cachedRow.narrative_engine_version
         });
         const hasOtherNarrativeRefreshReason =
             !cachedRow.why_now ||

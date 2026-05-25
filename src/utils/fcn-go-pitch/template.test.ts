@@ -49,4 +49,20 @@ assert.ok(litePitch.includes('承接 LITE'));
 assert.ok(tsmPitch.includes('近 5 日 -2.3%'));
 assert.ok(buildMinimalPitch({ ...basePitch, change_5d_pct: 1.2, pct_from_52w_high: -7 }).includes('近 5 日 +1.2%'));
 
+const xomMinimal = buildMinimalPitch({
+    ...basePitch,
+    symbol: 'XOM',
+    recent_news_titles: ['Brent Crude Is Up 85% Since January']
+});
+assert.equal(xomMinimal.includes('85%'), false);
+assert.equal(xomMinimal.includes('近期消息'), false);
+
+const unhMinimal = buildMinimalPitch({
+    ...basePitch,
+    symbol: 'UNH',
+    recent_news_titles: ['Is UnitedHealth Group a Buy, Sell, or Hold in 2026?']
+});
+assert.equal(unhMinimal.includes('Buy, Sell, or Hold'), false);
+assert.equal(unhMinimal.includes('近期消息'), false);
+
 console.log('fcn-go-pitch template tests passed');

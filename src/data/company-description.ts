@@ -187,6 +187,11 @@ function formatDisplayDescription(text: string, symbol: string): string {
     if (cleaned.length >= 18 && cleaned.length <= 28) return cleaned;
     if (cleaned.length > 28) return truncateDisplayDescription(cleaned);
 
+    if (cleaned.includes('是')) {
+        if (cleaned.endsWith('标的')) return cleaned;
+        if (cleaned.includes('龙头')) return truncateDisplayDescription(`${cleaned}标的`);
+        return truncateDisplayDescription(`${cleaned}${/[A-Za-z0-9]$/.test(cleaned) ? ' ' : ''}核心标的`);
+    }
     if (cleaned.includes('龙头')) return truncateDisplayDescription(`${cleaned}标的`);
     if (cleaned.includes('供应商')) return truncateDisplayDescription(`${cleaned}核心标的`);
     if (cleaned.includes('平台')) return truncateDisplayDescription(`${cleaned}核心标的`);

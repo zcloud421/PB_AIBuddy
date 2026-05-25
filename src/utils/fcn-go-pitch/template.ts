@@ -1,4 +1,5 @@
 import type { PitchInputs } from './llm-stitcher';
+import { isSafeTemplateHeadline } from './headline-filter';
 
 const BRIDGES = ['在这个背景下，', '对应到结构上，', '条款上，'] as const;
 
@@ -59,7 +60,7 @@ function buildSpecificSignals(p: PitchInputs): string[] {
         signals.push(`财报已于 ${p.days_since_earnings} 天前发布`);
     }
 
-    const headline = p.recent_news_titles?.[0];
+    const headline = p.recent_news_titles?.find((title) => isSafeTemplateHeadline(title));
     if (headline && headline.length > 10) {
         signals.push(`近期消息：${truncateHeadline(headline, 50)}`);
     }

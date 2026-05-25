@@ -1850,6 +1850,20 @@ export function mapTodayIdeasResponse(
         flagsBySymbol.set(flag.symbol, existing);
     }
 
+    const mapNarrative = (idea: TodayIdeaRow) =>
+        idea.why_now
+            ? {
+                  why_now: idea.why_now,
+                  risk_note: idea.risk_note ?? '',
+                  sentiment_score: parseNumeric(idea.sentiment_score) ?? 0.5,
+                  key_events: idea.key_events ?? [],
+                  source_quality: idea.source_quality ?? undefined,
+                  engine_version: idea.narrative_engine_version ?? undefined
+              }
+            : null;
+    const isAvoidDisplayRow = (idea: TodayIdeaRow) =>
+        idea.overall_grade === 'AVOID' || idea.source_quality === 'avoid_pitch_deterministic';
+
     return {
         run_date: run.run_date,
         run_id: run.run_id,
@@ -1878,16 +1892,7 @@ export function mapTodayIdeasResponse(
                 coupon_note: '实际票息请向交易台询价',
                 moneyness_pct: parseNumeric(idea.moneyness_pct),
                 reasoning_text: idea.reasoning_text,
-                narrative: idea.why_now
-                    ? {
-                          why_now: idea.why_now,
-                          risk_note: idea.risk_note ?? '',
-                          sentiment_score: parseNumeric(idea.sentiment_score) ?? 0.5,
-                          key_events: idea.key_events ?? [],
-                          source_quality: idea.source_quality ?? undefined,
-                          engine_version: idea.narrative_engine_version ?? undefined
-                      }
-                    : null,
+                narrative: mapNarrative(idea),
                 news_items: idea.news_items ?? [],
                 flags,
                 actionable_caution: false,
@@ -1903,7 +1908,7 @@ export function mapTodayIdeasResponse(
             };
             }),
         caution: ideas
-            .filter((idea) => idea.overall_grade === 'CAUTION')
+            .filter((idea) => idea.overall_grade === 'CAUTION' && !isAvoidDisplayRow(idea))
             .map((idea) => {
                 const flags = flagsBySymbol.get(idea.symbol) ?? [];
                 return {
@@ -1922,16 +1927,7 @@ export function mapTodayIdeasResponse(
                 coupon_note: '实际票息请向交易台询价',
                 moneyness_pct: parseNumeric(idea.moneyness_pct),
                 reasoning_text: idea.reasoning_text,
-                narrative: idea.why_now
-                    ? {
-                          why_now: idea.why_now,
-                          risk_note: idea.risk_note ?? '',
-                          sentiment_score: parseNumeric(idea.sentiment_score) ?? 0.5,
-                          key_events: idea.key_events ?? [],
-                          source_quality: idea.source_quality ?? undefined,
-                          engine_version: idea.narrative_engine_version ?? undefined
-                      }
-                    : null,
+                narrative: mapNarrative(idea),
                 news_items: idea.news_items ?? [],
                 flags,
                 actionable_caution: hasActionableCaution(flags),
@@ -1947,12 +1943,13 @@ export function mapTodayIdeasResponse(
             };
             }),
         not_recommended: ideas
-            .filter((idea) => idea.overall_grade === 'AVOID')
+            .filter((idea) => isAvoidDisplayRow(idea))
             .map((idea) => {
                 const flags = flagsBySymbol.get(idea.symbol) ?? [];
                 const primaryFlag = flags[0];
                 return {
                     symbol: idea.symbol,
+                    narrative: mapNarrative(idea),
                     primary_flag_type: primaryFlag?.type ?? 'NO_APPROVED_STRIKE',
                     primary_flag_detail: primaryFlag?.message ?? 'No primary block reason recorded',
                     wait_reason: deriveWaitReason('AVOID', flags)

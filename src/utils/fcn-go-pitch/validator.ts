@@ -104,6 +104,34 @@ export function validatePitch(
     return { passed: reasons.length === 0, reasons };
 }
 
+export function validateGeneratedPitchText(text: string, pitchInputs: PitchInputs): PitchValidationResult {
+    const reasons: string[] = [];
+
+    for (const phrase of FORBIDDEN_PHRASES) {
+        if (text.includes(phrase)) reasons.push(`含禁词: ${phrase}`);
+    }
+
+    for (const num of extractNumbers(text)) {
+        if (isStructuralWindowNumber(num, text)) continue;
+        const authorization = authorizeNumber(num, text, pitchInputs);
+        if (!authorization.passed) {
+            console.log(
+                JSON.stringify({
+                    tag: 'numeric_context_mismatch',
+                    symbol: pitchInputs.symbol,
+                    value: num.value,
+                    context: authorization.context,
+                    expected_kinds: authorization.expectedKinds,
+                    ts: new Date().toISOString()
+                })
+            );
+            reasons.push(`未授权数字: ${num.value}`);
+        }
+    }
+
+    return { passed: reasons.length === 0, reasons };
+}
+
 function validateSpecificity(output: PitchLLMOutput, litTags: LitTags, pitchInputs: PitchInputs): string[] {
     const text = output.why_sentence ?? '';
     const hasAllowedNumericFact = extractNumbers(text).some((num) => {

@@ -13,6 +13,14 @@ async function run(): Promise<void> {
     for (const term of ['标的', '龙头', '供应商', '平台', '厂商', '公司']) {
         assert.equal(curated.endsWith(term[0]) && !curated.endsWith(term), false);
     }
+    const gdx = await getDisplayDescription('GDX');
+    assert.ok(gdx.includes('GDX 是全球黄金矿企 ETF'));
+    assert.equal(gdx.includes('ETF 是美股核心标的'), false);
+    assert.equal(/是.*是美股核心标的/.test(gdx), false);
+    for (const symbol of Object.keys(CURATED_DESCRIPTIONS)) {
+        const desc = await getDisplayDescription(symbol);
+        assert.equal(/是.*是美股核心标的/.test(desc), false, `${symbol} has duplicate fallback wording: ${desc}`);
+    }
 
     process.env.MASSIVE_API_KEY = 'test-key';
     global.fetch = (async () => ({
