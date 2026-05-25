@@ -4,6 +4,7 @@ import { buildTemplateNarrative } from './narrative-template';
 import { validateEventAnchors, type EventValidationResult } from './narrative-event-validator';
 import { validateNarrativeNumbers, type ValidationResult } from './narrative-validator';
 import { generateGoPitch } from './fcn-go-pitch';
+import { generateConcernPitch } from './fcn-concern-pitch';
 
 export type NarrativeSourceQuality =
     | 'llm_validated'
@@ -15,7 +16,10 @@ export type NarrativeSourceQuality =
     | 'go_pitch_llm_validated'
     | 'go_pitch_hybrid_validated'
     | 'go_pitch_template'
-    | 'go_pitch_minimal';
+    | 'go_pitch_minimal'
+    | 'caution_pitch_hybrid_validated'
+    | 'caution_pitch_template'
+    | 'avoid_pitch_deterministic';
 
 export interface NarrativeOutput {
     why_now: string;
@@ -156,6 +160,15 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
             logNarrativeOutput(input.symbol, goPitch);
             logNarrativeComplete(input, mode, goPitch, null);
             return goPitch;
+        }
+    }
+
+    if ((input.grade === 'CAUTION' || input.grade === 'AVOID') && !goPitchEarningsWait) {
+        const concernPitch = await generateConcernPitch(input);
+        if (concernPitch) {
+            logNarrativeOutput(input.symbol, concernPitch);
+            logNarrativeComplete(input, mode, concernPitch, null);
+            return concernPitch;
         }
     }
 

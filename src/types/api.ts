@@ -58,7 +58,10 @@ export interface NarrativeOutput {
         | 'go_pitch_llm_validated'
         | 'go_pitch_hybrid_validated'
         | 'go_pitch_template'
-        | 'go_pitch_minimal';
+        | 'go_pitch_minimal'
+        | 'caution_pitch_hybrid_validated'
+        | 'caution_pitch_template'
+        | 'avoid_pitch_deterministic';
 }
 
 export interface IdeaCard {
