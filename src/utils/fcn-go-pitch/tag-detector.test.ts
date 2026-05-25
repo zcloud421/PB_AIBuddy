@@ -19,7 +19,30 @@ const base = {
 assert.ok(detectLitTags({ ...base, days_since_earnings: 7, earnings_beat: true }).holding.includes('guide_raise'));
 assert.ok(detectLitTags(base).holding.includes('super_cycle'));
 assert.ok(detectLitTags(base).holding.includes('backlog'));
-assert.ok(detectLitTags({ ...base, news_headlines: ['Company Q3 revenue beats estimates'] }).holding.includes('post_earnings_beat'));
+assert.ok(
+    detectLitTags({
+        ...base,
+        earnings_surprise: { eps_actual: 1.12, eps_estimate: 1, eps_surprise_pct: 12 }
+    }).holding.includes('earnings_strong_beat')
+);
+assert.ok(
+    detectLitTags({
+        ...base,
+        earnings_surprise: { eps_actual: 1.03, eps_estimate: 1, eps_surprise_pct: 3 }
+    }).holding.includes('earnings_modest_beat')
+);
+assert.ok(
+    !detectLitTags({
+        ...base,
+        earnings_surprise: { eps_actual: 1.03, eps_estimate: 1, eps_surprise_pct: 3, revenue_surprise_pct: -4 }
+    }).holding.includes('earnings_modest_beat')
+);
+assert.ok(
+    detectLitTags({
+        ...base,
+        earnings_surprise: { eps_actual: 1.12, eps_estimate: 1, eps_surprise_pct: 12, revenue_surprise_pct: -4 }
+    }).holding.includes('earnings_modest_beat')
+);
 assert.ok(detectLitTags({ ...base, news_headlines: ['Company reaffirms 2026 guidance'] }).holding.includes('guidance_reaffirmed_or_raised'));
 assert.ok(detectLitTags({ ...base, news_headlines: ['Company added to Nasdaq-100 index'] }).holding.includes('index_inclusion'));
 assert.ok(detectLitTags({ ...base, symbol: 'VRT', industry: 'Electrical Equipment' }).holding.includes('infrastructure_capacity_cycle'));

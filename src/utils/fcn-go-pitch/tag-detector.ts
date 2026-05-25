@@ -2,7 +2,8 @@ export type HoldingTag =
     | 'guide_raise'
     | 'super_cycle'
     | 'backlog'
-    | 'post_earnings_beat'
+    | 'earnings_strong_beat'
+    | 'earnings_modest_beat'
     | 'guidance_reaffirmed_or_raised'
     | 'index_inclusion'
     | 'infrastructure_capacity_cycle';
@@ -30,6 +31,12 @@ export function detectLitTags(input: {
     industry: string | null;
     is_high_iv: boolean;
     news_headlines?: string[];
+    earnings_surprise?: {
+        eps_actual: number;
+        eps_estimate: number;
+        eps_surprise_pct: number;
+        revenue_surprise_pct?: number;
+    } | null;
 }): LitTags {
     const holding: HoldingTag[] = [];
     const timing: TimingTag[] = [];
@@ -39,9 +46,8 @@ export function detectLitTags(input: {
         holding.push('guide_raise');
     }
 
-    if (/beat|tops|exceed|超预期|大超/i.test(headlines)) {
-        holding.push('post_earnings_beat');
-    }
+    const earningsBeatTag = classifyEarningsBeatTag(input.earnings_surprise ?? null);
+    if (earningsBeatTag) holding.push(earningsBeatTag);
 
     if (/guidance|guide|outlook|reaffirm|raise|上调|维持指引/i.test(headlines)) {
         holding.push('guidance_reaffirmed_or_raised');
@@ -93,6 +99,26 @@ export function detectLitTags(input: {
     }
 
     return { holding, timing };
+}
+
+function classifyEarningsBeatTag(
+    surprise: {
+        eps_actual: number;
+        eps_estimate: number;
+        eps_surprise_pct: number;
+        revenue_surprise_pct?: number;
+    } | null
+): 'earnings_strong_beat' | 'earnings_modest_beat' | null {
+    if (!surprise || surprise.eps_actual <= surprise.eps_estimate || surprise.eps_surprise_pct < 2) return null;
+
+    let tag: 'earnings_strong_beat' | 'earnings_modest_beat' | null =
+        surprise.eps_surprise_pct >= 5 ? 'earnings_strong_beat' : 'earnings_modest_beat';
+
+    if (typeof surprise.revenue_surprise_pct === 'number' && surprise.revenue_surprise_pct < -3) {
+        tag = tag === 'earnings_strong_beat' ? 'earnings_modest_beat' : null;
+    }
+
+    return tag;
 }
 
 export function hasMinimumTagsForPitch(lit: LitTags): boolean {

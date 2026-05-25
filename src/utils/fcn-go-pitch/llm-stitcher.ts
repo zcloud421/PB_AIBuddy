@@ -6,7 +6,8 @@ const TAG_DESCRIPTIONS: Record<HoldingTag | TimingTag, string> = {
     guide_raise: '近期财报指引强劲 / 超预期',
     super_cycle: '所在行业处于上行周期(AI capex / 半导体 / 油气等)',
     backlog: '订单可见度 / backlog 较高,未来收入有支撑',
-    post_earnings_beat: '近期财报 beat / 超预期',
+    earnings_strong_beat: '最近一期 EPS 明显超预期(>=5%)',
+    earnings_modest_beat: '最近一期 EPS 小幅超预期(2-5%)',
     guidance_reaffirmed_or_raised: '近期指引上调或维持',
     index_inclusion: '近期被纳入重要指数',
     infrastructure_capacity_cycle: '数据中心供电 / 光通信 / 网络基础设施扩容周期',
@@ -29,6 +30,10 @@ export interface PitchInputs {
     change_5d_pct?: number | null;
     pct_from_52w_high?: number | null;
     days_since_earnings?: number | null;
+    earnings_surprise?: {
+        eps_surprise_pct: number;
+        period: string;
+    } | null;
 }
 
 export interface PitchNumericClaim {
@@ -76,17 +81,20 @@ ${newsList}
 - 期限 ${p.tenor_label}
 ${typeof p.change_5d_pct === 'number' ? `- 近 5 日 ${p.change_5d_pct.toFixed(1)}%` : ''}
 ${typeof p.pct_from_52w_high === 'number' ? `- 距 52 周高点 ${Math.abs(p.pct_from_52w_high).toFixed(1)}%` : ''}
+${p.earnings_surprise ? `- ${p.earnings_surprise.period} EPS 超预期 ${p.earnings_surprise.eps_surprise_pct.toFixed(1)}%` : ''}
 
 写作要求:
 1. why_sentence 只写 35-90 字中文,解释为什么现在 sell put 这只股票
 2. why_sentence 必须包含 holding reason + timing reason,但不要写 strike / coupon / tenor / 若跌破 等 FCN 条款
 3. 不要重复公司业务定位,系统会在前一句展示"${p.display_description}";你只写 why-now + holding signal
-4. why_sentence 必须包含至少 1 个具体信号:可用数字事实 / 上方新闻标题事件 / 已点亮 tag 的具体表述
-5. used_tags 必须只包含已点亮 tags,且至少 1 个 holding tag
-6. timing_signal 必填,不能只是"近期"/"最近"/"当前"/"市场关注"/"情绪改善"
-7. 数字必须来自可用数字事实;禁止补充背景知识里的数字
-8. 避免泛化表达:"订单可见度较高" / "支撑未来收入" / "技术形态健康" / "均线多头排列" / "动量未破" / "AI 需求支撑"
-9. 严禁:"正是好时机" / "不过是" / "您本就看好" / "敲入" / "接货" / "安全垫" / "摊薄" / 风险描述
+4. why_sentence 必须包含 1 个 primary specificity,优先级:EPS surprise > price-data > news event > 已点亮 tag 的具体表述
+${p.earnings_surprise ? `5. 已提供 earnings_surprise,必须引用 "${p.earnings_surprise.period} EPS 超预期 ${p.earnings_surprise.eps_surprise_pct.toFixed(1)}%"` : '5. 未提供 earnings_surprise 时,严禁使用"超预期 / beat / 上调 / 强劲"等财报宣传词'}
+6. used_tags 必须只包含已点亮 tags,且至少 1 个 holding tag
+7. timing_signal 必填,不能只是"近期"/"最近"/"当前"/"市场关注"/"情绪改善"
+8. 数字必须来自可用数字事实;禁止补充背景知识里的数字
+9. 禁止相对时间词:"本周" / "上周";用 period 或 "财报后 N 天"
+10. 避免泛化表达:"订单可见度较高" / "支撑未来收入" / "技术形态健康" / "均线多头排列" / "动量未破" / "AI 需求支撑"
+11. 严禁:"正是好时机" / "不过是" / "您本就看好" / "敲入" / "接货" / "安全垫" / "摊薄" / 风险描述
 
 正例:
 {

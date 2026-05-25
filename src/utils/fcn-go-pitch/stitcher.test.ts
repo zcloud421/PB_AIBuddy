@@ -70,6 +70,38 @@ const outOfRangeNews: PitchLLMOutput = {
 };
 assert.ok(validatePitch(outOfRangeNews, pitchInputs.lit_tags, pitchInputs).reasons.some((reason) => reason.includes('referenced_news_index')));
 
+const earningsPitchInputs: PitchInputs = {
+    ...pitchInputs,
+    lit_tags: {
+        holding: ['earnings_strong_beat'],
+        timing: ['quality_pullback']
+    },
+    earnings_surprise: {
+        period: 'Q3 2026',
+        eps_surprise_pct: 8.3
+    },
+    pct_from_52w_high: -8.5
+};
+const earningsLlm: PitchLLMOutput = {
+    why_sentence: 'Q3 2026 EPS 超预期 8.3%，股价距 52 周高点回调 8.5%，承接水平更有纪律。',
+    used_tags: ['earnings_strong_beat', 'quality_pullback'],
+    timing_signal: '股价距 52 周高点回调 8.5%',
+    referenced_news_index: -1,
+    numeric_claims: [{ value: 8.3, unit: '%', context: 'EPS 超预期' }]
+};
+assert.equal(
+    validatePitch(earningsLlm, earningsPitchInputs.lit_tags, earningsPitchInputs, buildHybridPitch(earningsLlm.why_sentence, earningsPitchInputs)).passed,
+    true
+);
+assert.ok(
+    validatePitch(
+        { ...llmOutput, why_sentence: `${llmOutput.why_sentence} 财报超预期。` },
+        pitchInputs.lit_tags,
+        pitchInputs,
+        buildHybridPitch(`${llmOutput.why_sentence} 财报超预期。`, pitchInputs)
+    ).reasons.some((reason) => reason.includes('财报 beat tag'))
+);
+
 const tooLong: PitchLLMOutput = {
     ...llmOutput,
     why_sentence: '定制 ASIC 订单可见度较高，股价近 5 日 +3.2%，趋势保持稳健，客户承接节奏更清晰，同时市场对数据中心网络芯片的关注度仍在提升，管理层执行力也持续获得认可，渠道反馈和供应链节奏也体现出较强延续性。'

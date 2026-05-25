@@ -1,4 +1,5 @@
 import { getCompanyDescription, getDisplayDescription } from '../../data/company-description';
+import { getLatestEarningsSurprise } from '../../data/earnings-surprise';
 import type { NarrativeInput, NarrativeOutput, NarrativeSourceQuality } from '../narrative-generator';
 import { checkRepetitionStyle, logStyleRepetitionWarning } from '../fcn-shared/style-repetition';
 import { PITCH_ENGINE_VERSION } from '../fcn-shared/pitch-engine-version';
@@ -105,6 +106,7 @@ async function buildPitchInputsFromNarrativeInput(input: NarrativeInput): Promis
     const discount = Math.round(100 - (input.recommended_strike / input.current_price) * 100);
     const desc = await getCompanyDescription(input.symbol);
     const displayDescription = await getDisplayDescription(input.symbol, input.company_name);
+    const earningsSurprise = await getLatestEarningsSurprise(input.symbol);
     const litTags = detectLitTags({
         symbol: input.symbol,
         current_price: input.current_price,
@@ -118,8 +120,11 @@ async function buildPitchInputsFromNarrativeInput(input: NarrativeInput): Promis
         sector: desc?.sector ?? null,
         industry: desc?.industry ?? null,
         is_high_iv: isHighIVString(input.iv_level),
-        news_headlines: input.news_headlines ?? []
+        news_headlines: input.news_headlines ?? [],
+        earnings_surprise: earningsSurprise
     });
+    const hasEarningsBeatTag =
+        litTags.holding.includes('earnings_strong_beat') || litTags.holding.includes('earnings_modest_beat');
 
     return {
         symbol: input.symbol,
@@ -138,7 +143,13 @@ async function buildPitchInputsFromNarrativeInput(input: NarrativeInput): Promis
             .slice(0, 3),
         change_5d_pct: input.change_5d_pct,
         pct_from_52w_high: input.pct_from_52w_high,
-        days_since_earnings: input.days_since_earnings
+        days_since_earnings: input.days_since_earnings,
+        earnings_surprise: hasEarningsBeatTag && earningsSurprise
+            ? {
+                  eps_surprise_pct: earningsSurprise.eps_surprise_pct,
+                  period: earningsSurprise.period
+              }
+            : null
     };
 }
 

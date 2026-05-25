@@ -59,6 +59,53 @@ assert.ok(
     )
 );
 
+const earningsInputs: PitchInputs = {
+    ...pitchInputs,
+    lit_tags: {
+        holding: ['earnings_strong_beat'],
+        timing: ['quality_pullback']
+    },
+    earnings_surprise: {
+        period: 'Q3 2026',
+        eps_surprise_pct: 8.3
+    },
+    pct_from_52w_high: -8.5
+};
+
+const earningsOutput: PitchLLMOutput = {
+    why_sentence: 'Q3 2026 EPS 超预期 8.3%，股价距 52 周高点回调 8.5%，承接水平更有纪律。',
+    used_tags: ['earnings_strong_beat', 'quality_pullback'],
+    timing_signal: '股价距 52 周高点回调 8.5%',
+    referenced_news_index: -1,
+    numeric_claims: [{ value: 8.3, unit: '%', context: 'EPS 超预期' }]
+};
+
+assert.equal(validatePitch(earningsOutput, earningsInputs.lit_tags, earningsInputs, buildHybridPitch(earningsOutput.why_sentence, earningsInputs)).passed, true);
+assert.ok(
+    validatePitch(
+        { ...earningsOutput, why_sentence: 'Q3 2026 数字 8.3%，股价距 52 周高点回调 8.5%，承接水平更有纪律。' },
+        earningsInputs.lit_tags,
+        earningsInputs,
+        buildHybridPitch(earningsOutput.why_sentence, earningsInputs)
+    ).reasons.some((reason) => reason.includes('未授权数字'))
+);
+assert.ok(
+    validatePitch(
+        { ...earningsOutput, why_sentence: 'Q3 2026 EPS 超预期 8.5%，承接水平更有纪律。' },
+        earningsInputs.lit_tags,
+        earningsInputs,
+        buildHybridPitch('Q3 2026 EPS 超预期 8.5%，承接水平更有纪律。', earningsInputs)
+    ).reasons.some((reason) => reason.includes('earnings surprise'))
+);
+assert.ok(
+    validatePitch(
+        { ...output(), why_sentence: `${output().why_sentence} 财报超预期。` },
+        pitchInputs.lit_tags,
+        pitchInputs,
+        buildHybridPitch(`${output().why_sentence} 财报超预期。`, pitchInputs)
+    ).reasons.some((reason) => reason.includes('财报 beat tag'))
+);
+
 const tooLongFinal = `${buildHybridPitch(output().why_sentence, pitchInputs)}${'补充说明。'.repeat(40)}`;
 assert.ok(validatePitch(output(), pitchInputs.lit_tags, pitchInputs, tooLongFinal).reasons.some((reason) => reason.includes('100-220')));
 

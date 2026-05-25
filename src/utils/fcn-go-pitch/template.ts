@@ -37,6 +37,10 @@ function buildTemplateWhySentence(p: PitchInputs, includeTags: boolean): string 
 function buildSpecificSignals(p: PitchInputs): string[] {
     const signals: string[] = [];
 
+    if (p.earnings_surprise) {
+        signals.push(`${p.earnings_surprise.period} EPS 超预期 ${p.earnings_surprise.eps_surprise_pct.toFixed(1)}%`);
+    }
+
     if (typeof p.change_5d_pct === 'number' && Math.abs(p.change_5d_pct) >= 1) {
         const sign = p.change_5d_pct >= 0 ? '+' : '';
         signals.push(`近 5 日 ${sign}${p.change_5d_pct.toFixed(1)}%`);
@@ -67,7 +71,8 @@ function buildTagSupplements(p: PitchInputs): string[] {
     const tags: string[] = [];
     if (p.lit_tags.holding.includes('index_inclusion')) tags.push('近期指数纳入提升关注度');
     if (p.lit_tags.holding.includes('guidance_reaffirmed_or_raised')) tags.push('近期指引维持或上调');
-    if (p.lit_tags.holding.includes('post_earnings_beat')) tags.push('近期财报表现超预期');
+    if (p.lit_tags.holding.includes('earnings_strong_beat')) tags.push('最近一期 EPS 明显超预期');
+    if (p.lit_tags.holding.includes('earnings_modest_beat')) tags.push('最近一期 EPS 小幅超预期');
     if (p.lit_tags.holding.includes('infrastructure_capacity_cycle')) tags.push('数据中心基础设施扩容周期延续');
     if (p.lit_tags.holding.includes('guide_raise')) tags.push('财报指引强劲');
     if (p.lit_tags.holding.includes('super_cycle')) tags.push('所在行业处于上行周期');
