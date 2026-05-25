@@ -173,7 +173,9 @@ function isStructuralWindowNumber(num: ExtractedNumber, text: string): boolean {
     const context = text.slice(Math.max(0, num.index - 4), num.index + num.raw.length + 8);
     return (
         (num.value === 52 && /52\s*周/.test(context)) ||
-        (num.value === 5 && /近\s*5\s*日/.test(context))
+        (num.value === 5 && /近\s*5\s*日/.test(context)) ||
+        (num.value >= 2000 && num.value <= 2099 && /20\d{2}/.test(context)) ||
+        (num.value >= 1 && num.value <= 4 && new RegExp(`Q\\s*${num.raw}|${num.raw}\\s*季`, 'i').test(context))
     );
 }
 

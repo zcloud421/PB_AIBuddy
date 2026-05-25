@@ -1,4 +1,4 @@
-import { getCompanyDescription, getDisplayDescription } from '../../data/fmp-company-description';
+import { getCompanyDescription, getDisplayDescription } from '../../data/company-description';
 import type { NarrativeInput, NarrativeOutput, NarrativeSourceQuality } from '../narrative-generator';
 import { checkRepetitionStyle, logStyleRepetitionWarning } from '../fcn-shared/style-repetition';
 import { parseCouponRange, parseTenorMonths } from '../fcn-go-pitch/input-adapter';

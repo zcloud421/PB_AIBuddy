@@ -8,6 +8,28 @@ const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 30000;
 const MIN_REQUEST_INTERVAL_MS = 2000;
 const REQUEST_TIMEOUT_MS = 30000;
+const TICKER_OVERVIEW_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export interface MassiveTickerOverview {
+    name: string | null;
+    sic_description: string | null;
+    type: string | null;
+    market_cap: number | null;
+    primary_exchange: string | null;
+}
+
+interface MassiveTickerOverviewResponse {
+    results?: {
+        name?: string;
+        sic_description?: string;
+        type?: string;
+        market_cap?: number;
+        primary_exchange?: string;
+    };
+}
+
+const tickerOverviewCache = new Map<string, { data: MassiveTickerOverview | null; expires: number }>();
+const tickerOverviewWarned = new Set<string>();
 
 export class MassiveApiError extends Error {
     public readonly statusCode: number;
@@ -113,6 +135,42 @@ export class MassiveClient {
     }
 }
 
+export async function getMassiveTickerOverview(symbol: string): Promise<MassiveTickerOverview | null> {
+    const normalized = symbol.toUpperCase();
+    const cached = tickerOverviewCache.get(normalized);
+    if (cached && cached.expires > Date.now()) return cached.data;
+
+    if (!process.env.MASSIVE_API_KEY) {
+        tickerOverviewCache.set(normalized, { data: null, expires: Date.now() + TICKER_OVERVIEW_TTL_MS });
+        return null;
+    }
+
+    try {
+        const client = new MassiveClient();
+        const response = await client.get<MassiveTickerOverviewResponse>(`/v3/reference/tickers/${normalized}`);
+        const result = response.results;
+        const overview: MassiveTickerOverview | null = result
+            ? {
+                  name: normalizeString(result.name),
+                  sic_description: normalizeString(result.sic_description),
+                  type: normalizeString(result.type),
+                  market_cap: typeof result.market_cap === 'number' && Number.isFinite(result.market_cap) ? result.market_cap : null,
+                  primary_exchange: normalizeString(result.primary_exchange)
+              }
+            : null;
+        tickerOverviewCache.set(normalized, { data: overview, expires: Date.now() + TICKER_OVERVIEW_TTL_MS });
+        return overview;
+    } catch (error) {
+        if (!tickerOverviewWarned.has(normalized)) {
+            tickerOverviewWarned.add(normalized);
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn(`[massive-overview] ${normalized}: ${message}`);
+        }
+        tickerOverviewCache.set(normalized, { data: null, expires: Date.now() + TICKER_OVERVIEW_TTL_MS });
+        return null;
+    }
+}
+
 function delay(ms: number): Promise<void> {
     return new Promise((resolve) => {
         setTimeout(resolve, ms);
@@ -135,4 +193,8 @@ function parseRetryAfterMs(headerValue: string | null): number {
     }
 
     return Math.max(0, retryAt - Date.now());
+}
+
+function normalizeString(value: unknown): string | null {
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 }
