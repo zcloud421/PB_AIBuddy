@@ -105,6 +105,36 @@ assert.ok(
         buildHybridPitch(`${output().why_sentence} 财报超预期。`, pitchInputs)
     ).reasons.some((reason) => reason.includes('财报 beat tag'))
 );
+assert.ok(
+    validatePitch(
+        {
+            ...output(),
+            why_sentence: '公司被纳入重要指数强化配置逻辑，同时股价距 52 周高点回调 12.8%。',
+            used_tags: ['super_cycle', 'quality_pullback'],
+            timing_signal: '股价距 52 周高点回调 12.8%'
+        },
+        pitchInputs.lit_tags,
+        pitchInputs,
+        buildHybridPitch('公司被纳入重要指数强化配置逻辑，同时股价距 52 周高点回调 12.8%。', pitchInputs)
+    ).reasons.some((reason) => reason.includes('tag_conditional_ban_hit: index_inclusion'))
+);
+
+const indexInputs: PitchInputs = {
+    ...pitchInputs,
+    lit_tags: {
+        holding: ['super_cycle', 'index_inclusion'],
+        timing: ['quality_pullback']
+    },
+    recent_news_titles: ['Company will join the Nasdaq-100 Index next month']
+};
+const indexOutput: PitchLLMOutput = {
+    why_sentence: '公司被纳入重要指数强化配置逻辑，同时股价距 52 周高点回调 12.8%，承接水平更有纪律。',
+    used_tags: ['super_cycle', 'index_inclusion', 'quality_pullback'],
+    timing_signal: '股价距 52 周高点回调 12.8%',
+    referenced_news_index: 0,
+    numeric_claims: [{ value: 12.8, unit: '%', context: '距 52 周高点' }]
+};
+assert.equal(validatePitch(indexOutput, indexInputs.lit_tags, indexInputs, buildHybridPitch(indexOutput.why_sentence, indexInputs)).passed, true);
 
 const tooLongFinal = `${buildHybridPitch(output().why_sentence, pitchInputs)}${'补充说明。'.repeat(40)}`;
 assert.ok(validatePitch(output(), pitchInputs.lit_tags, pitchInputs, tooLongFinal).reasons.some((reason) => reason.includes('100-220')));

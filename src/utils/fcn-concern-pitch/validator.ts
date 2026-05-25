@@ -11,6 +11,11 @@ const FORBIDDEN = ['崩盘', '暴跌', '腰斩', '灾难', '危险', '千万别'
 const ANTI_GO = ['可推进', '可询价', '可承接', '适合承接', '进入询价', '票息具吸引力', '结构有吸引力', '当前是机会', '可以考虑卖 put', '承接水平更有纪律'];
 const TRIGGER_TERMS = ['若', '如果', '待', '等', '一旦', '当', '后再评估', '确认后', '落地后', '重新站回', '企稳'];
 const AVOID_ENDING = ['建议观望', '暂缓推进', '不建议推进', '先不纳入', '当前不适合', '暂不考虑', '后再评估'];
+const TAG_CONDITIONAL_BANS: Partial<Record<ConcernTag, RegExp[]>> = {
+    regulatory_overhang: [/监管事件/, /监管悬而/, /诉讼仍未/, /调查持续/, /\bregulatory probe\b/i, /\bpending lawsuit\b/i],
+    guide_cut: [/下调指引/, /下调展望/, /砍指引/, /\bcut guidance\b/i],
+    earnings_miss_recent: [/不及预期/, /未达预期/, /财报失望/, /\bmissed estimates\b/i]
+};
 
 export function validateConcernPitch(
     mode: 'CAUTION' | 'AVOID',
@@ -43,6 +48,7 @@ export function validateConcernPitch(
         const sentenceLen = llmOutput.concern_sentence.replace(/\s+/g, '').length;
         if (sentenceLen < 25 || sentenceLen > 90) reasons.push(`concern_sentence 字数 ${sentenceLen} 不在 25-90 范围`);
         reasons.push(...validateConcernSpecificity(llmOutput.concern_sentence, p));
+        reasons.push(...validateSemanticTagConsistency(text, llmOutput.used_tags));
     }
 
     const numericText = `${text}\n${llmOutput?.numeric_claims.map((claim) => `${claim.value}${claim.unit}`).join('\n') ?? ''}`;
@@ -52,6 +58,21 @@ export function validateConcernPitch(
     }
 
     return { passed: reasons.length === 0, reasons };
+}
+
+function validateSemanticTagConsistency(text: string, usedTags: string[]): string[] {
+    const used = new Set(usedTags);
+    const reasons: string[] = [];
+
+    for (const [tag, patterns] of Object.entries(TAG_CONDITIONAL_BANS) as Array<[ConcernTag, RegExp[]]>) {
+        if (used.has(tag)) continue;
+        for (const pattern of patterns) {
+            const match = text.match(pattern);
+            if (match) reasons.push(`tag_conditional_ban_hit: ${tag}: ${match[0]}`);
+        }
+    }
+
+    return reasons;
 }
 
 function validateConcernSpecificity(text: string, p: ConcernPitchInputs): string[] {

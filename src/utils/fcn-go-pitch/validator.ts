@@ -23,6 +23,32 @@ const FORBIDDEN_PHRASES = [
 
 const GENERIC_TIMING_PHRASES = ['近期', '最近', '当前', '市场关注', '情绪改善'];
 const PRICE_DATA_SIGNAL_PATTERNS = [/距\s*52\s*周高点/, /回调/, /近\s*5\s*日/, /趋势/, /均线/];
+const TAG_CONDITIONAL_BANS: Partial<Record<HoldingTag, RegExp[]>> = {
+    index_inclusion: [
+        /纳入重要指数/,
+        /指数纳入/,
+        /纳入标普/,
+        /纳入纳斯达克/,
+        /被纳入.{0,8}指数/,
+        /入选.{0,8}指数/,
+        /\binclusion in\b.{0,20}\bindex\b/i,
+        /\badded to\b.{0,20}\bindex\b/i,
+        /\bjoins?\b.{0,20}\bS&P\b/i,
+        /\bjoins?\b.{0,20}\bNasdaq\b/i
+    ],
+    guidance_reaffirmed_or_raised: [
+        /上调指引/,
+        /维持指引/,
+        /重申指引/,
+        /上调展望/,
+        /上调预期/,
+        /\braised guidance\b/i,
+        /\breaffirmed outlook\b/i,
+        /\bboosted forecast\b/i
+    ],
+    earnings_strong_beat: [/超预期/, /\bbeat consensus\b/i, /\bbeat estimates\b/i, /业绩超预期/, /财报超预期/],
+    earnings_modest_beat: [/超预期/, /\bbeat consensus\b/i, /\bbeat estimates\b/i, /业绩超预期/, /财报超预期/]
+};
 
 export function validatePitch(
     output: PitchLLMOutput,
@@ -74,6 +100,7 @@ export function validatePitch(
     for (const phrase of FORBIDDEN_PHRASES) {
         if (textForForbiddenScan.includes(phrase)) reasons.push(`含禁词: ${phrase}`);
     }
+    reasons.push(...validateSemanticTagConsistency(textForForbiddenScan, output.used_tags));
 
     if (finalParagraph !== undefined) {
         const finalLength = finalParagraph.replace(/\s+/g, '').length;
@@ -102,6 +129,25 @@ export function validatePitch(
     }
 
     return { passed: reasons.length === 0, reasons };
+}
+
+function validateSemanticTagConsistency(text: string, usedTags: string[]): string[] {
+    const used = new Set(usedTags);
+    const reasons: string[] = [];
+
+    for (const [tag, patterns] of Object.entries(TAG_CONDITIONAL_BANS) as Array<[HoldingTag, RegExp[]]>) {
+        const tagIsPresent = tag === 'earnings_strong_beat' || tag === 'earnings_modest_beat'
+            ? used.has('earnings_strong_beat') || used.has('earnings_modest_beat')
+            : used.has(tag);
+        if (tagIsPresent) continue;
+
+        for (const pattern of patterns) {
+            const match = text.match(pattern);
+            if (match) reasons.push(`tag_conditional_ban_hit: ${tag}: ${match[0]}`);
+        }
+    }
+
+    return reasons;
 }
 
 export function validateGeneratedPitchText(text: string, pitchInputs: PitchInputs): PitchValidationResult {

@@ -81,6 +81,11 @@ assert.ok(
         reason.includes('未授权数字')
     )
 );
+assert.ok(
+    validateConcernPitch('CAUTION', `${cautionText}监管事件悬而未决。`, p, llm).reasons.some((reason) =>
+        reason.includes('tag_conditional_ban_hit: regulatory_overhang')
+    )
+);
 
 const avoidInputs: ConcernPitchInputs = {
     ...p,

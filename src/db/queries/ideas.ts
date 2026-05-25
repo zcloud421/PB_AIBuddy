@@ -1,4 +1,5 @@
 import { pool } from '../client';
+import { createHash } from 'node:crypto';
 import type { DailyBestCard, DailyMarketNarrative, DrawdownAttribution, Flag, NarrativeOutput, NewsItem, SymbolIdeaResponse, TodayIdeasResponse } from '../../types/api';
 import type { DailyPriceBar } from '../../data/massive-fetcher';
 import { PITCH_ENGINE_VERSION, narrativeSourceQualityPriority } from '../../utils/fcn-shared/pitch-engine-version';
@@ -1130,6 +1131,21 @@ export async function updateIdeaCandidateNarrative(
     const newSourceQuality = narrative.source_quality ?? null;
     const newEngineVersion = narrative.engine_version ?? PITCH_ENGINE_VERSION;
     const newPriority = narrativeSourceQualityPriority(newSourceQuality);
+    const newHash = createHash('sha256').update(narrative.why_now).digest('hex').slice(0, 12);
+    const existing = await pool.query<{
+        source_quality: NarrativeOutput['source_quality'] | null;
+        narrative_engine_version: string | null;
+    }>(
+        `
+        SELECT source_quality, narrative_engine_version
+        FROM idea_candidates
+        WHERE run_id = $1
+          AND symbol = $2
+        LIMIT 1
+        `,
+        [runId, symbol]
+    );
+    const existingRow = existing.rows[0];
     const result = await pool.query(
         `
         UPDATE idea_candidates
@@ -1176,29 +1192,36 @@ export async function updateIdeaCandidateNarrative(
         ]
     );
 
-    if (result.rowCount === 0) {
-        const existing = await pool.query<{
-            source_quality: NarrativeOutput['source_quality'] | null;
-            narrative_engine_version: string | null;
-        }>(
-            `
-            SELECT source_quality, narrative_engine_version
-            FROM idea_candidates
-            WHERE run_id = $1
-              AND symbol = $2
-            LIMIT 1
-            `,
-            [runId, symbol]
-        );
-        const row = existing.rows[0];
-        if (row) {
+    if ((result.rowCount ?? 0) > 0) {
+        console.log(JSON.stringify({
+            tag: 'narrative_write_applied',
+            symbol,
+            run_id: runId,
+            old_quality: existingRow?.source_quality ?? null,
+            new_quality: newSourceQuality,
+            new_hash: newHash,
+            row_count: result.rowCount,
+            ts: new Date().toISOString()
+        }));
+    } else {
+        if (existingRow) {
             console.log(JSON.stringify({
                 tag: 'narrative_write_skipped',
                 symbol,
-                existing_quality: row.source_quality,
-                existing_engine_version: row.narrative_engine_version,
+                existing_quality: existingRow.source_quality,
+                existing_engine_version: existingRow.narrative_engine_version,
                 new_quality: newSourceQuality,
                 new_engine_version: newEngineVersion,
+                ts: new Date().toISOString()
+            }));
+        } else {
+            console.warn(JSON.stringify({
+                tag: 'narrative_write_missing_row',
+                symbol,
+                run_id: runId,
+                query_attempted: 'UPDATE idea_candidates WHERE run_id=$1 AND symbol=$2',
+                new_quality: newSourceQuality,
+                new_hash: newHash,
                 ts: new Date().toISOString()
             }));
         }
