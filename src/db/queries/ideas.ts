@@ -1,6 +1,6 @@
 import { pool } from '../client';
 import { createHash } from 'node:crypto';
-import type { DailyBestCard, DailyMarketNarrative, DrawdownAttribution, Flag, NarrativeOutput, NewsItem, SymbolIdeaResponse, TodayIdeasResponse } from '../../types/api';
+import type { DailyBestCard, DailyMarketNarrative, DrawdownAttribution, Flag, MarketContext, NarrativeOutput, NewsItem, SymbolIdeaResponse, TodayIdeasResponse } from '../../types/api';
 import type { DailyPriceBar } from '../../data/massive-fetcher';
 import { PITCH_ENGINE_VERSION, narrativeSourceQualityPriority } from '../../utils/fcn-shared/pitch-engine-version';
 
@@ -149,6 +149,9 @@ export interface TodayIdeaRow {
     overall_grade: 'GO' | 'CAUTION' | 'AVOID';
     composite_score: number;
     risk_reward_score: number | null;
+    trend_score: number | null;
+    event_risk_score: number | null;
+    iv_premium_score: number | null;
     recommended_strike: number | null;
     recommended_tenor_days: number | null;
     expiry_date: string | null;
@@ -188,6 +191,9 @@ export interface CachedIdeaRow {
     overall_grade: 'GO' | 'CAUTION' | 'AVOID';
     composite_score: number | null;
     risk_reward_score: number | null;
+    trend_score: number | null;
+    event_risk_score: number | null;
+    iv_premium_score: number | null;
     recommended_strike: number | null;
     recommended_tenor_days: number | null;
     expiry_date: string | null;
@@ -219,6 +225,7 @@ export interface SaveIdeaCandidateInput {
     trendScore: number;
     skewScore: number;
     eventRiskScore: number;
+    ivPremiumScore: number;
     compositeScore: number;
     riskRewardScore?: number | null;
     recommendedStrike: number | null;
@@ -477,6 +484,9 @@ export async function getIdeasByRunId(runId: string): Promise<TodayIdeaRow[]> {
             ic.overall_grade,
             ic.composite_score,
             ic.risk_reward_score,
+            ic.trend_score,
+            ic.event_risk_score,
+            ic.iv_premium_score,
             ic.recommended_strike,
             ic.recommended_tenor_days,
             ic.expiry_date::text AS expiry_date,
@@ -579,6 +589,9 @@ export async function getIdeaBySymbolAndDate(symbol: string, date: string): Prom
             ic.overall_grade,
             ic.composite_score,
             ic.risk_reward_score,
+            ic.trend_score,
+            ic.event_risk_score,
+            ic.iv_premium_score,
             ic.recommended_strike,
             ic.recommended_tenor_days,
             ic.expiry_date::text AS expiry_date,
@@ -647,6 +660,9 @@ export async function getIdeaBySymbolAndRunId(symbol: string, runId: string): Pr
             ic.overall_grade,
             ic.composite_score,
             ic.risk_reward_score,
+            ic.trend_score,
+            ic.event_risk_score,
+            ic.iv_premium_score,
             ic.recommended_strike,
             ic.recommended_tenor_days,
             ic.expiry_date::text AS expiry_date,
@@ -905,6 +921,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             trend_score,
             skew_score,
             event_risk_score,
+            iv_premium_score,
             composite_score,
             risk_reward_score,
             recommended_strike,
@@ -927,7 +944,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             news_items,
             reasoning_text
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::date, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26::jsonb, $27::jsonb, $28
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::date, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27::jsonb, $28::jsonb, $29
         )
         ON CONFLICT (run_id, symbol) DO UPDATE
         SET overall_grade = EXCLUDED.overall_grade,
@@ -935,6 +952,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             trend_score = EXCLUDED.trend_score,
             skew_score = EXCLUDED.skew_score,
             event_risk_score = EXCLUDED.event_risk_score,
+            iv_premium_score = EXCLUDED.iv_premium_score,
             composite_score = EXCLUDED.composite_score,
             risk_reward_score = EXCLUDED.risk_reward_score,
             recommended_strike = EXCLUDED.recommended_strike,
@@ -965,6 +983,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             result.trendScore,
             result.skewScore,
             result.eventRiskScore,
+            result.ivPremiumScore,
             result.compositeScore,
             result.riskRewardScore ?? null,
             result.recommendedStrike,
@@ -1032,6 +1051,7 @@ export async function ensureIdeaCandidatePriceColumns(): Promise<void> {
     await pool.query(`
         ALTER TABLE idea_candidates
         ADD COLUMN IF NOT EXISTS sentiment_score NUMERIC(10, 4),
+        ADD COLUMN IF NOT EXISTS iv_premium_score NUMERIC(8, 4),
         ADD COLUMN IF NOT EXISTS selected_implied_volatility NUMERIC(10, 6),
         ADD COLUMN IF NOT EXISTS current_price NUMERIC(18, 6),
         ADD COLUMN IF NOT EXISTS ma20 NUMERIC(18, 6),
@@ -1859,7 +1879,12 @@ export function mapTodayIdeasResponse(
     run: LatestCompletedRun,
     ideas: TodayIdeaRow[],
     riskFlags: RiskFlagRow[],
-    dailyBest: DailyBestCard | null = null
+    dailyBest: DailyBestCard | null = null,
+    marketContext: MarketContext = {
+        vix: 0,
+        vix_change_1d_pct: null,
+        notable_macro: 'Macro regime snapshot unavailable'
+    }
 ): TodayIdeasResponse {
     const flagsBySymbol = new Map<string, Flag[]>();
 
@@ -1891,10 +1916,7 @@ export function mapTodayIdeasResponse(
     return {
         run_date: run.run_date,
         run_id: run.run_id,
-        market_context: {
-            vix: 0,
-            notable_macro: 'TODO: populate market context from macro snapshot source'
-        },
+        market_context: marketContext,
         daily_best: dailyBest,
         recommended: ideas
             .filter((idea) => idea.overall_grade === 'GO')
@@ -1909,6 +1931,9 @@ export function mapTodayIdeasResponse(
                 tier: idea.tier,
                 grade: 'GO',
                 composite_score: Number(idea.composite_score),
+                trend_score: parseNumeric(idea.trend_score),
+                event_risk_score: parseNumeric(idea.event_risk_score),
+                iv_premium_score: parseNumeric(idea.iv_premium_score),
                 recommended_strike: parseNumeric(idea.recommended_strike),
                 recommended_tenor_days: parseNumeric(idea.recommended_tenor_days),
                 recommended_expiry_date: idea.expiry_date ?? null,
@@ -1944,6 +1969,9 @@ export function mapTodayIdeasResponse(
                 tier: idea.tier,
                 grade: 'CAUTION',
                 composite_score: Number(idea.composite_score),
+                trend_score: parseNumeric(idea.trend_score),
+                event_risk_score: parseNumeric(idea.event_risk_score),
+                iv_premium_score: parseNumeric(idea.iv_premium_score),
                 recommended_strike: parseNumeric(idea.recommended_strike),
                 recommended_tenor_days: parseNumeric(idea.recommended_tenor_days),
                 recommended_expiry_date: idea.expiry_date ?? null,

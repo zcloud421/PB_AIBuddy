@@ -2,6 +2,7 @@ import { fetchTickerMarketCap, fetchTickerReferenceSnapshot, MassiveDataFetcher 
 import { getChinaGoldReserveTrend } from '../data/macro-china-fetcher';
 import { getGldFlowTrend } from '../data/spdr-gold-flow-fetcher';
 import { getBreakevenInflationTrend } from '../data/fred-fetcher';
+import { fetchFredSeries, latestPoint, pointDaysBack } from '../data/fred-series-fetcher';
 import { fetchHistoricalStockNewsBatch, fetchStockNews, fetchStockNewsContext, filterRelevantNewsItems, getCompanyName } from '../data/news-fetcher';
 import {
     calculateHistoricalVolatility,
@@ -47,6 +48,7 @@ import {
     upsertDrawdownAttributions,
     updateIdeaRunStatus
 } from '../db/queries/ideas';
+import { getLatestMacroRegimeSnapshot } from '../db/queries/macro-regime';
 import { HttpError } from '../lib/http-error';
 import { buildThemeNarrative } from './theme-narrative';
 import { generateNarrative, sanitizeNarrativeOutput } from '../utils/narrative-generator';
@@ -61,6 +63,7 @@ import type {
     DailyBestCard,
     Flag,
     InteractiveStrikeRiskSummary,
+    MarketContext,
     NarrativeOutput,
     NewsItem,
     DrawdownAttribution,
@@ -4223,7 +4226,50 @@ export async function getTodayIdeas(): Promise<TodayIdeasResponse> {
     }
     scheduleDrawdownAttributionPrewarm(prewarmSymbols);
 
-    return mapTodayIdeasResponse(latestRun, normalizedIdeas, riskFlags, dailyBest);
+    const marketContext = await buildTodayMarketContext();
+    return mapTodayIdeasResponse(latestRun, normalizedIdeas, riskFlags, dailyBest, marketContext);
+}
+
+async function buildTodayMarketContext(): Promise<MarketContext> {
+    const [vixSeries, macroSnapshot] = await Promise.all([
+        fetchFredSeries('VIXCLS', 5).catch(() => null),
+        getLatestMacroRegimeSnapshot().catch(() => null)
+    ]);
+
+    const latestVix = vixSeries ? latestPoint(vixSeries) : null;
+    const previousVix = vixSeries ? pointDaysBack(vixSeries, 1) : null;
+    const macroVixValue = macroSnapshot?.indicators?.VIX?.value;
+    const vix = latestVix?.value ?? (typeof macroVixValue === 'number' ? macroVixValue : 0);
+    const vixChange1dPct =
+        latestVix && previousVix && previousVix.value !== 0
+            ? Number((((latestVix.value - previousVix.value) / previousVix.value) * 100).toFixed(1))
+            : null;
+
+    const notableMacro = macroSnapshot
+        ? formatMacroRegimeContext(macroSnapshot)
+        : 'Macro regime snapshot unavailable';
+
+    return {
+        vix: Number(vix.toFixed(1)),
+        vix_change_1d_pct: vixChange1dPct,
+        notable_macro: notableMacro
+    };
+}
+
+function formatMacroRegimeContext(snapshot: NonNullable<Awaited<ReturnType<typeof getLatestMacroRegimeSnapshot>>>): string {
+    const severityLabel: Record<string, string> = {
+        Healthy: 'Risk-On',
+        Neutral: 'Neutral',
+        Warning: 'Risk Watch',
+        Critical: 'Risk-Off'
+    };
+    const primaryDriver =
+        snapshot.escalation_summary?.escalation_reasons?.[0] ??
+        snapshot.indicators?.VIX?.notes?.[0] ??
+        snapshot.indicators?.HY_OAS?.notes?.[0] ??
+        snapshot.guardrail?.note ??
+        'macro snapshot stable';
+    return `${severityLabel[snapshot.overall] ?? snapshot.overall} · ${primaryDriver}`;
 }
 
 export async function selectDailyBest(candidates: ScoringResult[]): Promise<{
@@ -4663,6 +4709,9 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             grade: cachedRow.overall_grade,
             composite_score: toNullableNumber(cachedRow.composite_score) ?? 0,
             risk_reward_score: toNullableNumber(cachedRow.risk_reward_score),
+            trend_score: toNullableNumber(cachedRow.trend_score),
+            event_risk_score: toNullableNumber(cachedRow.event_risk_score),
+            iv_premium_score: toNullableNumber(cachedRow.iv_premium_score),
             verdict_headline: gradeToHeadline(cachedRow.overall_grade),
             verdict_sub: generateVerdictSub(cachedRow.overall_grade, effectiveFlags),
             data_as_of_date: effectiveDataAsOfDate,
@@ -4915,6 +4964,7 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
                     trendScore: scoring.trend_score,
                     skewScore: scoring.skew_score,
                     eventRiskScore: scoring.event_risk_score,
+                    ivPremiumScore: scoring.iv_premium_score,
                     compositeScore: scoring.composite_score,
                     riskRewardScore: scoring.risk_reward_score,
                     recommendedStrike: scoring.recommended_strike,
@@ -4993,6 +5043,9 @@ function buildUnavailableIdeaResponse(symbol: string): SymbolIdeaResponse {
         grade: 'AVOID',
         composite_score: 0,
         risk_reward_score: null,
+        trend_score: null,
+        event_risk_score: null,
+        iv_premium_score: null,
         verdict_headline: '暂不推荐',
         verdict_sub: '该标的数据暂时无法获取，请稍后重试',
         data_as_of_date: null,
@@ -5059,6 +5112,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 trend_score: 0,
                 skew_score: 0,
                 event_risk_score: 1,
+                iv_premium_score: 0,
                 premium_score: null,
                 selected_implied_volatility: null,
                 recommended_strike: null,
@@ -5134,6 +5188,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                     postEarningsShockFlag || (daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3 && !earningsAlreadyReported)
                         ? 0.1
                         : 0.4,
+                iv_premium_score: 0,
                 premium_score: null,
                 selected_implied_volatility: null,
                 recommended_strike: null,
@@ -5279,6 +5334,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 trend_score: 0,
                 skew_score: 0,
                 event_risk_score: 1,
+                iv_premium_score: 0,
                 premium_score: null,
                 selected_implied_volatility: null,
                 recommended_strike: null,
@@ -5375,6 +5431,9 @@ function mapScoringResultToSymbolIdea(
         grade: scoring.overall_grade,
         composite_score: scoring.composite_score,
         risk_reward_score: scoring.risk_reward_score,
+        trend_score: scoring.trend_score,
+        event_risk_score: scoring.event_risk_score,
+        iv_premium_score: scoring.iv_premium_score,
         verdict_headline: gradeToHeadline(scoring.overall_grade),
         verdict_sub: generateVerdictSub(scoring.overall_grade, flags),
         data_as_of_date: symbolData.price_history[symbolData.price_history.length - 1]?.date ?? todayIsoDate(),
@@ -9547,6 +9606,9 @@ async function mapDailyBestCard(
         recommended_tenor_days: number | null;
         expiry_date?: string | null;
         ref_coupon_pct: number | null;
+        trend_score?: number | null;
+        event_risk_score?: number | null;
+        iv_premium_score?: number | null;
         moneyness_pct: number | null;
         selected_implied_volatility?: number | null;
         current_price?: number | null;
@@ -9644,6 +9706,9 @@ async function mapDailyBestCard(
         theme,
         theme_narrative: themeNarrative,
         grade: 'GO',
+        trend_score: parseNullableNumber(idea.trend_score ?? null),
+        event_risk_score: parseNullableNumber(idea.event_risk_score ?? null),
+        iv_premium_score: parseNullableNumber(idea.iv_premium_score ?? null),
         recommended_strike: recommendedStrike,
         recommended_tenor_days: recommendedTenorDays,
         recommended_expiry_date: idea.expiry_date ?? null,

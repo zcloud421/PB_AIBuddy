@@ -74,6 +74,9 @@ export interface IdeaCard {
     tier: number;
     grade: Extract<Grade, 'GO' | 'CAUTION'>;
     composite_score: number;
+    trend_score?: number | null;
+    event_risk_score?: number | null;
+    iv_premium_score?: number | null;
     recommended_strike: number | null;
     recommended_tenor_days: number | null;
     recommended_expiry_date: string | null;
@@ -110,6 +113,9 @@ export interface DailyBestCard {
     theme: string;
     theme_narrative: string;
     grade: 'GO';
+    trend_score?: number | null;
+    event_risk_score?: number | null;
+    iv_premium_score?: number | null;
     recommended_strike: number;
     recommended_tenor_days: number;
     recommended_expiry_date: string | null;
@@ -126,6 +132,7 @@ export interface DailyBestCard {
 
 export interface MarketContext {
     vix: number;
+    vix_change_1d_pct?: number | null;
     hk_vix?: number;
     notable_macro: string;
 }
@@ -583,6 +590,9 @@ export interface SymbolIdeaResponse {
     grade: Grade;
     composite_score: number;
     risk_reward_score: number | null;
+    trend_score?: number | null;
+    event_risk_score?: number | null;
+    iv_premium_score?: number | null;
     verdict_headline: string;
     verdict_sub: string;
     data_as_of_date: string | null;

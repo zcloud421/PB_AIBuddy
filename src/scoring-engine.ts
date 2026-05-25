@@ -102,6 +102,7 @@ export interface ScoringResult {
     trend_score: number;
     skew_score: number;
     event_risk_score: number;
+    iv_premium_score: number;
     premium_score: number | null;
     selected_implied_volatility: number | null;
     recommended_strike: number | null;
@@ -982,10 +983,11 @@ export function scoreAndGrade(candidate: {
 
     const premiumScore = adjustedPremiumScore(strikeData);
 
+    const ivPremiumScore = clamp((ivRankScore * 0.40) + ((premiumScore ?? 0.5) * 0.40) + (skewScore * 0.20), 0, 1);
     const baseCompositeScore = clamp(
         (trendScore * 0.40) +
             (eventRiskScore * 0.25) +
-            (((ivRankScore * 0.40) + ((premiumScore ?? 0.5) * 0.40) + (skewScore * 0.20)) * 0.35),
+            (ivPremiumScore * 0.35),
         0,
         1
     );
@@ -1271,6 +1273,7 @@ export function scoreAndGrade(candidate: {
         trend_score: Number(trendScore.toFixed(4)),
         skew_score: Number(skewScore.toFixed(4)),
         event_risk_score: Number(eventRiskScore.toFixed(4)),
+        iv_premium_score: Number(ivPremiumScore.toFixed(4)),
         premium_score: premiumScore !== null ? Number(premiumScore.toFixed(4)) : null,
         selected_implied_volatility: Number.isFinite(strikeData.iv) ? Number(strikeData.iv.toFixed(4)) : null,
         recommended_strike: strikeData.strike,
@@ -1449,6 +1452,7 @@ export async function runDailyScreener(
                 trend_score: 0,
                 skew_score: 0,
                 event_risk_score: 0,
+                iv_premium_score: 0,
                 premium_score: null,
                 selected_implied_volatility: null,
                 recommended_strike: null,
@@ -1514,6 +1518,7 @@ export async function runDailyScreener(
                 trend_score: 0,
                 skew_score: 0,
                 event_risk_score: 0,
+                iv_premium_score: 0,
                 premium_score: null,
                 selected_implied_volatility: null,
                 recommended_strike: null,
@@ -1577,6 +1582,7 @@ export async function runDailyScreener(
                     trend_score: 0,
                     skew_score: 0,
                     event_risk_score: 0,
+                    iv_premium_score: 0,
                     premium_score: null,
                     selected_implied_volatility: null,
                     recommended_strike: null,
@@ -1690,6 +1696,7 @@ export async function runDailyScreener(
                 trend_score: 0,
                 skew_score: 0,
                 event_risk_score: 0,
+                iv_premium_score: 0,
                 premium_score: null,
                 selected_implied_volatility: null,
                 recommended_strike: null,

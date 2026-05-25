@@ -132,6 +132,7 @@ CREATE TABLE idea_candidates (
     trend_score NUMERIC(8, 4) NOT NULL CHECK (trend_score >= 0),
     skew_score NUMERIC(8, 4) NOT NULL CHECK (skew_score >= 0),
     event_risk_score NUMERIC(8, 4) NOT NULL CHECK (event_risk_score >= 0),
+    iv_premium_score NUMERIC(8, 4) CHECK (iv_premium_score IS NULL OR iv_premium_score >= 0),
     composite_score NUMERIC(10, 4) NOT NULL CHECK (composite_score >= 0),
     risk_reward_score NUMERIC(10, 4) CHECK (risk_reward_score IS NULL OR risk_reward_score >= 0),
     recommended_strike NUMERIC(18, 6) CHECK (recommended_strike IS NULL OR recommended_strike > 0),
@@ -426,6 +427,7 @@ CREATE TABLE IF NOT EXISTS theme_basket_results (
 
 ALTER TABLE idea_candidates
     ADD COLUMN IF NOT EXISTS source_quality TEXT NULL,
-    ADD COLUMN IF NOT EXISTS narrative_engine_version TEXT NULL;
+    ADD COLUMN IF NOT EXISTS narrative_engine_version TEXT NULL,
+    ADD COLUMN IF NOT EXISTS iv_premium_score NUMERIC(8, 4);
 
 COMMIT;
