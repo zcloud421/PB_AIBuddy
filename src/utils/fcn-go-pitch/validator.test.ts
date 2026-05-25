@@ -6,6 +6,7 @@ import { validatePitch } from './validator';
 const pitchInputs: PitchInputs = {
     symbol: 'NVDA',
     company_short_desc: 'NVIDIA 是全球 AI 算力 GPU 核心供应商',
+    display_description: 'NVIDIA 是AI算力GPU供应商',
     current_price: 100,
     recommended_strike: 85,
     discount_pct: 15,

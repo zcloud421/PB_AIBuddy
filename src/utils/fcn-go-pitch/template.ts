@@ -7,7 +7,7 @@ export function buildDealStructureSentence(p: PitchInputs): string {
 }
 
 export function buildHybridPitch(whySentence: string, p: PitchInputs, bridge = pickBridge(p.symbol)): string {
-    return `${normalizeSentence(whySentence)}${bridge}${buildDealStructureSentence(p)}`;
+    return `${normalizeSentence(p.display_description)}${normalizeSentence(whySentence)}${bridge}${buildDealStructureSentence(p)}`;
 }
 
 export function buildDeterministicPitch(p: PitchInputs): string {
@@ -30,8 +30,8 @@ function buildTemplateWhySentence(p: PitchInputs, includeTags: boolean): string 
     }
     parts.push(...buildSpecificSignals(p).slice(0, 2));
     return parts.length > 0
-        ? `${p.company_short_desc}，${parts.join('，')}。`
-        : `${p.company_short_desc}。`;
+        ? `${parts.join('，')}。`
+        : `承接节奏以条款纪律为主。`;
 }
 
 function buildSpecificSignals(p: PitchInputs): string[] {
@@ -65,10 +65,14 @@ function buildSpecificSignals(p: PitchInputs): string[] {
 
 function buildTagSupplements(p: PitchInputs): string[] {
     const tags: string[] = [];
+    if (p.lit_tags.holding.includes('index_inclusion')) tags.push('近期指数纳入提升关注度');
+    if (p.lit_tags.holding.includes('guidance_reaffirmed_or_raised')) tags.push('近期指引维持或上调');
+    if (p.lit_tags.holding.includes('post_earnings_beat')) tags.push('近期财报表现超预期');
+    if (p.lit_tags.holding.includes('infrastructure_capacity_cycle')) tags.push('数据中心基础设施扩容周期延续');
     if (p.lit_tags.holding.includes('guide_raise')) tags.push('财报指引强劲');
-    if (p.lit_tags.holding.includes('super_cycle')) tags.push('所在行业上行周期');
-    if (p.lit_tags.holding.includes('backlog')) tags.push('订单可见度较高');
-    if (p.lit_tags.timing.includes('momentum_intact')) tags.push('技术形态稳健');
+    if (p.lit_tags.holding.includes('super_cycle')) tags.push('所在行业处于上行周期');
+    if (p.lit_tags.holding.includes('backlog')) tags.push('订单积压提供能见度');
+    if (p.lit_tags.timing.includes('momentum_intact')) tags.push('趋势仍保持在关键均线上方');
     return tags;
 }
 

@@ -1,5 +1,6 @@
-import { getCompanyDescription } from '../../data/fmp-company-description';
+import { getCompanyDescription, getDisplayDescription } from '../../data/fmp-company-description';
 import type { NarrativeInput, NarrativeOutput, NarrativeSourceQuality } from '../narrative-generator';
+import { checkRepetitionStyle, logStyleRepetitionWarning } from '../fcn-shared/style-repetition';
 import { inferEarningsBeat, isHighIVString, parseCouponRange, parseTenorMonths } from './input-adapter';
 import { callDeepSeekForPitch, buildPitchPrompt, type PitchInputs } from './llm-stitcher';
 import { detectLitTags, hasMinimumTagsForPitch } from './tag-detector';
@@ -28,6 +29,7 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
     const tenorLabel = parseTenorMonths(input.tenor_days);
     const discount = Math.round(100 - (input.recommended_strike / input.current_price) * 100);
     const desc = await getCompanyDescription(input.symbol);
+    const displayDescription = await getDisplayDescription(input.symbol, input.company_name);
     const companyDesc = desc?.short_description ?? input.company_name ?? input.symbol;
     const recentNewsTitles = (input.news_items ?? [])
         .map((item) => item.title)
@@ -46,12 +48,14 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
         composite_score: input.composite_score,
         sector: desc?.sector ?? null,
         industry: desc?.industry ?? null,
-        is_high_iv: isHighIVString(input.iv_level)
+        is_high_iv: isHighIVString(input.iv_level),
+        news_headlines: input.news_headlines ?? []
     });
 
     const pitchInputs: PitchInputs = {
         symbol: input.symbol,
         company_short_desc: companyDesc,
+        display_description: displayDescription,
         current_price: input.current_price,
         recommended_strike: input.recommended_strike,
         discount_pct: discount,
@@ -66,11 +70,15 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
     };
 
     if (coupon.low <= 0 || coupon.high <= 0 || discount <= 0 || discount > 60) {
-        return wrapResult(buildMinimalPitch(pitchInputs), 'go_pitch_minimal');
+        const text = buildMinimalPitch(pitchInputs);
+        logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
+        return wrapResult(text, 'go_pitch_minimal');
     }
 
     if (!hasMinimumTagsForPitch(litTags)) {
-        return wrapResult(buildMinimalPitch(pitchInputs), 'go_pitch_minimal');
+        const text = buildMinimalPitch(pitchInputs);
+        logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
+        return wrapResult(text, 'go_pitch_minimal');
     }
 
     const useLLM = process.env.ENABLE_GO_LLM_PITCH !== 'false';
@@ -82,6 +90,7 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
                 const finalPitch = buildHybridPitch(llmOutput.why_sentence, pitchInputs, bridge);
                 const validation = validatePitch(llmOutput, litTags, pitchInputs, finalPitch);
                 if (validation.passed) {
+                    logStyleRepetitionWarning(input.symbol, finalPitch, checkRepetitionStyle(finalPitch));
                     return wrapResult(finalPitch, 'go_pitch_hybrid_validated');
                 }
 
@@ -113,7 +122,9 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
         }
     }
 
-    return wrapResult(buildDeterministicPitch(pitchInputs), 'go_pitch_template');
+    const text = buildDeterministicPitch(pitchInputs);
+    logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
+    return wrapResult(text, 'go_pitch_template');
 }
 
 function isClickbait(title: string): boolean {

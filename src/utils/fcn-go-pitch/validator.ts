@@ -45,6 +45,7 @@ export function validatePitch(
 
     const timingSignalResult = validateTimingSignal(output, litTags, pitchInputs);
     reasons.push(...timingSignalResult);
+    reasons.push(...validateSpecificity(output, litTags, pitchInputs));
 
     const textForForbiddenScan = `${whySentence}\n${finalParagraph ?? ''}`;
     for (const phrase of FORBIDDEN_PHRASES) {
@@ -67,6 +68,19 @@ export function validatePitch(
     }
 
     return { passed: reasons.length === 0, reasons };
+}
+
+function validateSpecificity(output: PitchLLMOutput, litTags: LitTags, pitchInputs: PitchInputs): string[] {
+    const text = output.why_sentence ?? '';
+    const hasAllowedNumericFact = extractNumbers(text).some((num) => {
+        if (isStructuralWindowNumber(num, text)) return false;
+        return isAllowedNumber(num, pitchInputs);
+    });
+    const hasNewsAnchor = hasNewsTimingSignal(output, pitchInputs);
+    const hasTagSpecificPhrase = hasHoldingTagPhrase(text, litTags) || hasTimingTagPhrase(text, litTags);
+    return hasAllowedNumericFact || hasNewsAnchor || hasTagSpecificPhrase
+        ? []
+        : ['why_sentence 缺少安全特异性来源'];
 }
 
 function validateTimingSignal(output: PitchLLMOutput, litTags: LitTags, pitchInputs: PitchInputs): string[] {
@@ -117,6 +131,17 @@ function hasTimingTagPhrase(timingSignal: string, litTags: LitTags): boolean {
     if (litTags.timing.includes('momentum_intact')) {
         if (/趋势|动量|均线|高位稳住/.test(timingSignal)) return true;
     }
+    return false;
+}
+
+function hasHoldingTagPhrase(text: string, litTags: LitTags): boolean {
+    if (litTags.holding.includes('post_earnings_beat') && /财报|超预期|beat|业绩/.test(text)) return true;
+    if (litTags.holding.includes('guidance_reaffirmed_or_raised') && /指引|展望|上调|维持/.test(text)) return true;
+    if (litTags.holding.includes('index_inclusion') && /指数|纳入|Nasdaq|S&P/.test(text)) return true;
+    if (litTags.holding.includes('infrastructure_capacity_cycle') && /数据中心|基础设施|电源|散热|光通信|网络/.test(text)) return true;
+    if (litTags.holding.includes('guide_raise') && /指引|财报|超预期/.test(text)) return true;
+    if (litTags.holding.includes('super_cycle') && /周期|capex|算力|油气|半导体/.test(text)) return true;
+    if (litTags.holding.includes('backlog') && /backlog|订单|积压|能见度/.test(text)) return true;
     return false;
 }
 

@@ -5,6 +5,7 @@ import { buildDealStructureSentence, buildDeterministicPitch, buildMinimalPitch 
 const basePitch: PitchInputs = {
     symbol: 'LITE',
     company_short_desc: 'Lumentum 是数据中心光通信器件核心供应商',
+    display_description: 'Lumentum 是光通信器件供应商',
     current_price: 100,
     recommended_strike: 85,
     discount_pct: 15,
@@ -36,6 +37,7 @@ const tsmPitch = buildDeterministicPitch({
     ...basePitch,
     symbol: 'TSM',
     company_short_desc: '台积电是全球先进制程晶圆代工龙头',
+    display_description: '台积电是先进制程代工龙头',
     change_5d_pct: -2.3,
     pct_from_52w_high: -9,
     recent_news_titles: ['TSMC Reports Monthly Revenue Growth']

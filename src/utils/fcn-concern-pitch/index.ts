@@ -1,5 +1,6 @@
-import { getCompanyDescription } from '../../data/fmp-company-description';
+import { getCompanyDescription, getDisplayDescription } from '../../data/fmp-company-description';
 import type { NarrativeInput, NarrativeOutput, NarrativeSourceQuality } from '../narrative-generator';
+import { checkRepetitionStyle, logStyleRepetitionWarning } from '../fcn-shared/style-repetition';
 import { parseCouponRange, parseTenorMonths } from '../fcn-go-pitch/input-adapter';
 import { detectConcernTags } from './tag-detector';
 import { buildConcernPrompt, callDeepSeekForConcern } from './llm-stitcher';
@@ -17,9 +18,11 @@ export async function generateConcernPitch(input: NarrativeInput): Promise<Narra
     if (!tags.eligible_mode) return null;
 
     const desc = await getCompanyDescription(input.symbol);
+    const displayDescription = await getDisplayDescription(input.symbol, input.company_name);
     const p: ConcernPitchInputs = {
         symbol: input.symbol,
         company_short_desc: desc?.short_description ?? input.company_name ?? input.symbol,
+        display_description: displayDescription,
         current_price: input.current_price,
         recommended_strike: input.recommended_strike,
         discount_pct: discount,
@@ -35,6 +38,7 @@ export async function generateConcernPitch(input: NarrativeInput): Promise<Narra
         const text = buildAvoidPitch(p);
         const validation = validateConcernPitch('AVOID', text, p);
         if (!validation.passed) logValidationFailure(input.symbol, 'AVOID', validation.reasons, text);
+        logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
         return wrapResult(text, 'avoid_pitch_deterministic');
     }
 
@@ -45,7 +49,10 @@ export async function generateConcernPitch(input: NarrativeInput): Promise<Narra
             if (llm) {
                 const text = buildCautionPitch(llm.concern_sentence, p);
                 const validation = validateConcernPitch('CAUTION', text, p, llm);
-                if (validation.passed) return wrapResult(text, 'caution_pitch_hybrid_validated');
+                if (validation.passed) {
+                    logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
+                    return wrapResult(text, 'caution_pitch_hybrid_validated');
+                }
                 logValidationFailure(input.symbol, 'CAUTION', validation.reasons, text);
             }
         } catch (error) {
@@ -53,7 +60,9 @@ export async function generateConcernPitch(input: NarrativeInput): Promise<Narra
         }
     }
 
-    return wrapResult(buildCautionTemplate(p), 'caution_pitch_template');
+    const text = buildCautionTemplate(p);
+    logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
+    return wrapResult(text, 'caution_pitch_template');
 }
 
 function logValidationFailure(symbol: string, mode: string, reasons: string[], text: string): void {

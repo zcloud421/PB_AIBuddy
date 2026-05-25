@@ -6,6 +6,10 @@ const TAG_DESCRIPTIONS: Record<HoldingTag | TimingTag, string> = {
     guide_raise: '近期财报指引强劲 / 超预期',
     super_cycle: '所在行业处于上行周期(AI capex / 半导体 / 油气等)',
     backlog: '订单可见度 / backlog 较高,未来收入有支撑',
+    post_earnings_beat: '近期财报 beat / 超预期',
+    guidance_reaffirmed_or_raised: '近期指引上调或维持',
+    index_inclusion: '近期被纳入重要指数',
+    infrastructure_capacity_cycle: '数据中心供电 / 光通信 / 网络基础设施扩容周期',
     quality_pullback: '强基本面公司近期回调,提供合理 entry',
     momentum_intact: '技术形态健康,均线多头排列,动量未破'
 };
@@ -13,6 +17,7 @@ const TAG_DESCRIPTIONS: Record<HoldingTag | TimingTag, string> = {
 export interface PitchInputs {
     symbol: string;
     company_short_desc: string;
+    display_description: string;
     current_price: number;
     recommended_strike: number;
     discount_pct: number;
@@ -52,6 +57,7 @@ export function buildPitchPrompt(p: PitchInputs): string {
     return `你是私行 FCN 产品 RM 写作助手。你只负责写 why-sentence,不要写 FCN 条款。
 
 公司:${p.company_short_desc}
+客户展示公司定位:${p.display_description}
 
 已点亮 tags(只能从这里选,不许引入其他理由):
 ${litList}
@@ -74,10 +80,13 @@ ${typeof p.pct_from_52w_high === 'number' ? `- 距 52 周高点 ${Math.abs(p.pct
 写作要求:
 1. why_sentence 只写 35-90 字中文,解释为什么现在 sell put 这只股票
 2. why_sentence 必须包含 holding reason + timing reason,但不要写 strike / coupon / tenor / 若跌破 等 FCN 条款
-3. used_tags 必须只包含已点亮 tags,且至少 1 个 holding tag
-4. timing_signal 必填,不能只是"近期"/"最近"/"当前"/"市场关注"/"情绪改善"
-5. 数字必须来自可用数字事实;禁止补充背景知识里的数字
-6. 严禁:"正是好时机" / "不过是" / "您本就看好" / "敲入" / "接货" / "安全垫" / "摊薄" / 风险描述
+3. 不要重复公司业务定位,系统会在前一句展示"${p.display_description}";你只写 why-now + holding signal
+4. why_sentence 必须包含至少 1 个具体信号:可用数字事实 / 上方新闻标题事件 / 已点亮 tag 的具体表述
+5. used_tags 必须只包含已点亮 tags,且至少 1 个 holding tag
+6. timing_signal 必填,不能只是"近期"/"最近"/"当前"/"市场关注"/"情绪改善"
+7. 数字必须来自可用数字事实;禁止补充背景知识里的数字
+8. 避免泛化表达:"订单可见度较高" / "支撑未来收入" / "技术形态健康" / "均线多头排列" / "动量未破" / "AI 需求支撑"
+9. 严禁:"正是好时机" / "不过是" / "您本就看好" / "敲入" / "接货" / "安全垫" / "摊薄" / 风险描述
 
 正例:
 {

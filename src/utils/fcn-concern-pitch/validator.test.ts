@@ -33,6 +33,7 @@ const narrativeInput: NarrativeInput = {
 const p: ConcernPitchInputs = {
     symbol: 'TEST',
     company_short_desc: 'Test Corp 是数据中心基础设施供应商',
+    display_description: 'Test Corp 是基础设施供应商',
     current_price: 100,
     recommended_strike: 85,
     discount_pct: 15,

@@ -33,6 +33,7 @@ export function buildConcernPrompt(p: ConcernPitchInputs): string {
     return `你是私行 FCN 产品 RM 写作助手。你只负责写 CAUTION 评级的 concern_sentence,不要写 trigger 句,不要写 FCN 条款。
 
 公司:${p.company_short_desc}
+客户展示公司定位:${p.display_description}
 
 已点亮 concern tags(只能从这里选):
 ${tagList}
@@ -40,9 +41,12 @@ ${tagList}
 写作要求:
 1. concern_sentence 25-90 字,中性观察语气
 2. 只说明当前 FCN 结构不适合卖 put 的条件,不是判断公司基本面差
-3. 不预测价格下跌,不用恐慌词,不要绝对化措辞
-4. 不要写"若/待/再评估"触发句,那部分由系统拼接
-5. 数字只能来自输入事实,不要补充新数字
+3. 不要重复公司业务定位,系统会在前一句展示"${p.display_description}"
+4. 必须包含至少 1 个具体 concern 信号:已点亮 tag 的具体表述 / 可用输入数字 / 事件窗口
+5. 不预测价格下跌,不用恐慌词,不要绝对化措辞
+6. 不要写"若/待/再评估"触发句,那部分由系统拼接
+7. 数字只能来自输入事实,不要补充新数字
+8. 避免泛化表达:"当前卖 put 条件不够友好" / "短期事件风险未落地" / "短期动量转弱"
 
 正例:
 {

@@ -6,6 +6,7 @@ import { validatePitch } from './validator';
 const pitchInputs: PitchInputs = {
     symbol: 'AVGO',
     company_short_desc: 'Broadcom 是网络芯片与定制 ASIC 供应商',
+    display_description: 'Broadcom 是网络芯片供应商',
     current_price: 190,
     recommended_strike: 160,
     discount_pct: 16,

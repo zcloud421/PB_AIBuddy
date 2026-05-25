@@ -4,6 +4,7 @@ import type { ConcernTag } from './tag-detector';
 export interface ConcernPitchInputs {
     symbol: string;
     company_short_desc: string;
+    display_description: string;
     current_price: number;
     recommended_strike: number;
     discount_pct: number;
@@ -23,17 +24,17 @@ export function pickBridge(symbol: string): string {
 }
 
 export function buildCautionPitch(concernSentence: string, p: ConcernPitchInputs): string {
-    return `${normalizeSentence(concernSentence)}${pickBridge(p.symbol)}${buildTriggerSentence('CAUTION', dominantTags(p), p)}`;
+    return `${normalizeSentence(p.display_description)}${normalizeSentence(concernSentence)}${pickBridge(p.symbol)}${buildTriggerSentence('CAUTION', dominantTags(p), p)}`;
 }
 
 export function buildCautionTemplate(p: ConcernPitchInputs): string {
-    const sentence = `${p.company_short_desc}，${tagConcernPhrase(dominantTags(p))}，当前卖 put 条件不够友好，本期先以观察为主，避免在信号确认前急于卖 put。`;
+    const sentence = `${tagConcernPhrase(dominantTags(p))}，当前卖 put 条件不够友好，本期先以观察为主，避免在信号确认前急于卖 put。`;
     return buildCautionPitch(sentence, p);
 }
 
 export function buildAvoidPitch(p: ConcernPitchInputs): string {
     const tags = dominantTags(p);
-    return `${p.company_short_desc}。当前不建议推进该 FCN 结构，本期先以保护承接纪律为主。主要原因是 ${tagConcernPhrase(tags)}；待 ${neutralizeCondition(tags)} 后再评估。`;
+    return `${p.display_description}。当前不建议推进该 FCN 结构，本期先以保护承接纪律为主。主要原因是 ${tagConcernPhrase(tags)}；待 ${neutralizeCondition(tags)} 后再评估。`;
 }
 
 export function buildTriggerSentence(_mode: 'CAUTION' | 'AVOID', tags: ConcernTag[], _p: ConcernPitchInputs): string {

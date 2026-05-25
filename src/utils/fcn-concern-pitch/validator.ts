@@ -41,6 +41,7 @@ export function validateConcernPitch(
         }
         const sentenceLen = llmOutput.concern_sentence.replace(/\s+/g, '').length;
         if (sentenceLen < 25 || sentenceLen > 90) reasons.push(`concern_sentence 字数 ${sentenceLen} 不在 25-90 范围`);
+        reasons.push(...validateConcernSpecificity(llmOutput.concern_sentence, p));
     }
 
     const numericText = `${text}\n${llmOutput?.numeric_claims.map((claim) => `${claim.value}${claim.unit}`).join('\n') ?? ''}`;
@@ -50,6 +51,36 @@ export function validateConcernPitch(
     }
 
     return { passed: reasons.length === 0, reasons };
+}
+
+function validateConcernSpecificity(text: string, p: ConcernPitchInputs): string[] {
+    const hasAllowedNumber = extractNumbers(text).some((num) => {
+        if (isStructuralNumber(num, text)) return false;
+        return isAllowedNumber(num.value, p);
+    });
+    const hasTagPhrase = hasConcernTagPhrase(text, [...p.caution_tags, ...p.avoid_tags]);
+    const hasEventWindow = /财报|事件|监管|诉讼|指引|均线|MA50|MA200|IV|评分|反弹|回调|年内|近\s*5\s*日/.test(text);
+    return hasAllowedNumber || hasTagPhrase || hasEventWindow
+        ? []
+        : ['concern_sentence 缺少安全特异性来源'];
+}
+
+function hasConcernTagPhrase(text: string, tags: ConcernTag[]): boolean {
+    if (tags.includes('earnings_window_imminent') && /财报|窗口/.test(text)) return true;
+    if (tags.includes('iv_too_low') && /IV|票息|补偿/.test(text)) return true;
+    if (tags.includes('composite_score_borderline') && /评分|边界|优势/.test(text)) return true;
+    if (tags.includes('guide_cut') && /指引|下调/.test(text)) return true;
+    if (tags.includes('earnings_miss_recent') && /财报|不及预期|重新定价/.test(text)) return true;
+    if (tags.includes('breakdown_below_ma') && /均线|MA50|MA200|趋势/.test(text)) return true;
+    if (tags.includes('regulatory_overhang') && /监管|法律|事件|诉讼/.test(text)) return true;
+    if (tags.includes('post_earnings_gap_down') && /财报后|股价下行|事件风险/.test(text)) return true;
+    if (tags.includes('distribution_pattern') && /MA20|动量|价格/.test(text)) return true;
+    if (tags.includes('failed_rebound') && /反弹|延续性|确认度/.test(text)) return true;
+    if (tags.includes('single_name_news_overhang') && /新闻|不确定性|事件/.test(text)) return true;
+    if (tags.includes('high_vol_event_risk') && /IV|事件窗口|财报/.test(text)) return true;
+    if (tags.includes('liquidity_or_gap_risk') && /流动性|跳空/.test(text)) return true;
+    if (tags.includes('relative_underperformance_5d_20d') && /短期|年内|表现/.test(text)) return true;
+    return false;
 }
 
 function hasTriggerTerm(text: string): boolean {

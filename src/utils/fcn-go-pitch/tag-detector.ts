@@ -1,4 +1,11 @@
-export type HoldingTag = 'guide_raise' | 'super_cycle' | 'backlog';
+export type HoldingTag =
+    | 'guide_raise'
+    | 'super_cycle'
+    | 'backlog'
+    | 'post_earnings_beat'
+    | 'guidance_reaffirmed_or_raised'
+    | 'index_inclusion'
+    | 'infrastructure_capacity_cycle';
 export type TimingTag = 'quality_pullback' | 'momentum_intact';
 
 export interface LitTags {
@@ -7,6 +14,7 @@ export interface LitTags {
 }
 
 const BACKLOG_TICKERS = new Set(['NVDA', 'TSM', 'AVGO', 'VRT', 'ANET', 'CIEN', 'LITE', 'CRWV', 'NBIS']);
+const INFRASTRUCTURE_CAPACITY_TICKERS = new Set(['VRT', 'ETN', 'PWR', 'ANET', 'CIEN', 'LITE']);
 
 export function detectLitTags(input: {
     symbol: string;
@@ -21,15 +29,31 @@ export function detectLitTags(input: {
     sector: string | null;
     industry: string | null;
     is_high_iv: boolean;
+    news_headlines?: string[];
 }): LitTags {
     const holding: HoldingTag[] = [];
     const timing: TimingTag[] = [];
+    const headlines = (input.news_headlines ?? []).join(' ');
 
     if (input.days_since_earnings !== null && input.days_since_earnings !== undefined && input.days_since_earnings <= 14 && input.earnings_beat === true) {
         holding.push('guide_raise');
     }
 
-    if (isSuperCycle(input.sector, input.industry)) {
+    if (/beat|tops|exceed|超预期|大超/i.test(headlines)) {
+        holding.push('post_earnings_beat');
+    }
+
+    if (/guidance|guide|outlook|reaffirm|raise|上调|维持指引/i.test(headlines)) {
+        holding.push('guidance_reaffirmed_or_raised');
+    }
+
+    if (/join|added to|included in|Nasdaq-100|S&P 500|纳入指数/i.test(headlines)) {
+        holding.push('index_inclusion');
+    }
+
+    if (INFRASTRUCTURE_CAPACITY_TICKERS.has(input.symbol.toUpperCase())) {
+        holding.push('infrastructure_capacity_cycle');
+    } else if (isSuperCycle(input.sector, input.industry)) {
         holding.push('super_cycle');
     }
 
