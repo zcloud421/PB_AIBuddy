@@ -1,5 +1,4 @@
 import type { PitchInputs } from './llm-stitcher';
-import { isSafeTemplateHeadline } from './headline-filter';
 
 const BRIDGES = ['在这个背景下，', '对应到结构上，', '条款上，'] as const;
 
@@ -60,11 +59,6 @@ function buildSpecificSignals(p: PitchInputs): string[] {
         signals.push(`财报已于 ${p.days_since_earnings} 天前发布`);
     }
 
-    const headline = p.recent_news_titles?.find((title) => isSafeTemplateHeadline(title));
-    if (headline && headline.length > 10) {
-        signals.push(`近期消息：${truncateHeadline(headline, 50)}`);
-    }
-
     return signals;
 }
 
@@ -86,12 +80,4 @@ function normalizeSentence(text: string): string {
     const trimmed = text.trim();
     if (!trimmed) return '';
     return /[。！？.!?]$/.test(trimmed) ? trimmed : `${trimmed}。`;
-}
-
-function truncateHeadline(headline: string, maxChars: number): string {
-    if (headline.length <= maxChars) return headline;
-
-    const sliced = headline.slice(0, maxChars);
-    const wordBoundary = sliced.replace(/\s+\S*$/, '');
-    return `${(wordBoundary.length >= 20 ? wordBoundary : sliced).trim()}...`;
 }

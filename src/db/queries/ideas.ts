@@ -1862,7 +1862,8 @@ export function mapTodayIdeasResponse(
               }
             : null;
     const isAvoidDisplayRow = (idea: TodayIdeaRow) =>
-        idea.overall_grade === 'AVOID' || idea.source_quality === 'avoid_pitch_deterministic';
+        idea.overall_grade === 'AVOID' ||
+        (idea.overall_grade !== 'CAUTION' && idea.source_quality === 'avoid_pitch_deterministic');
 
     return {
         run_date: run.run_date,

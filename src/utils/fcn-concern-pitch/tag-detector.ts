@@ -32,7 +32,7 @@ const STRONG_AVOID_TAGS = new Set<ConcernTag>([
 
 const HARD_BLOCK_FLAGS = new Set(['BROKEN_TREND', 'POST_EARNINGS_SHOCK', 'BEARISH_STRUCTURE', 'NO_APPROVED_TENOR', 'NO_APPROVED_STRIKE']);
 const LIQUIDITY_FLAGS = new Set(['LOW_LIQUIDITY', 'MATERIAL_NEWS_SHOCK', 'MATERIAL_NEWS_OVERHANG']);
-const NEGATIVE_NEWS_REGEX = /miss|lawsuit|probe|investigation|sanction|antitrust|cut|downgrade|recall|监管|诉讼|制裁|反垄断|下调|不及预期/i;
+const NEGATIVE_NEWS_REGEX = /earnings miss|misses estimates|lawsuit|probe|investigation|sanction|antitrust|guidance cut|cuts guidance|downgrade|recall|监管|诉讼|制裁|反垄断|下调指引|不及预期/i;
 
 export function detectConcernTags(input: NarrativeInput): ConcernTagsResult {
     const caution = new Set<ConcernTag>();
@@ -44,8 +44,8 @@ export function detectConcernTags(input: NarrativeInput): ConcernTagsResult {
     if (typeof input.composite_score === 'number' && input.composite_score >= 0.42 && input.composite_score <= 0.48) {
         caution.add('composite_score_borderline');
     }
-    if (/下调|guide.*(cut|down)|lowers guidance/i.test(headlines)) avoid.add('guide_cut');
-    if (input.has_recent_earnings && /miss|low(?:er)? than (?:expected|estimates)|不及预期|低于预期/i.test(headlines)) {
+    if (matchesAnyHeadline(input.news_headlines, isGuidanceCutHeadline)) avoid.add('guide_cut');
+    if (input.has_recent_earnings && matchesAnyHeadline(input.news_headlines, isEarningsMissHeadline)) {
         avoid.add('earnings_miss_recent');
     }
     if (
@@ -57,7 +57,7 @@ export function detectConcernTags(input: NarrativeInput): ConcernTagsResult {
     ) {
         avoid.add('breakdown_below_ma');
     }
-    if (/investigation|lawsuit|probe|sanction|antitrust|监管|诉讼|制裁|反垄断/i.test(headlines)) avoid.add('regulatory_overhang');
+    if (matchesAnyHeadline(input.news_headlines, isRegulatoryOverhangHeadline)) avoid.add('regulatory_overhang');
     if (isWithin(input.days_since_earnings, 0, 5) && typeof input.change_5d_pct === 'number' && input.change_5d_pct < -5) {
         avoid.add('post_earnings_gap_down');
     }
@@ -73,7 +73,7 @@ export function detectConcernTags(input: NarrativeInput): ConcernTagsResult {
         caution.add('failed_rebound');
     }
     const newsItems = input.news_items ?? [];
-    if (newsItems.length >= 3 && newsItems.every((item) => NEGATIVE_NEWS_REGEX.test(item.title))) {
+    if (newsItems.length >= 3 && newsItems.every((item) => isNegativeNewsHeadline(item.title))) {
         caution.add('single_name_news_overhang');
     }
     if ((/^high$/i.test(input.iv_level) || input.iv_level === '高') && isWithin(input.days_to_earnings, 0, 14)) {
@@ -103,6 +103,43 @@ export function detectConcernTags(input: NarrativeInput): ConcernTagsResult {
         avoid_tags: avoidTags,
         eligible_mode: eligibleMode
     };
+}
+
+function matchesAnyHeadline(headlines: string[] | undefined, predicate: (headline: string) => boolean): boolean {
+    return (headlines ?? []).some((headline) => predicate(headline));
+}
+
+function isGuidanceCutHeadline(headline: string): boolean {
+    const normalized = headline.replace(/\s+/g, ' ').trim();
+    return (
+        /\b(?:cuts?|cut|lowers?|lowered|reduces?|reduced|slashes?|slashed)\s+(?:full[\s-]?year\s+)?(?:guidance|outlook|forecast|target)s?\b/i.test(normalized) ||
+        /\b(?:guidance|outlook|forecast|target)s?\s+(?:cut|cuts|cutting|lowered|reduced|slashed)\b/i.test(normalized) ||
+        /(下调|降低|削减)\s*(?:全年\s*)?(指引|预期|展望|目标)/i.test(normalized)
+    );
+}
+
+function isEarningsMissHeadline(headline: string): boolean {
+    const normalized = headline.replace(/\s+/g, ' ').trim();
+    return (
+        /\b(?:earnings|eps|revenue|sales|quarterly results|q[1-4])\b.{0,40}\b(?:miss|misses|missed|below estimates|below expectations|lower than expected)\b/i.test(normalized) ||
+        /\b(?:miss|misses|missed|below estimates|below expectations|lower than expected)\b.{0,40}\b(?:earnings|eps|revenue|sales|quarterly results|q[1-4])\b/i.test(normalized) ||
+        /(财报|业绩|营收|EPS|每股收益).{0,20}(不及预期|低于预期|逊预期)/i.test(normalized)
+    );
+}
+
+function isRegulatoryOverhangHeadline(headline: string): boolean {
+    const normalized = headline.replace(/\s+/g, ' ').trim();
+    return (
+        /\b(?:antitrust|lawsuit|litigation|sanction|sec probe|doj probe|ftc probe|regulatory investigation|regulator probes?|investigation into|probe into)\b/i.test(normalized) ||
+        /(监管调查|反垄断|诉讼|制裁|监管机构.{0,12}(调查|审查)|调查.{0,12}(反垄断|财务|会计|披露))/i.test(normalized)
+    );
+}
+
+function isNegativeNewsHeadline(headline: string): boolean {
+    return NEGATIVE_NEWS_REGEX.test(headline) ||
+        isGuidanceCutHeadline(headline) ||
+        isEarningsMissHeadline(headline) ||
+        isRegulatoryOverhangHeadline(headline);
 }
 
 function isWithin(value: number | null | undefined, min: number, max: number): boolean {

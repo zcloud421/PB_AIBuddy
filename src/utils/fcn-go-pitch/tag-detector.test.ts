@@ -43,8 +43,14 @@ assert.ok(
         earnings_surprise: { eps_actual: 1.12, eps_estimate: 1, eps_surprise_pct: 12, revenue_surprise_pct: -4 }
     }).holding.includes('earnings_modest_beat')
 );
-assert.ok(detectLitTags({ ...base, news_headlines: ['Company reaffirms 2026 guidance'] }).holding.includes('guidance_reaffirmed_or_raised'));
-assert.ok(detectLitTags({ ...base, news_headlines: ['Company added to Nasdaq-100 index'] }).holding.includes('index_inclusion'));
+assert.ok(detectLitTags({ ...base, news_headlines: ['Company raises full-year guidance after strong quarter'] }).holding.includes('guidance_reaffirmed_or_raised'));
+assert.ok(detectLitTags({ ...base, news_headlines: ['公司上调全年指引'] }).holding.includes('guidance_reaffirmed_or_raised'));
+assert.ok(!detectLitTags({ ...base, news_headlines: ['Analysts raise concerns about Apple supply chain'] }).holding.includes('guidance_reaffirmed_or_raised'));
+assert.ok(!detectLitTags({ ...base, news_headlines: ['Rate raise fears pressure technology shares'] }).holding.includes('guidance_reaffirmed_or_raised'));
+assert.ok(detectLitTags({ ...base, news_headlines: ['Company will join the Nasdaq-100 Index next month'] }).holding.includes('index_inclusion'));
+assert.ok(detectLitTags({ ...base, news_headlines: ['公司纳入标普500指数'] }).holding.includes('index_inclusion'));
+assert.ok(!detectLitTags({ ...base, symbol: 'GOOG', news_headlines: ['S&P 500 hits new high as GOOG leads megacaps'] }).holding.includes('index_inclusion'));
+assert.ok(!detectLitTags({ ...base, symbol: 'GOOG', news_headlines: ['GOOG underweight in Nasdaq-100 ETF portfolios'] }).holding.includes('index_inclusion'));
 assert.ok(detectLitTags({ ...base, symbol: 'VRT', industry: 'Electrical Equipment' }).holding.includes('infrastructure_capacity_cycle'));
 assert.ok(!detectLitTags({ ...base, symbol: 'VRT', industry: 'Electrical Equipment' }).holding.includes('super_cycle'));
 assert.ok(

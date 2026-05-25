@@ -44,6 +44,19 @@ result = detectConcernTags(input({ news_headlines: ['Company lowers guidance aft
 assert.ok(result.avoid_tags.includes('guide_cut'));
 assert.ok(result.avoid_tags.includes('earnings_miss_recent'));
 assert.equal(result.eligible_mode, 'AVOID');
+result = detectConcernTags(input({ news_headlines: ['Company cuts full-year outlook after demand slows'] }));
+assert.ok(result.avoid_tags.includes('guide_cut'));
+result = detectConcernTags(input({ news_headlines: ['Cost cuts raise margins while revenue stabilizes'] }));
+assert.equal(result.avoid_tags.includes('guide_cut'), false);
+result = detectConcernTags(input({ news_headlines: ['Executives discuss down cycle but maintain forecast'] }));
+assert.equal(result.avoid_tags.includes('guide_cut'), false);
+
+result = detectConcernTags(input({ news_headlines: ['Q4 EPS misses estimates'], has_recent_earnings: true }));
+assert.ok(result.avoid_tags.includes('earnings_miss_recent'));
+result = detectConcernTags(input({ news_headlines: ['CEO says we miss our customers during event'], has_recent_earnings: true }));
+assert.equal(result.avoid_tags.includes('earnings_miss_recent'), false);
+result = detectConcernTags(input({ news_headlines: ['Analysts miss old valuation multiples'], has_recent_earnings: true }));
+assert.equal(result.avoid_tags.includes('earnings_miss_recent'), false);
 
 result = detectConcernTags(
     input({
@@ -57,6 +70,12 @@ result = detectConcernTags(
 assert.ok(result.avoid_tags.includes('breakdown_below_ma'));
 assert.ok(result.avoid_tags.includes('regulatory_overhang'));
 assert.equal(result.eligible_mode, 'AVOID');
+result = detectConcernTags(input({ news_headlines: ['DOJ probe into acquisition expands'] }));
+assert.ok(result.avoid_tags.includes('regulatory_overhang'));
+result = detectConcernTags(input({ news_headlines: ['Space probe mission lifts supplier sentiment'] }));
+assert.equal(result.avoid_tags.includes('regulatory_overhang'), false);
+result = detectConcernTags(input({ news_headlines: ['Investigation Discovery renews documentary series'] }));
+assert.equal(result.avoid_tags.includes('regulatory_overhang'), false);
 
 result = detectConcernTags(input({ days_since_earnings: 3, change_5d_pct: -6 }));
 assert.ok(result.avoid_tags.includes('post_earnings_gap_down'));
@@ -71,7 +90,7 @@ assert.ok(result.caution_tags.includes('failed_rebound'));
 result = detectConcernTags(
     input({
         news_items: [
-            { title: 'Probe weighs on shares', published_at: '' },
+            { title: 'DOJ probe into acquisition weighs on shares', published_at: '' },
             { title: 'Lawsuit expands', published_at: '' },
             { title: 'Guidance cut worries investors', published_at: '' }
         ]

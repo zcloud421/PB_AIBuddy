@@ -49,11 +49,11 @@ export function detectLitTags(input: {
     const earningsBeatTag = classifyEarningsBeatTag(input.earnings_surprise ?? null);
     if (earningsBeatTag) holding.push(earningsBeatTag);
 
-    if (/guidance|guide|outlook|reaffirm|raise|上调|维持指引/i.test(headlines)) {
+    if (matchesAnyHeadline(input.news_headlines, isGuidanceReaffirmedOrRaisedHeadline)) {
         holding.push('guidance_reaffirmed_or_raised');
     }
 
-    if (/join|added to|included in|Nasdaq-100|S&P 500|纳入指数/i.test(headlines)) {
+    if (matchesAnyHeadline(input.news_headlines, isIndexInclusionHeadline)) {
         holding.push('index_inclusion');
     }
 
@@ -99,6 +99,29 @@ export function detectLitTags(input: {
     }
 
     return { holding, timing };
+}
+
+function matchesAnyHeadline(headlines: string[] | undefined, predicate: (headline: string) => boolean): boolean {
+    return (headlines ?? []).some((headline) => predicate(headline));
+}
+
+function isGuidanceReaffirmedOrRaisedHeadline(headline: string): boolean {
+    const normalized = headline.replace(/\s+/g, ' ').trim();
+    return (
+        /\b(raises?|raised|reaffirms?|reaffirmed|boosts?|boosted)\s+(?:full[\s-]?year\s+)?(?:guidance|outlook|forecast|target)s?\b/i.test(normalized) ||
+        /(上调|维持|重申|提升)\s*(?:全年\s*)?(指引|预期|展望|目标)/i.test(normalized)
+    );
+}
+
+function isIndexInclusionHeadline(headline: string): boolean {
+    const normalized = headline.replace(/\s+/g, ' ').trim();
+    if (/\b(?:underweight|removed from|dropped from|exit|exits|deleted from)\b|出场|剔除/i.test(normalized)) {
+        return false;
+    }
+    return (
+        /\b(?:joined|will join|joins|added to|to be added to|inclusion in|set to enter)\s+(?:the\s+)?(?:S&P\s*500|Nasdaq[\s-]?100|Russell\s*1000|Russell\s*2000|Dow\s*Jones)\b/i.test(normalized) ||
+        /(纳入|加入|入选)\s*(标普\s*500|纳斯达克\s*100|道琼斯|罗素\s*1000|罗素\s*2000)/i.test(normalized)
+    );
 }
 
 function classifyEarningsBeatTag(

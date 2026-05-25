@@ -127,7 +127,7 @@ export async function getCompanyDescription(symbol: string): Promise<CompanyDesc
     if (curated) {
         const result = {
             symbol: normalized,
-            short_description: formatDisplayDescription(curated, normalized),
+            short_description: formatCuratedDescription(curated),
             sector: null,
             industry: null
         };
@@ -156,7 +156,7 @@ export async function getCompanyDescription(symbol: string): Promise<CompanyDesc
 export async function getDisplayDescription(symbol: string, companyName?: string | null): Promise<string> {
     const normalized = symbol.toUpperCase();
     const curated = CURATED_DESCRIPTIONS[normalized];
-    if (curated) return formatDisplayDescription(curated, normalized);
+    if (curated) return formatCuratedDescription(curated);
 
     const overview = await getMassiveTickerOverview(normalized);
     const industryZh = mapIndustryToZh(overview?.sic_description);
@@ -177,13 +177,13 @@ function buildFallbackDescription(symbol: string): string {
     return `${symbol} 是美股核心标的`;
 }
 
+function formatCuratedDescription(text: string): string {
+    const cleaned = cleanDescriptionText(text);
+    return cleaned.length > 28 ? truncateDisplayDescription(cleaned) : cleaned;
+}
+
 function formatDisplayDescription(text: string, symbol: string): string {
-    const cleaned = text
-        .replace(/[,.，。]+$/g, '')
-        .replace(/\s+/g, ' ')
-        .replace(/\s*\/\s*/g, ' / ')
-        .replace(/’/g, "'")
-        .trim();
+    const cleaned = cleanDescriptionText(text);
     if (cleaned.length >= 18 && cleaned.length <= 28) return cleaned;
     if (cleaned.length > 28) return truncateDisplayDescription(cleaned);
 
@@ -197,6 +197,15 @@ function formatDisplayDescription(text: string, symbol: string): string {
     if (cleaned.includes('平台')) return truncateDisplayDescription(`${cleaned}核心标的`);
     if (cleaned.includes('公司')) return truncateDisplayDescription(`${cleaned}核心标的`);
     return truncateDisplayDescription(`${cleaned || symbol} 是美股核心标的`);
+}
+
+function cleanDescriptionText(text: string): string {
+    return text
+        .replace(/[,.，。]+$/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*\/\s*/g, ' / ')
+        .replace(/’/g, "'")
+        .trim();
 }
 
 function truncateDisplayDescription(text: string): string {
