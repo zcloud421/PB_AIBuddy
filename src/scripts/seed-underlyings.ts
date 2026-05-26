@@ -94,7 +94,11 @@ export const UNDERLYINGS: SeedUnderlying[] = [
 
 export const DEPRECATED_SYMBOLS = ['USO', 'NEM', 'BILI', 'LI', 'XPEV'];
 
-async function main(): Promise<void> {
+export async function seedUnderlyingsInline(options: { skipCompanyNameFetch?: boolean } = {}): Promise<{
+    status: 'ok';
+    active_count: number;
+    deprecated_symbols: string[];
+}> {
     const { fetchTickerCompanyName } = await import('../data/massive-fetcher');
     const { pool } = await import('../db/client');
     const client = await pool.connect();
@@ -153,7 +157,9 @@ async function main(): Promise<void> {
         `);
 
         for (const underlying of UNDERLYINGS) {
-            const companyName = await fetchTickerCompanyName(underlying.symbol).catch(() => null);
+            const companyName = options.skipCompanyNameFetch
+                ? null
+                : await fetchTickerCompanyName(underlying.symbol).catch(() => null);
             const status = underlying.active ? 'active' : 'deprecated';
             await client.query(
                 `
@@ -224,20 +230,28 @@ async function main(): Promise<void> {
         );
 
         await client.query('COMMIT');
-        console.log(`Successfully seeded ${UNDERLYINGS.length} active underlyings; deprecated ${DEPRECATED_SYMBOLS.join(', ')}`);
+        const activeCount = UNDERLYINGS.filter((u) => u.active).length;
+        console.log(`Successfully seeded ${activeCount} active underlyings; deprecated ${DEPRECATED_SYMBOLS.join(', ')}`);
+        return { status: 'ok', active_count: activeCount, deprecated_symbols: DEPRECATED_SYMBOLS };
     } catch (error) {
         await client.query('ROLLBACK');
         throw error;
     } finally {
         client.release();
-        await pool.end();
     }
 }
 
 if (require.main === module) {
-    main().catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(message);
-        process.exitCode = 1;
-    });
+    seedUnderlyingsInline()
+        .then(async () => {
+            const { pool } = await import('../db/client');
+            await pool.end();
+        })
+        .catch(async (error: unknown) => {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error(message);
+            process.exitCode = 1;
+            const { pool } = await import('../db/client');
+            await pool.end();
+        });
 }

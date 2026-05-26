@@ -8,6 +8,7 @@ import {
     revokeHouseOverride,
     updateUnderlyingStatus
 } from '../db/queries/ideas';
+import { seedUnderlyingsInline } from '../scripts/seed-underlyings';
 
 export const adminRouter = Router();
 
@@ -59,6 +60,12 @@ adminRouter.delete('/overrides/:symbol', asyncHandler(async (req, res) => {
 
 adminRouter.get('/universe', asyncHandler(async (_req, res) => {
     res.json({ underlyings: await listUniverse() });
+}));
+
+adminRouter.post('/universe/seed', asyncHandler(async (req, res) => {
+    const skipNames = req.body?.skip_company_name_fetch === true;
+    const result = await seedUnderlyingsInline({ skipCompanyNameFetch: skipNames });
+    res.json(result);
 }));
 
 adminRouter.patch('/universe/:symbol/status', asyncHandler(async (req, res) => {
