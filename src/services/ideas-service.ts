@@ -58,6 +58,8 @@ import { generateNarrative, sanitizeNarrativeOutput } from '../utils/narrative-g
 import { buildNarrativeInput } from '../utils/narrative-input-builder';
 import { PITCH_ENGINE_VERSION, getPitchNarrativeStaleReason } from '../utils/fcn-shared/pitch-engine-version';
 import { getEngineMode } from '../utils/fcn-gates/engine-mode';
+import { STANDARD_TARGET_COUPON_PCT } from '../utils/fcn-gates/combo-picker';
+import { loadMacroContext } from '../utils/fcn-gates/macro-context';
 import type {
     AsyncScoringAcceptedResponse,
     AsyncScoringStatusResponse,
@@ -99,6 +101,7 @@ interface FreshSymbolAnalysis {
     exchange: string;
     scoring: ScoringResult;
     symbolData: SymbolData;
+    macroContext?: Awaited<ReturnType<typeof loadMacroContext>>;
 }
 
 interface ThresholdDrawdownEvent {
@@ -4828,6 +4831,10 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             gate_decisions: cachedRow.gate_decisions ?? [],
             shadow_grade: cachedRow.shadow_grade ?? null,
             engine_mode: cachedRow.engine_mode ?? 'weighted',
+            target_coupon_pct: toNullableNumber(cachedRow.target_coupon_pct),
+            achieved_coupon_pct: toNullableNumber(cachedRow.achieved_coupon_pct),
+            max_achievable_coupon_pct: toNullableNumber(cachedRow.max_achievable_coupon_pct),
+            target_unreachable: Boolean(cachedRow.target_unreachable),
             actionable_caution: hasActionableCaution(effectiveFlags),
             wait_reason: deriveWaitReason(cachedRow.overall_grade, effectiveFlags),
             assignment_quality_score: null,
@@ -5016,7 +5023,7 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
         }
 
         const analysis = await runFreshSymbolScoring(symbol);
-        const { exchange, scoring, symbolData } = analysis;
+        const { exchange, scoring, symbolData, macroContext } = analysis;
         const extendedPriceHistory = await loadExtendedPriceHistory(symbol, symbolData.price_history);
         const activeFocusStatuses = await getActiveMacroFocusStatuses();
         const macroSensitivityFlag = buildMacroSensitivityFlag(underlying, activeFocusStatuses);
@@ -5089,6 +5096,12 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
                     gateDecisions: scoring.gate_decisions,
                     shadowGrade: scoring.shadow_grade ?? null,
                     engineMode: scoring.engine_mode,
+                    targetCouponPct: scoring.target_coupon_pct ?? null,
+                    achievedCouponPct: scoring.achieved_coupon_pct ?? null,
+                    maxAchievableCouponPct: scoring.max_achievable_coupon_pct ?? null,
+                    targetUnreachable: scoring.target_unreachable ?? null,
+                    generatedUnderRegime: macroContext?.overall ?? null,
+                    macroOverridesApplied: (scoring.gate_decisions ?? []).filter((decision) => decision.type.startsWith('MACRO_')),
                     keyEvents: narrative?.key_events ?? [],
                     newsItems,
                     reasoningText: scoring.reasoning_text
@@ -5265,12 +5278,14 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
     }
 
     const newsContext = await fetchStockNewsContext(symbol, underlying?.company_name ?? undefined);
+    const macroContext = await loadMacroContext();
 
     const eligibility = checkEligibility(symbolData);
     if (!eligibility.eligible) {
         return {
             exchange: underlying?.exchange ?? 'UNKNOWN',
             symbolData,
+            macroContext,
             scoring: {
                 symbol,
                 overall_grade: 'AVOID',
@@ -5341,6 +5356,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
         return {
             exchange: underlying?.exchange ?? 'UNKNOWN',
             symbolData,
+            macroContext,
             scoring: {
                 symbol,
                 overall_grade:
@@ -5396,12 +5412,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
     } | null = null;
     const extendedPriceHistory = await loadExtendedPriceHistory(symbol, symbolData.price_history);
     const historicalVolatility = calculateHistoricalVolatility(symbolData.price_history);
-    const targetCouponPct =
-        historicalVolatility > 0.6
-            ? ['GDX', 'USO'].includes(symbol) ? 15 : 20
-            : historicalVolatility >= 0.3
-              ? ['GDX', 'USO'].includes(symbol) ? 12 : 15
-              : ['GDX', 'USO'].includes(symbol) ? 8 : 10;
+    const targetCouponPct = STANDARD_TARGET_COUPON_PCT;
 
     const shouldReplaceSameTenorChoice = (
         candidate: { scoring: ScoringResult; couponDistance: number },
@@ -5432,7 +5443,8 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 hasRecentEarnings: newsContext.hasRecentEarnings,
                 daysSinceEarnings: newsContext.daysSinceEarnings,
                 sentimentProxy: newsContext.sentimentProxy,
-                hasMaterialNegativeNews: newsContext.hasMaterialNegativeNews
+                hasMaterialNegativeNews: newsContext.hasMaterialNegativeNews,
+                macroContext
             });
             const enhancedScoring = applyRiskRewardOverlay({
                 scoring: {
@@ -5499,6 +5511,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
         return {
             exchange: underlying?.exchange ?? 'UNKNOWN',
             symbolData,
+            macroContext,
             scoring: {
                 symbol,
                 overall_grade: lowLiquidity ? 'AVOID' : 'CAUTION',
@@ -5600,6 +5613,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
     return {
         exchange: underlying?.exchange ?? 'UNKNOWN',
         symbolData,
+        macroContext,
         scoring
     };
 }
@@ -5643,6 +5657,10 @@ function mapScoringResultToSymbolIdea(
         gate_decisions: scoring.gate_decisions,
         shadow_grade: scoring.shadow_grade ?? null,
         engine_mode: scoring.engine_mode,
+        target_coupon_pct: scoring.target_coupon_pct ?? null,
+        achieved_coupon_pct: scoring.achieved_coupon_pct ?? null,
+        max_achievable_coupon_pct: scoring.max_achievable_coupon_pct ?? null,
+        target_unreachable: scoring.target_unreachable ?? null,
         actionable_caution: Boolean(scoring.actionable_caution),
         wait_reason: scoring.wait_reason ?? deriveWaitReason(scoring.overall_grade, flags),
         assignment_quality_score: scoring.assignment_quality_score ?? null,
@@ -9788,6 +9806,10 @@ async function mapDailyBestCard(
         gate_decisions?: import('../utils/fcn-gates/types').GateDecision[] | null;
         shadow_grade?: 'GO' | 'CAUTION' | 'AVOID' | null;
         engine_mode?: import('../utils/fcn-gates/types').FcnEngineMode | null;
+        target_coupon_pct?: number | null;
+        achieved_coupon_pct?: number | null;
+        max_achievable_coupon_pct?: number | null;
+        target_unreachable?: boolean | null;
         reasoning_text: string;
     }>,
     flagsBySymbol: Map<string, Flag[]>
@@ -9891,6 +9913,10 @@ async function mapDailyBestCard(
         gate_decisions: idea.gate_decisions ?? [],
         shadow_grade: idea.shadow_grade ?? null,
         engine_mode: idea.engine_mode ?? 'weighted',
+        target_coupon_pct: parseNullableNumber(idea.target_coupon_pct ?? null),
+        achieved_coupon_pct: parseNullableNumber(idea.achieved_coupon_pct ?? null),
+        max_achievable_coupon_pct: parseNullableNumber(idea.max_achievable_coupon_pct ?? null),
+        target_unreachable: Boolean(idea.target_unreachable),
         sentiment_score: narrative?.sentiment_score ?? parseNullableNumber(idea.sentiment_score ?? null)
     };
 }

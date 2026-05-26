@@ -185,6 +185,12 @@ export interface TodayIdeaRow {
     gate_decisions: GateDecision[] | null;
     shadow_grade: 'GO' | 'CAUTION' | 'AVOID' | null;
     engine_mode: FcnEngineMode | null;
+    target_coupon_pct: number | null;
+    achieved_coupon_pct: number | null;
+    max_achievable_coupon_pct: number | null;
+    target_unreachable: boolean | null;
+    generated_under_regime: string | null;
+    macro_overrides_applied: GateDecision[] | null;
     key_events: string[] | null;
     news_items: NewsItem[] | null;
     reasoning_text: string;
@@ -230,6 +236,12 @@ export interface CachedIdeaRow {
     gate_decisions: GateDecision[] | null;
     shadow_grade: 'GO' | 'CAUTION' | 'AVOID' | null;
     engine_mode: FcnEngineMode | null;
+    target_coupon_pct: number | null;
+    achieved_coupon_pct: number | null;
+    max_achievable_coupon_pct: number | null;
+    target_unreachable: boolean | null;
+    generated_under_regime: string | null;
+    macro_overrides_applied: GateDecision[] | null;
     key_events: string[] | null;
     news_items: NewsItem[] | null;
     reasoning_text: string;
@@ -273,6 +285,12 @@ export interface SaveIdeaCandidateInput {
     gateDecisions?: GateDecision[] | null;
     shadowGrade?: 'GO' | 'CAUTION' | 'AVOID' | null;
     engineMode?: FcnEngineMode | null;
+    targetCouponPct?: number | null;
+    achievedCouponPct?: number | null;
+    maxAchievableCouponPct?: number | null;
+    targetUnreachable?: boolean | null;
+    generatedUnderRegime?: string | null;
+    macroOverridesApplied?: GateDecision[] | null;
     keyEvents?: string[] | null;
     newsItems?: NewsItem[] | null;
     reasoningText: string;
@@ -726,6 +744,12 @@ export async function getIdeasByRunId(runId: string): Promise<TodayIdeaRow[]> {
             ic.gate_decisions,
             ic.shadow_grade,
             ic.engine_mode,
+            ic.target_coupon_pct,
+            ic.achieved_coupon_pct,
+            ic.max_achievable_coupon_pct,
+            ic.target_unreachable,
+            ic.generated_under_regime,
+            ic.macro_overrides_applied,
             ic.key_events,
             ic.news_items,
             ic.reasoning_text,
@@ -834,6 +858,12 @@ export async function getIdeaBySymbolAndDate(symbol: string, date: string): Prom
             ic.gate_decisions,
             ic.shadow_grade,
             ic.engine_mode,
+            ic.target_coupon_pct,
+            ic.achieved_coupon_pct,
+            ic.max_achievable_coupon_pct,
+            ic.target_unreachable,
+            ic.generated_under_regime,
+            ic.macro_overrides_applied,
             ic.key_events,
             ic.news_items,
             ic.reasoning_text,
@@ -908,6 +938,12 @@ export async function getIdeaBySymbolAndRunId(symbol: string, runId: string): Pr
             ic.gate_decisions,
             ic.shadow_grade,
             ic.engine_mode,
+            ic.target_coupon_pct,
+            ic.achieved_coupon_pct,
+            ic.max_achievable_coupon_pct,
+            ic.target_unreachable,
+            ic.generated_under_regime,
+            ic.macro_overrides_applied,
             ic.key_events,
             ic.news_items,
             ic.reasoning_text,
@@ -1180,11 +1216,17 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             gate_decisions,
             shadow_grade,
             engine_mode,
+            target_coupon_pct,
+            achieved_coupon_pct,
+            max_achievable_coupon_pct,
+            target_unreachable,
+            generated_under_regime,
+            macro_overrides_applied,
             key_events,
             news_items,
             reasoning_text
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::date, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27::jsonb, $28, $29, $30::jsonb, $31::jsonb, $32
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::date, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27::jsonb, $28, $29, $30, $31, $32, $33, $34, $35::jsonb, $36::jsonb, $37::jsonb, $38
         )
         ON CONFLICT (run_id, symbol) DO UPDATE
         SET overall_grade = EXCLUDED.overall_grade,
@@ -1214,6 +1256,12 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             gate_decisions = EXCLUDED.gate_decisions,
             shadow_grade = EXCLUDED.shadow_grade,
             engine_mode = EXCLUDED.engine_mode,
+            target_coupon_pct = EXCLUDED.target_coupon_pct,
+            achieved_coupon_pct = EXCLUDED.achieved_coupon_pct,
+            max_achievable_coupon_pct = EXCLUDED.max_achievable_coupon_pct,
+            target_unreachable = EXCLUDED.target_unreachable,
+            generated_under_regime = EXCLUDED.generated_under_regime,
+            macro_overrides_applied = EXCLUDED.macro_overrides_applied,
             key_events = EXCLUDED.key_events,
             news_items = EXCLUDED.news_items,
             reasoning_text = EXCLUDED.reasoning_text
@@ -1248,6 +1296,12 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             JSON.stringify(result.gateDecisions ?? []),
             result.shadowGrade ?? null,
             result.engineMode ?? 'weighted',
+            result.targetCouponPct ?? null,
+            result.achievedCouponPct ?? null,
+            result.maxAchievableCouponPct ?? null,
+            result.targetUnreachable ?? null,
+            result.generatedUnderRegime ?? null,
+            JSON.stringify(result.macroOverridesApplied ?? []),
             JSON.stringify(result.keyEvents ?? []),
             JSON.stringify(result.newsItems ?? []),
             result.reasoningText
@@ -1311,7 +1365,13 @@ export async function ensureIdeaCandidatePriceColumns(): Promise<void> {
         ADD COLUMN IF NOT EXISTS narrative_engine_version TEXT NULL,
         ADD COLUMN IF NOT EXISTS gate_decisions JSONB DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS shadow_grade TEXT,
-        ADD COLUMN IF NOT EXISTS engine_mode TEXT NOT NULL DEFAULT 'weighted'
+        ADD COLUMN IF NOT EXISTS engine_mode TEXT NOT NULL DEFAULT 'gated_shadow',
+        ADD COLUMN IF NOT EXISTS target_coupon_pct NUMERIC(8, 4),
+        ADD COLUMN IF NOT EXISTS achieved_coupon_pct NUMERIC(8, 4),
+        ADD COLUMN IF NOT EXISTS max_achievable_coupon_pct NUMERIC(8, 4),
+        ADD COLUMN IF NOT EXISTS target_unreachable BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS generated_under_regime TEXT,
+        ADD COLUMN IF NOT EXISTS macro_overrides_applied JSONB DEFAULT '[]'::jsonb
     `);
 }
 
@@ -2250,6 +2310,10 @@ export function mapTodayIdeasResponse(
                 gate_decisions: idea.gate_decisions ?? [],
                 shadow_grade: idea.shadow_grade ?? null,
                 engine_mode: idea.engine_mode ?? 'weighted',
+                target_coupon_pct: parseNumeric(idea.target_coupon_pct),
+                achieved_coupon_pct: parseNumeric(idea.achieved_coupon_pct),
+                max_achievable_coupon_pct: parseNumeric(idea.max_achievable_coupon_pct),
+                target_unreachable: Boolean(idea.target_unreachable),
                 actionable_caution: false,
                 wait_reason: null,
                 assignment_quality_score: null,
@@ -2291,6 +2355,10 @@ export function mapTodayIdeasResponse(
                 gate_decisions: idea.gate_decisions ?? [],
                 shadow_grade: idea.shadow_grade ?? null,
                 engine_mode: idea.engine_mode ?? 'weighted',
+                target_coupon_pct: parseNumeric(idea.target_coupon_pct),
+                achieved_coupon_pct: parseNumeric(idea.achieved_coupon_pct),
+                max_achievable_coupon_pct: parseNumeric(idea.max_achievable_coupon_pct),
+                target_unreachable: Boolean(idea.target_unreachable),
                 actionable_caution: hasActionableCaution(flags),
                 wait_reason: deriveWaitReason('CAUTION', flags),
                 assignment_quality_score: null,
@@ -2316,6 +2384,10 @@ export function mapTodayIdeasResponse(
                     gate_decisions: idea.gate_decisions ?? [],
                     shadow_grade: idea.shadow_grade ?? null,
                     engine_mode: idea.engine_mode ?? 'weighted',
+                    target_coupon_pct: parseNumeric(idea.target_coupon_pct),
+                    achieved_coupon_pct: parseNumeric(idea.achieved_coupon_pct),
+                    max_achievable_coupon_pct: parseNumeric(idea.max_achievable_coupon_pct),
+                    target_unreachable: Boolean(idea.target_unreachable),
                     wait_reason: deriveWaitReason('AVOID', flags)
                 };
             })

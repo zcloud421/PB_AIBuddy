@@ -85,11 +85,20 @@ export type GateDecisionType =
     | 'OUTSIDE_UNIVERSE'
     | 'STATUS_BLOCK'
     | 'RESTRICTED'
+    | 'BUFFER_FLOOR'
     | 'BEARISH_STRUCTURE'
     | 'KI_BARRIER_RISK'
     | 'PATH_RISK'
     | 'EARNINGS_IMMINENT'
     | 'EARNINGS_WINDOW'
+    | 'FUNDAMENTAL_DETERIORATION'
+    | 'DISTRIBUTION_FALLING_KNIFE'
+    | 'MACRO_REGIME_CRITICAL_CAP'
+    | 'MACRO_CREDIT_CRISIS'
+    | 'MACRO_AI_CAPEX_STRESS'
+    | 'MACRO_AI_CAPEX_CAP'
+    | 'MACRO_GUARDRAIL_AI_CAPEX_CAP'
+    | 'MACRO_CONTEXT_UNAVAILABLE'
     | 'HARD_AVOID_TRIGGERED'
     | 'HIGH_COUPON_OVERRIDE'
     | 'QUALITY_DIP_RESCUE'
@@ -137,6 +146,10 @@ export interface IdeaCard {
     gate_decisions?: GateDecision[];
     shadow_grade?: Extract<Grade, 'GO' | 'CAUTION' | 'AVOID'> | null;
     engine_mode?: FcnEngineMode;
+    target_coupon_pct?: number | null;
+    achieved_coupon_pct?: number | null;
+    max_achievable_coupon_pct?: number | null;
+    target_unreachable?: boolean | null;
     actionable_caution?: boolean;
     wait_reason?: WaitReason | null;
     assignment_quality_score?: number | null;
@@ -157,6 +170,10 @@ export interface AvoidEntry {
     gate_decisions?: GateDecision[];
     shadow_grade?: Extract<Grade, 'GO' | 'CAUTION' | 'AVOID'> | null;
     engine_mode?: FcnEngineMode;
+    target_coupon_pct?: number | null;
+    achieved_coupon_pct?: number | null;
+    max_achievable_coupon_pct?: number | null;
+    target_unreachable?: boolean | null;
     wait_reason?: WaitReason | null;
 }
 
@@ -181,6 +198,10 @@ export interface DailyBestCard {
     gate_decisions?: GateDecision[];
     shadow_grade?: Extract<Grade, 'GO' | 'CAUTION' | 'AVOID'> | null;
     engine_mode?: FcnEngineMode;
+    target_coupon_pct?: number | null;
+    achieved_coupon_pct?: number | null;
+    max_achievable_coupon_pct?: number | null;
+    target_unreachable?: boolean | null;
     assignment_quality_score?: number | null;
     assignment_quality_label?: AssignmentQualityLabel | null;
     sentiment_score: number | null;
@@ -667,6 +688,10 @@ export interface SymbolIdeaResponse {
     gate_decisions?: GateDecision[];
     shadow_grade?: Extract<Grade, 'GO' | 'CAUTION' | 'AVOID'> | null;
     engine_mode?: FcnEngineMode;
+    target_coupon_pct?: number | null;
+    achieved_coupon_pct?: number | null;
+    max_achievable_coupon_pct?: number | null;
+    target_unreachable?: boolean | null;
     actionable_caution?: boolean;
     wait_reason?: WaitReason | null;
     assignment_quality_score?: number | null;

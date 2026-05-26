@@ -140,7 +140,7 @@ async function ensureGateDecisionColumns(): Promise<void> {
         ALTER TABLE idea_candidates
         ADD COLUMN IF NOT EXISTS gate_decisions JSONB DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS shadow_grade TEXT,
-        ADD COLUMN IF NOT EXISTS engine_mode TEXT NOT NULL DEFAULT 'weighted'
+        ADD COLUMN IF NOT EXISTS engine_mode TEXT NOT NULL DEFAULT 'gated_shadow'
     `);
 }
 

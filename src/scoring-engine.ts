@@ -2,6 +2,8 @@ import { fetchStockNewsContext, getCompanyName } from './data/news-fetcher';
 import { getEngineMode, isGatedLive, isShadowMode } from './utils/fcn-gates/engine-mode';
 import { evaluateShadowGates } from './utils/fcn-gates/shadow-evaluator';
 import type { FcnEngineMode, GateDecision } from './utils/fcn-gates/types';
+import type { MacroGateContext } from './utils/fcn-gates/macro-context';
+import { calculateAnnualizedCouponPct, selectStrikeAtTargetCoupon, STANDARD_TARGET_COUPON_PCT } from './utils/fcn-gates/combo-picker';
 
 export type HouseOverrideType = 'FORCE_AVOID' | 'FORCE_CAUTION' | 'WHITELIST_ONLY';
 
@@ -114,6 +116,10 @@ export interface ScoringResult {
     recommended_expiry_date: string | null;
     estimated_coupon_range: string | null;
     ref_coupon_pct: number | null;
+    target_coupon_pct?: number | null;
+    achieved_coupon_pct?: number | null;
+    max_achievable_coupon_pct?: number | null;
+    target_unreachable?: boolean | null;
     moneyness_pct: number | null;
     current_price: number | null;
     ma20: number | null;
@@ -873,20 +879,28 @@ export function approveStrikes(
     tenorData: TenorWindow,
     config: StrikeSelectionConfig = getStrikeSelectionConfig(symbol)
 ): StrikeData[] {
-    const historicalVolatility = calculateHistoricalVolatility(symbolData.price_history);
-    const targetCouponPct = getTargetCouponPct(historicalVolatility, symbol);
-
-    return tenorData.strikes
+    const targetCouponPct = STANDARD_TARGET_COUPON_PCT;
+    const filtered = tenorData.strikes
         .filter((strike) => Math.abs(strike.delta) >= config.minAbsDelta && Math.abs(strike.delta) <= config.maxAbsDelta)
         .filter((strike) => (strike.strike / symbolData.current_price) * 100 <= config.maxMoneynessPct)
-        .filter((strike) => strike.open_interest >= 10)
+        .filter((strike) => strike.open_interest >= 10);
+    const targetSelection = selectStrikeAtTargetCoupon({
+        strikes: filtered,
+        tenorDays: tenorData.tenor_days,
+        currentPrice: symbolData.current_price,
+        targetCouponPct
+    });
+
+    return filtered
         .sort((a, b) => {
             const refCouponPctA = calculateRefCouponPct(a, tenorData.tenor_days);
             const refCouponPctB = calculateRefCouponPct(b, tenorData.tenor_days);
+            const targetBiasA = targetSelection?.strike === a ? -0.5 : 0;
+            const targetBiasB = targetSelection?.strike === b ? -0.5 : 0;
             const couponDistanceA =
-                refCouponPctA === null ? Number.POSITIVE_INFINITY : Math.abs(refCouponPctA - targetCouponPct);
+                refCouponPctA === null ? Number.POSITIVE_INFINITY : Math.abs(refCouponPctA - targetCouponPct) + targetBiasA;
             const couponDistanceB =
-                refCouponPctB === null ? Number.POSITIVE_INFINITY : Math.abs(refCouponPctB - targetCouponPct);
+                refCouponPctB === null ? Number.POSITIVE_INFINITY : Math.abs(refCouponPctB - targetCouponPct) + targetBiasB;
 
             if (couponDistanceA !== couponDistanceB) {
                 return couponDistanceA - couponDistanceB;
@@ -911,6 +925,7 @@ export function scoreAndGrade(candidate: {
     daysSinceEarnings?: number | null;
     sentimentProxy?: number | null;
     hasMaterialNegativeNews?: boolean;
+    macroContext?: MacroGateContext | null;
 }): ScoringResult {
     const { symbol, symbolData, tenorData, strikeData } = candidate;
     const flags: Flag[] = [];
@@ -1019,6 +1034,13 @@ export function scoreAndGrade(candidate: {
     const refCouponPct = couponEstimate?.lowerBound ?? null;
     const estimatedCouponRange = couponEstimate?.label ?? null;
     const moneynessPct = (strikeData.strike / symbolData.current_price) * 100;
+    const targetCouponSelection = selectStrikeAtTargetCoupon({
+        strikes: tenorData.strikes,
+        tenorDays: tenorData.tenor_days,
+        currentPrice: symbolData.current_price,
+        targetCouponPct: STANDARD_TARGET_COUPON_PCT
+    });
+    const achievedCouponPct = calculateRefCouponPct(strikeData, tenorData.tenor_days);
 
     if (refCouponPct !== null && refCouponPct < 8) {
         flags.push({
@@ -1408,11 +1430,20 @@ export function scoreAndGrade(candidate: {
             symbol,
             symbolData,
             strikeData,
-            weightedGrade: overallGrade
+            weightedGrade: overallGrade,
+            tenorDays: tenorData.tenor_days,
+            macroContext: candidate.macroContext ?? null,
+            earningsMiss: Boolean(candidate.hasRecentEarnings && (candidate.sentimentProxy ?? 1) < 0.4),
+            guideCut: candidate.hasMaterialNegativeNews ?? false
         });
         if (isShadowMode()) {
             decisions.push(...shadowResult.decisions.map((decision) => ({ ...decision, shadow: true })));
-            shadowGrade = null;
+            shadowGrade = shadowResult.final_grade;
+        }
+        if (isGatedLive()) {
+            decisions.push(...shadowResult.decisions);
+            shadowGrade = shadowResult.final_grade;
+            overallGrade = shadowResult.final_grade;
         }
     }
 
@@ -1433,6 +1464,10 @@ export function scoreAndGrade(candidate: {
         recommended_expiry_date: tenorData.expiry_date,
         estimated_coupon_range: estimatedCouponRange,
         ref_coupon_pct: refCouponPct !== null ? Number(refCouponPct.toFixed(1)) : null,
+        target_coupon_pct: STANDARD_TARGET_COUPON_PCT,
+        achieved_coupon_pct: achievedCouponPct !== null ? Number(achievedCouponPct.toFixed(1)) : null,
+        max_achievable_coupon_pct: targetCouponSelection?.max_achievable_coupon_pct ?? null,
+        target_unreachable: targetCouponSelection?.target_unreachable ?? null,
         moneyness_pct: Number(moneynessPct.toFixed(2)),
         current_price: symbolData.current_price,
         ma20: symbolData.ma20,
@@ -1603,7 +1638,8 @@ function applyHighVolCautionOverride(input: {
 
 export async function runDailyScreener(
     symbols: string[],
-    dataFetcher: DataFetcherInterface
+    dataFetcher: DataFetcherInterface,
+    options: { macroContext?: MacroGateContext | null } = {}
 ): Promise<ScoringResult[]> {
     const results: ScoringResult[] = [];
 
@@ -1630,6 +1666,10 @@ export async function runDailyScreener(
                 recommended_expiry_date: null,
                 estimated_coupon_range: null,
                 ref_coupon_pct: null,
+                target_coupon_pct: STANDARD_TARGET_COUPON_PCT,
+                achieved_coupon_pct: null,
+                max_achievable_coupon_pct: null,
+                target_unreachable: null,
                 moneyness_pct: null,
                 current_price: symbolData.current_price,
                 ma20: symbolData.ma20,
@@ -1699,6 +1739,10 @@ export async function runDailyScreener(
                 recommended_expiry_date: null,
                 estimated_coupon_range: null,
                 ref_coupon_pct: null,
+                target_coupon_pct: STANDARD_TARGET_COUPON_PCT,
+                achieved_coupon_pct: null,
+                max_achievable_coupon_pct: null,
+                target_unreachable: null,
                 moneyness_pct: null,
                 current_price: symbolData.current_price,
                 ma20: symbolData.ma20,
@@ -1714,7 +1758,7 @@ export async function runDailyScreener(
             continue;
         }
 
-        const targetCouponPct = getTargetCouponPct(calculateHistoricalVolatility(symbolData.price_history), symbol);
+        const targetCouponPct = STANDARD_TARGET_COUPON_PCT;
         let best90: { result: ScoringResult; couponDistance: number; strikeData: StrikeData; tenorBucketDays: number } | null = null;
         let best180: { result: ScoringResult; couponDistance: number; strikeData: StrikeData; tenorBucketDays: number } | null = null;
 
@@ -1766,6 +1810,10 @@ export async function runDailyScreener(
                     recommended_expiry_date: tenorData.expiry_date,
                     estimated_coupon_range: null,
                     ref_coupon_pct: null,
+                    target_coupon_pct: STANDARD_TARGET_COUPON_PCT,
+                    achieved_coupon_pct: null,
+                    max_achievable_coupon_pct: null,
+                    target_unreachable: null,
                     moneyness_pct: null,
                     current_price: symbolData.current_price,
                     ma20: symbolData.ma20,
@@ -1812,7 +1860,8 @@ export async function runDailyScreener(
                     hasRecentEarnings: newsContext.hasRecentEarnings,
                     daysSinceEarnings: newsContext.daysSinceEarnings,
                     sentimentProxy: newsContext.sentimentProxy,
-                    hasMaterialNegativeNews: newsContext.hasMaterialNegativeNews
+                    hasMaterialNegativeNews: newsContext.hasMaterialNegativeNews,
+                    macroContext: options.macroContext ?? null
                 });
 
                 candidateResult.flags = mergeUniqueFlags(eligibility.flags, candidateResult.flags);
@@ -1883,6 +1932,10 @@ export async function runDailyScreener(
                 recommended_expiry_date: null,
                 estimated_coupon_range: null,
                 ref_coupon_pct: null,
+                target_coupon_pct: STANDARD_TARGET_COUPON_PCT,
+                achieved_coupon_pct: null,
+                max_achievable_coupon_pct: null,
+                target_unreachable: null,
                 moneyness_pct: null,
                 current_price: symbolData.current_price,
                 ma20: symbolData.ma20,
@@ -1992,11 +2045,7 @@ function scoreRsiStrength(rsi: number | null): number {
 }
 
 function calculateRefCouponPct(strikeData: StrikeData, tenorDays: number): number | null {
-    if (strikeData.mid_price === null || tenorDays <= 0) {
-        return null;
-    }
-
-    return (strikeData.mid_price / strikeData.strike) * (365 / tenorDays) * 100;
+    return calculateAnnualizedCouponPct(strikeData, tenorDays);
 }
 
 function calculateEstimatedCouponRange(

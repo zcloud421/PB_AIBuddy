@@ -36,6 +36,7 @@ import { selectDailyBest, selectDailyRecommendationShowcase } from '../services/
 import { runPriceTracker } from '../services/tracker-service';
 import { generateNarrative } from '../utils/narrative-generator';
 import { buildNarrativeInput } from '../utils/narrative-input-builder';
+import { loadMacroContext } from '../utils/fcn-gates/macro-context';
 import { sendDowngradeNotifications } from '../utils/push-notifications';
 import { ensureDeviceTables } from '../db/queries/devices';
 
@@ -118,6 +119,7 @@ export async function runDailyScreener(): Promise<void> {
         runId = await createIdeaRun('DAILY_SCREEN', 'scheduled', runDate);
 
         const fetcher = new MassiveDataFetcher();
+        const macroContext = await loadMacroContext();
         const results: ScoringResult[] = [];
         let failedSymbols = 0;
 
@@ -127,7 +129,7 @@ export async function runDailyScreener(): Promise<void> {
                 await upsertUnderlyingCompanyName(symbol, companyName);
                 const underlying = await getUnderlyingBySymbol(symbol);
 
-                const [result] = await scoreDailyScreenerSymbols([symbol], fetcher);
+                const [result] = await scoreDailyScreenerSymbols([symbol], fetcher, { macroContext });
                 if (!result) {
                     throw new Error(`No scoring result returned for ${symbol}`);
                 }
@@ -200,6 +202,12 @@ export async function runDailyScreener(): Promise<void> {
                     gateDecisions: result.gate_decisions,
                     shadowGrade: result.shadow_grade ?? null,
                     engineMode: result.engine_mode,
+                    targetCouponPct: result.target_coupon_pct ?? null,
+                    achievedCouponPct: result.achieved_coupon_pct ?? null,
+                    maxAchievableCouponPct: result.max_achievable_coupon_pct ?? null,
+                    targetUnreachable: result.target_unreachable ?? null,
+                    generatedUnderRegime: macroContext.overall,
+                    macroOverridesApplied: (result.gate_decisions ?? []).filter((decision) => decision.type.startsWith('MACRO_')),
                     keyEvents: narrative?.key_events ?? [],
                     newsItems: newsContext.displayItems,
                     reasoningText: result.reasoning_text

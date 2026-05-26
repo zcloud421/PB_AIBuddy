@@ -11,6 +11,8 @@ export interface EngineDiffRow {
     baseline_grade: string;
     candidate_grade: string;
     reason?: string | null;
+    gate_decisions?: Array<{ type: string; failType?: string; shadow?: boolean }> | null;
+    regime?: string | null;
 }
 
 export interface EngineDiffInput {
@@ -29,6 +31,7 @@ export function buildEngineDiffReport(input: EngineDiffInput): string {
         .filter((row) => row.baseline_grade !== row.candidate_grade)
         .slice(0, 20);
     const gateReasons = input.gate_reasons ?? [];
+    const macroBuckets = countByRegime(input.rows);
 
     return [
         `# Engine Diff Report`,
@@ -63,6 +66,23 @@ export function buildEngineDiffReport(input: EngineDiffInput): string {
         ...(gateReasons.length > 0
             ? gateReasons.slice(0, 20).map((row) => `| ${row.reason} | ${row.count} |`)
             : ['| — | 0 |']),
+        '',
+        `## Shadow vs Live Comparison`,
+        '',
+        `| Ticker | Live grade | Shadow grade | Diff | First failing gate |`,
+        `|---|---|---|---|---|`,
+        ...input.rows.slice(0, 50).map((row) => {
+            const diff = row.baseline_grade === row.candidate_grade ? '=' : gradeDiff(row.baseline_grade, row.candidate_grade);
+            return `| ${row.symbol} | ${row.baseline_grade} | ${row.candidate_grade} | ${diff} | ${row.reason ?? '—'} |`;
+        }),
+        '',
+        `## Macro bucket distribution`,
+        '',
+        `| Regime | GO | CAUTION | AVOID | WAIT |`,
+        `|---|---:|---:|---:|---:|`,
+        ...Object.entries(macroBuckets).map(([regime, counts]) =>
+            `| ${regime} | ${counts.GO ?? 0} | ${counts.CAUTION ?? 0} | ${counts.AVOID ?? 0} | ${counts.WAIT ?? 0} |`
+        ),
         ''
     ].join('\n');
 }
@@ -89,9 +109,13 @@ export async function runEngineDiffReport(options: {
 }
 
 async function fetchCurrentRows(): Promise<EngineDiffRow[]> {
+    await ensureDiffColumns();
     const result = await pool.query<{
         symbol: string;
         grade: string;
+        shadow_grade: string | null;
+        gate_decisions: Array<{ type: string; failType?: string; shadow?: boolean }> | null;
+        generated_under_regime: string | null;
     }>(`
         WITH latest_completed_run AS (
             SELECT run_id
@@ -100,19 +124,34 @@ async function fetchCurrentRows(): Promise<EngineDiffRow[]> {
             ORDER BY run_date DESC, completed_at DESC, started_at DESC
             LIMIT 1
         )
-        SELECT ic.symbol, ic.overall_grade::text AS grade
+        SELECT
+            ic.symbol,
+            ic.overall_grade::text AS grade,
+            ic.shadow_grade,
+            ic.gate_decisions,
+            ic.generated_under_regime
         FROM idea_candidates ic
         JOIN latest_completed_run lcr ON lcr.run_id = ic.run_id
         ORDER BY ic.symbol ASC
     `);
 
-    // Phase 5.0 has no shadow/candidate column yet, so baseline and candidate are both current.
     return result.rows.map((row) => ({
         symbol: row.symbol,
         baseline_grade: row.grade,
-        candidate_grade: row.grade,
-        reason: 'phase_5_0_baseline'
+        candidate_grade: row.shadow_grade ?? row.grade,
+        reason: firstFailingGate(row.gate_decisions),
+        gate_decisions: row.gate_decisions,
+        regime: row.generated_under_regime ?? 'unknown'
     }));
+}
+
+async function ensureDiffColumns(): Promise<void> {
+    await pool.query(`
+        ALTER TABLE idea_candidates
+        ADD COLUMN IF NOT EXISTS shadow_grade TEXT,
+        ADD COLUMN IF NOT EXISTS gate_decisions JSONB DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS generated_under_regime TEXT
+    `);
 }
 
 function countGrades(grades: string[]): Record<string, number> {
@@ -121,6 +160,31 @@ function countGrades(grades: string[]): Record<string, number> {
         counts[grade] = (counts[grade] ?? 0) + 1;
     }
     return counts;
+}
+
+function firstFailingGate(decisions: Array<{ type: string; failType?: string; shadow?: boolean }> | null): string {
+    const all = decisions ?? [];
+    const failing = all.find((decision) => decision.shadow && decision.failType) ?? all.find((decision) => decision.failType);
+    return failing?.type ?? '—';
+}
+
+function gradeDiff(base: string, candidate: string): string {
+    const order = new Map(GRADE_ORDER.map((grade, index) => [grade, index]));
+    const baseRank = order.get(base) ?? 99;
+    const candidateRank = order.get(candidate) ?? 99;
+    if (candidateRank > baseRank) return '↓';
+    if (candidateRank < baseRank) return '↑';
+    return '=';
+}
+
+function countByRegime(rows: EngineDiffRow[]): Record<string, Record<string, number>> {
+    const buckets: Record<string, Record<string, number>> = {};
+    for (const row of rows) {
+        const regime = row.regime ?? 'unknown';
+        buckets[regime] ??= {};
+        buckets[regime][row.candidate_grade] = (buckets[regime][row.candidate_grade] ?? 0) + 1;
+    }
+    return buckets;
 }
 
 function parseArg(name: string): string | undefined {

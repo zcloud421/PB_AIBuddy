@@ -158,7 +158,13 @@ CREATE TABLE idea_candidates (
     narrative_engine_version TEXT,
     gate_decisions JSONB DEFAULT '[]'::jsonb,
     shadow_grade TEXT,
-    engine_mode TEXT NOT NULL DEFAULT 'weighted',
+    engine_mode TEXT NOT NULL DEFAULT 'gated_shadow',
+    target_coupon_pct NUMERIC(8, 4),
+    achieved_coupon_pct NUMERIC(8, 4),
+    max_achievable_coupon_pct NUMERIC(8, 4),
+    target_unreachable BOOLEAN DEFAULT FALSE,
+    generated_under_regime TEXT,
+    macro_overrides_applied JSONB DEFAULT '[]'::jsonb,
     reasoning_text TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT idea_candidates_run_symbol_uniq UNIQUE (run_id, symbol)
@@ -449,7 +455,13 @@ ALTER TABLE idea_candidates
     ADD COLUMN IF NOT EXISTS narrative_engine_version TEXT NULL,
     ADD COLUMN IF NOT EXISTS gate_decisions JSONB DEFAULT '[]'::jsonb,
     ADD COLUMN IF NOT EXISTS shadow_grade TEXT,
-    ADD COLUMN IF NOT EXISTS engine_mode TEXT NOT NULL DEFAULT 'weighted',
+    ADD COLUMN IF NOT EXISTS engine_mode TEXT NOT NULL DEFAULT 'gated_shadow',
+    ADD COLUMN IF NOT EXISTS target_coupon_pct NUMERIC(8, 4),
+    ADD COLUMN IF NOT EXISTS achieved_coupon_pct NUMERIC(8, 4),
+    ADD COLUMN IF NOT EXISTS max_achievable_coupon_pct NUMERIC(8, 4),
+    ADD COLUMN IF NOT EXISTS target_unreachable BOOLEAN DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS generated_under_regime TEXT,
+    ADD COLUMN IF NOT EXISTS macro_overrides_applied JSONB DEFAULT '[]'::jsonb,
     ADD COLUMN IF NOT EXISTS iv_premium_score NUMERIC(8, 4);
 
 ALTER TABLE underlyings

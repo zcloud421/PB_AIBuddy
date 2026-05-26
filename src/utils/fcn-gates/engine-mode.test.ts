@@ -4,7 +4,7 @@ import { getEngineMode, isGatedLive, isShadowMode } from './engine-mode';
 const original = process.env.FCN_ENGINE_MODE;
 
 process.env.FCN_ENGINE_MODE = '';
-assert.equal(getEngineMode(), 'weighted');
+assert.equal(getEngineMode(), 'gated_shadow');
 
 process.env.FCN_ENGINE_MODE = 'gated_shadow';
 assert.equal(getEngineMode(), 'gated_shadow');
@@ -17,7 +17,7 @@ assert.equal(isShadowMode(), false);
 assert.equal(isGatedLive(), true);
 
 process.env.FCN_ENGINE_MODE = 'nonsense';
-assert.equal(getEngineMode(), 'weighted');
+assert.equal(getEngineMode(), 'gated_shadow');
 
 if (original === undefined) {
     delete process.env.FCN_ENGINE_MODE;
