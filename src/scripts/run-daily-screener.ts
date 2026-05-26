@@ -197,6 +197,9 @@ export async function runDailyScreener(): Promise<void> {
                     sentimentScore: narrative?.sentiment_score ?? null,
                     sourceQuality: narrative?.source_quality ?? null,
                     narrativeEngineVersion: narrative?.engine_version ?? null,
+                    gateDecisions: result.gate_decisions,
+                    shadowGrade: result.shadow_grade ?? null,
+                    engineMode: result.engine_mode,
                     keyEvents: narrative?.key_events ?? [],
                     newsItems: newsContext.displayItems,
                     reasoningText: result.reasoning_text

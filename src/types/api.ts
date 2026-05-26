@@ -78,6 +78,40 @@ export interface HouseOverrideStatus {
     set_at: string;
 }
 
+export type FcnEngineMode = 'weighted' | 'gated_shadow' | 'gated_live';
+export type GateFailType = 'HARD_FAIL' | 'TIMING_FAIL' | 'SUITABILITY_FAIL';
+export type GateSeverity = 'INFO' | 'WARN' | 'BLOCK';
+export type GateDecisionType =
+    | 'OUTSIDE_UNIVERSE'
+    | 'STATUS_BLOCK'
+    | 'RESTRICTED'
+    | 'BEARISH_STRUCTURE'
+    | 'KI_BARRIER_RISK'
+    | 'PATH_RISK'
+    | 'EARNINGS_IMMINENT'
+    | 'EARNINGS_WINDOW'
+    | 'HARD_AVOID_TRIGGERED'
+    | 'HIGH_COUPON_OVERRIDE'
+    | 'QUALITY_DIP_RESCUE'
+    | 'HIGH_VOL_CAUTION_OVERRIDE'
+    | 'GRADE_CAP_COMMODITY_BETA'
+    | 'GRADE_CAP_HIGH_BETA'
+    | 'GRADE_CAP_NEWS_SHOCK'
+    | 'GRADE_CAP_OVEREXTENDED'
+    | 'GRADE_CAP_ASSIGNMENT_QUALITY';
+
+export interface GateDecision {
+    type: GateDecisionType;
+    failType?: GateFailType;
+    passed: boolean;
+    severity: GateSeverity;
+    message: string;
+    details?: Record<string, unknown>;
+    old_grade?: Extract<Grade, 'GO' | 'CAUTION' | 'AVOID'>;
+    new_grade?: Extract<Grade, 'GO' | 'CAUTION' | 'AVOID'>;
+    shadow?: boolean;
+}
+
 export interface IdeaCard {
     symbol: string;
     exchange: string;
@@ -100,6 +134,9 @@ export interface IdeaCard {
     narrative: NarrativeOutput | null;
     news_items: NewsItem[];
     flags: Flag[];
+    gate_decisions?: GateDecision[];
+    shadow_grade?: Extract<Grade, 'GO' | 'CAUTION' | 'AVOID'> | null;
+    engine_mode?: FcnEngineMode;
     actionable_caution?: boolean;
     wait_reason?: WaitReason | null;
     assignment_quality_score?: number | null;
@@ -117,6 +154,9 @@ export interface AvoidEntry {
     narrative: NarrativeOutput | null;
     primary_flag_type: FlagType;
     primary_flag_detail: string;
+    gate_decisions?: GateDecision[];
+    shadow_grade?: Extract<Grade, 'GO' | 'CAUTION' | 'AVOID'> | null;
+    engine_mode?: FcnEngineMode;
     wait_reason?: WaitReason | null;
 }
 
@@ -138,6 +178,9 @@ export interface DailyBestCard {
     narrative: NarrativeOutput | null;
     news_items: NewsItem[];
     flags: Flag[];
+    gate_decisions?: GateDecision[];
+    shadow_grade?: Extract<Grade, 'GO' | 'CAUTION' | 'AVOID'> | null;
+    engine_mode?: FcnEngineMode;
     assignment_quality_score?: number | null;
     assignment_quality_label?: AssignmentQualityLabel | null;
     sentiment_score: number | null;
@@ -621,6 +664,9 @@ export interface SymbolIdeaResponse {
     house_override?: HouseOverrideStatus;
     news_items: NewsItem[];
     flags: Flag[];
+    gate_decisions?: GateDecision[];
+    shadow_grade?: Extract<Grade, 'GO' | 'CAUTION' | 'AVOID'> | null;
+    engine_mode?: FcnEngineMode;
     actionable_caution?: boolean;
     wait_reason?: WaitReason | null;
     assignment_quality_score?: number | null;

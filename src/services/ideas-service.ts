@@ -57,6 +57,7 @@ import { buildThemeNarrative } from './theme-narrative';
 import { generateNarrative, sanitizeNarrativeOutput } from '../utils/narrative-generator';
 import { buildNarrativeInput } from '../utils/narrative-input-builder';
 import { PITCH_ENGINE_VERSION, getPitchNarrativeStaleReason } from '../utils/fcn-shared/pitch-engine-version';
+import { getEngineMode } from '../utils/fcn-gates/engine-mode';
 import type {
     AsyncScoringAcceptedResponse,
     AsyncScoringStatusResponse,
@@ -4824,6 +4825,9 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
                 : undefined,
             news_items: newsItems,
             flags: effectiveFlags,
+            gate_decisions: cachedRow.gate_decisions ?? [],
+            shadow_grade: cachedRow.shadow_grade ?? null,
+            engine_mode: cachedRow.engine_mode ?? 'weighted',
             actionable_caution: hasActionableCaution(effectiveFlags),
             wait_reason: deriveWaitReason(cachedRow.overall_grade, effectiveFlags),
             assignment_quality_score: null,
@@ -5082,6 +5086,9 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
                     sentimentScore: narrative?.sentiment_score ?? null,
                     sourceQuality: narrative?.source_quality ?? null,
                     narrativeEngineVersion: narrative?.engine_version ?? null,
+                    gateDecisions: scoring.gate_decisions,
+                    shadowGrade: scoring.shadow_grade ?? null,
+                    engineMode: scoring.engine_mode,
                     keyEvents: narrative?.key_events ?? [],
                     newsItems,
                     reasoningText: scoring.reasoning_text
@@ -5287,6 +5294,9 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 ma50: symbolData.ma50,
                 ma200: symbolData.ma200,
                 pct_from_52w_high: symbolData.pct_from_52w_high,
+                gate_decisions: [],
+                shadow_grade: null,
+                engine_mode: getEngineMode(),
                 reasoning_text: 'The name is not suitable for FCN pitching today due to eligibility blocks.',
                 flags: eligibility.flags
             }
@@ -5363,6 +5373,9 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 ma50: symbolData.ma50,
                 ma200: symbolData.ma200,
                 pct_from_52w_high: symbolData.pct_from_52w_high,
+                gate_decisions: [],
+                shadow_grade: null,
+                engine_mode: getEngineMode(),
                 reasoning_text: 'No tenor and strike combination passed the current screening constraints.',
                 flags
             }
@@ -5509,6 +5522,9 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 ma50: symbolData.ma50,
                 ma200: symbolData.ma200,
                 pct_from_52w_high: symbolData.pct_from_52w_high,
+                gate_decisions: [],
+                shadow_grade: null,
+                engine_mode: getEngineMode(),
                 reasoning_text: 'No tenor and strike combination passed the current screening constraints.',
                 flags
             }
@@ -5548,6 +5564,22 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                           message: 'High-volatility caution applied because spot is in a deeper drawdown regime'
                       }
                   ]),
+                  gate_decisions: [
+                      ...(bestChoice.scoring.gate_decisions ?? []),
+                      {
+                          type: 'HIGH_VOL_CAUTION_OVERRIDE' as const,
+                          failType: 'SUITABILITY_FAIL' as const,
+                          passed: true,
+                          severity: 'WARN' as const,
+                          message: 'High-volatility caution override adjusted search result grade',
+                          details: {
+                              historical_volatility: Number(historicalVolatility.toFixed(4)),
+                              ref_coupon_pct: bestChoice.scoring.ref_coupon_pct
+                          },
+                          old_grade: bestChoice.scoring.overall_grade,
+                          new_grade: 'CAUTION' as const
+                      }
+                  ],
                   reasoning_text:
                       `The name is usable only with tighter risk discipline. Current best reference is a ` +
                       `${bestChoice.scoring.recommended_tenor_days}-day tenor around strike ` +
@@ -5608,6 +5640,9 @@ function mapScoringResultToSymbolIdea(
         narrative,
         news_items: newsItems,
         flags,
+        gate_decisions: scoring.gate_decisions,
+        shadow_grade: scoring.shadow_grade ?? null,
+        engine_mode: scoring.engine_mode,
         actionable_caution: Boolean(scoring.actionable_caution),
         wait_reason: scoring.wait_reason ?? deriveWaitReason(scoring.overall_grade, flags),
         assignment_quality_score: scoring.assignment_quality_score ?? null,
@@ -9750,6 +9785,9 @@ async function mapDailyBestCard(
         ma200?: number | null;
         source_quality?: NarrativeOutput['source_quality'] | null;
         narrative_engine_version?: string | null;
+        gate_decisions?: import('../utils/fcn-gates/types').GateDecision[] | null;
+        shadow_grade?: 'GO' | 'CAUTION' | 'AVOID' | null;
+        engine_mode?: import('../utils/fcn-gates/types').FcnEngineMode | null;
         reasoning_text: string;
     }>,
     flagsBySymbol: Map<string, Flag[]>
@@ -9850,6 +9888,9 @@ async function mapDailyBestCard(
         narrative,
         news_items: idea.news_items ?? [],
         flags: flagsBySymbol.get(symbol) ?? [],
+        gate_decisions: idea.gate_decisions ?? [],
+        shadow_grade: idea.shadow_grade ?? null,
+        engine_mode: idea.engine_mode ?? 'weighted',
         sentiment_score: narrative?.sentiment_score ?? parseNullableNumber(idea.sentiment_score ?? null)
     };
 }

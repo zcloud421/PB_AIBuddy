@@ -156,6 +156,9 @@ CREATE TABLE idea_candidates (
     sentiment_score NUMERIC(10, 4),
     source_quality TEXT,
     narrative_engine_version TEXT,
+    gate_decisions JSONB DEFAULT '[]'::jsonb,
+    shadow_grade TEXT,
+    engine_mode TEXT NOT NULL DEFAULT 'weighted',
     reasoning_text TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT idea_candidates_run_symbol_uniq UNIQUE (run_id, symbol)
@@ -444,6 +447,9 @@ CREATE TABLE IF NOT EXISTS theme_basket_results (
 ALTER TABLE idea_candidates
     ADD COLUMN IF NOT EXISTS source_quality TEXT NULL,
     ADD COLUMN IF NOT EXISTS narrative_engine_version TEXT NULL,
+    ADD COLUMN IF NOT EXISTS gate_decisions JSONB DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS shadow_grade TEXT,
+    ADD COLUMN IF NOT EXISTS engine_mode TEXT NOT NULL DEFAULT 'weighted',
     ADD COLUMN IF NOT EXISTS iv_premium_score NUMERIC(8, 4);
 
 ALTER TABLE underlyings

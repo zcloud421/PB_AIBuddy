@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { DailyBestCard, DailyMarketNarrative, DrawdownAttribution, Flag, MarketContext, NarrativeOutput, NewsItem, SymbolIdeaResponse, TodayIdeasResponse } from '../../types/api';
 import type { DailyPriceBar } from '../../data/massive-fetcher';
 import { PITCH_ENGINE_VERSION, narrativeSourceQualityPriority } from '../../utils/fcn-shared/pitch-engine-version';
+import type { FcnEngineMode, GateDecision } from '../../utils/fcn-gates/types';
 
 export interface LatestCompletedRun {
     run_id: string;
@@ -181,6 +182,9 @@ export interface TodayIdeaRow {
     sentiment_score: number | null;
     source_quality: NarrativeOutput['source_quality'] | null;
     narrative_engine_version: string | null;
+    gate_decisions: GateDecision[] | null;
+    shadow_grade: 'GO' | 'CAUTION' | 'AVOID' | null;
+    engine_mode: FcnEngineMode | null;
     key_events: string[] | null;
     news_items: NewsItem[] | null;
     reasoning_text: string;
@@ -223,6 +227,9 @@ export interface CachedIdeaRow {
     sentiment_score: number | null;
     source_quality: NarrativeOutput['source_quality'] | null;
     narrative_engine_version: string | null;
+    gate_decisions: GateDecision[] | null;
+    shadow_grade: 'GO' | 'CAUTION' | 'AVOID' | null;
+    engine_mode: FcnEngineMode | null;
     key_events: string[] | null;
     news_items: NewsItem[] | null;
     reasoning_text: string;
@@ -263,6 +270,9 @@ export interface SaveIdeaCandidateInput {
     sentimentScore?: number | null;
     sourceQuality?: NarrativeOutput['source_quality'] | null;
     narrativeEngineVersion?: string | null;
+    gateDecisions?: GateDecision[] | null;
+    shadowGrade?: 'GO' | 'CAUTION' | 'AVOID' | null;
+    engineMode?: FcnEngineMode | null;
     keyEvents?: string[] | null;
     newsItems?: NewsItem[] | null;
     reasoningText: string;
@@ -713,6 +723,9 @@ export async function getIdeasByRunId(runId: string): Promise<TodayIdeaRow[]> {
             ic.sentiment_score,
             ic.source_quality,
             ic.narrative_engine_version,
+            ic.gate_decisions,
+            ic.shadow_grade,
+            ic.engine_mode,
             ic.key_events,
             ic.news_items,
             ic.reasoning_text,
@@ -818,6 +831,9 @@ export async function getIdeaBySymbolAndDate(symbol: string, date: string): Prom
             ic.sentiment_score,
             ic.source_quality,
             ic.narrative_engine_version,
+            ic.gate_decisions,
+            ic.shadow_grade,
+            ic.engine_mode,
             ic.key_events,
             ic.news_items,
             ic.reasoning_text,
@@ -889,6 +905,9 @@ export async function getIdeaBySymbolAndRunId(symbol: string, runId: string): Pr
             ic.sentiment_score,
             ic.source_quality,
             ic.narrative_engine_version,
+            ic.gate_decisions,
+            ic.shadow_grade,
+            ic.engine_mode,
             ic.key_events,
             ic.news_items,
             ic.reasoning_text,
@@ -1158,11 +1177,14 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             sentiment_score,
             source_quality,
             narrative_engine_version,
+            gate_decisions,
+            shadow_grade,
+            engine_mode,
             key_events,
             news_items,
             reasoning_text
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::date, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27::jsonb, $28::jsonb, $29
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::date, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27::jsonb, $28, $29, $30::jsonb, $31::jsonb, $32
         )
         ON CONFLICT (run_id, symbol) DO UPDATE
         SET overall_grade = EXCLUDED.overall_grade,
@@ -1189,6 +1211,9 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             sentiment_score = EXCLUDED.sentiment_score,
             source_quality = EXCLUDED.source_quality,
             narrative_engine_version = EXCLUDED.narrative_engine_version,
+            gate_decisions = EXCLUDED.gate_decisions,
+            shadow_grade = EXCLUDED.shadow_grade,
+            engine_mode = EXCLUDED.engine_mode,
             key_events = EXCLUDED.key_events,
             news_items = EXCLUDED.news_items,
             reasoning_text = EXCLUDED.reasoning_text
@@ -1220,6 +1245,9 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             result.sentimentScore ?? null,
             result.sourceQuality ?? null,
             result.narrativeEngineVersion ?? (result.sourceQuality ? PITCH_ENGINE_VERSION : null),
+            JSON.stringify(result.gateDecisions ?? []),
+            result.shadowGrade ?? null,
+            result.engineMode ?? 'weighted',
             JSON.stringify(result.keyEvents ?? []),
             JSON.stringify(result.newsItems ?? []),
             result.reasoningText
@@ -1280,7 +1308,10 @@ export async function ensureIdeaCandidatePriceColumns(): Promise<void> {
         ADD COLUMN IF NOT EXISTS key_events JSONB DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS news_items JSONB DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS source_quality TEXT NULL,
-        ADD COLUMN IF NOT EXISTS narrative_engine_version TEXT NULL
+        ADD COLUMN IF NOT EXISTS narrative_engine_version TEXT NULL,
+        ADD COLUMN IF NOT EXISTS gate_decisions JSONB DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS shadow_grade TEXT,
+        ADD COLUMN IF NOT EXISTS engine_mode TEXT NOT NULL DEFAULT 'weighted'
     `);
 }
 
@@ -2216,6 +2247,9 @@ export function mapTodayIdeasResponse(
                 narrative: mapNarrative(idea),
                 news_items: idea.news_items ?? [],
                 flags,
+                gate_decisions: idea.gate_decisions ?? [],
+                shadow_grade: idea.shadow_grade ?? null,
+                engine_mode: idea.engine_mode ?? 'weighted',
                 actionable_caution: false,
                 wait_reason: null,
                 assignment_quality_score: null,
@@ -2254,6 +2288,9 @@ export function mapTodayIdeasResponse(
                 narrative: mapNarrative(idea),
                 news_items: idea.news_items ?? [],
                 flags,
+                gate_decisions: idea.gate_decisions ?? [],
+                shadow_grade: idea.shadow_grade ?? null,
+                engine_mode: idea.engine_mode ?? 'weighted',
                 actionable_caution: hasActionableCaution(flags),
                 wait_reason: deriveWaitReason('CAUTION', flags),
                 assignment_quality_score: null,
@@ -2276,6 +2313,9 @@ export function mapTodayIdeasResponse(
                     narrative: mapNarrative(idea),
                     primary_flag_type: primaryFlag?.type ?? 'NO_APPROVED_STRIKE',
                     primary_flag_detail: primaryFlag?.message ?? 'No primary block reason recorded',
+                    gate_decisions: idea.gate_decisions ?? [],
+                    shadow_grade: idea.shadow_grade ?? null,
+                    engine_mode: idea.engine_mode ?? 'weighted',
                     wait_reason: deriveWaitReason('AVOID', flags)
                 };
             })

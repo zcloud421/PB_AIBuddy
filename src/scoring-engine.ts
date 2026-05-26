@@ -1,4 +1,7 @@
 import { fetchStockNewsContext, getCompanyName } from './data/news-fetcher';
+import { getEngineMode, isGatedLive, isShadowMode } from './utils/fcn-gates/engine-mode';
+import { evaluateShadowGates } from './utils/fcn-gates/shadow-evaluator';
+import type { FcnEngineMode, GateDecision } from './utils/fcn-gates/types';
 
 export type HouseOverrideType = 'FORCE_AVOID' | 'FORCE_CAUTION' | 'WHITELIST_ONLY';
 
@@ -121,6 +124,9 @@ export interface ScoringResult {
     assignment_quality_label?: AssignmentQualityLabel | null;
     actionable_caution?: boolean;
     wait_reason?: WaitReason | null;
+    gate_decisions: GateDecision[];
+    shadow_grade?: OverallGrade | null;
+    engine_mode: FcnEngineMode;
     reasoning_text: string;
     flags: Flag[];
 }
@@ -911,6 +917,7 @@ export function scoreAndGrade(candidate: {
     const assignmentQuality = buildAssignmentQuality(symbol, symbolData);
     const overextendedUptrend = isOverextendedUptrend(symbol, symbolData);
     const normalizedSymbol = symbol.toUpperCase();
+    const decisions: GateDecision[] = [];
 
     const ivRankScore = clamp(strikeData.iv, 0, 1);
 
@@ -1118,6 +1125,19 @@ export function scoreAndGrade(candidate: {
     let overallGrade: OverallGrade;
 
     if (hardAvoidTriggered) {
+        decisions.push({
+            type: 'HARD_AVOID_TRIGGERED',
+            failType: 'HARD_FAIL',
+            passed: false,
+            severity: 'BLOCK',
+            message: '触发硬避免条件',
+            details: {
+                flag_types: flags.map((flag) => flag.type),
+                days_to_earnings: daysToEarnings,
+                open_interest: strikeData.open_interest,
+                ref_coupon_pct: refCouponPct
+            }
+        });
         const moneynessThresholdMet = moneynessPct <= 75;
         const highCouponOverride =
             refCouponPct !== null &&
@@ -1133,6 +1153,7 @@ export function scoreAndGrade(candidate: {
             !COMMODITY_BETA_SYMBOLS.has(normalizedSymbol);
 
         if (highCouponOverride) {
+            const oldGrade = deriveOverallGrade(compositeScore);
             compositeScore = clamp(compositeScore, 0.45, 0.55);
             flags.push({
                 type: 'HIGH_COUPON_OVERRIDE',
@@ -1140,6 +1161,21 @@ export function scoreAndGrade(candidate: {
                 message: '高票息执行价已充分反映下行风险，升级为CAUTION'
             });
             overallGrade = 'CAUTION';
+            decisions.push({
+                type: 'HIGH_COUPON_OVERRIDE',
+                failType: 'SUITABILITY_FAIL',
+                passed: true,
+                severity: 'WARN',
+                message: '高票息深折价 override 硬避免 → CAUTION',
+                details: {
+                    coupon: refCouponPct,
+                    moneyness: moneynessPct,
+                    open_interest: strikeData.open_interest,
+                    assignment_quality_score: assignmentQuality.score
+                },
+                old_grade: oldGrade,
+                new_grade: 'CAUTION'
+            });
         } else {
         // Hard avoid penalty: multiply final composite score by 0.4
         // This ensures AVOID grade always scores below CAUTION threshold (0.45)
@@ -1147,6 +1183,15 @@ export function scoreAndGrade(candidate: {
         // Penalty factor 0.4 is empirical, review after 30 days of data
             compositeScore = clamp(compositeScore * 0.4, 0, 1);
             overallGrade = deriveOverallGrade(compositeScore);
+            decisions.push({
+                type: 'HARD_AVOID_TRIGGERED',
+                failType: 'HARD_FAIL',
+                passed: false,
+                severity: 'BLOCK',
+                message: '硬避免未 override,soft penalty *0.4 应用 (5.2b 改 true block)',
+                details: { soft_penalty: 0.4 },
+                new_grade: overallGrade
+            });
         }
     } else {
         overallGrade = deriveOverallGrade(compositeScore);
@@ -1180,6 +1225,7 @@ export function scoreAndGrade(candidate: {
         );
 
     if (commodityBetaNeedsCaution && overallGrade === 'GO') {
+        const oldGrade = overallGrade;
         compositeScore = Math.min(compositeScore, 0.62);
         overallGrade = 'CAUTION';
         flags.push({
@@ -1187,9 +1233,24 @@ export function scoreAndGrade(candidate: {
             severity: 'WARN',
             message: 'Commodity-linked ETF uses tighter FCN guardrails because macro, curve, and beta sensitivity can amplify drawdowns'
         });
+        decisions.push({
+            type: 'GRADE_CAP_COMMODITY_BETA',
+            failType: 'SUITABILITY_FAIL',
+            passed: false,
+            severity: 'WARN',
+            message: 'Commodity beta guardrail capped GO at CAUTION',
+            details: {
+                moneyness: moneynessPct,
+                iv: strikeData.iv,
+                pct_from_52w_high: symbolData.pct_from_52w_high
+            },
+            old_grade: oldGrade,
+            new_grade: overallGrade
+        });
     }
 
     if (highBetaThemeNeedsCaution && overallGrade === 'GO') {
+        const oldGrade = overallGrade;
         compositeScore = Math.min(compositeScore, 0.6);
         overallGrade = 'CAUTION';
         flags.push({
@@ -1197,25 +1258,86 @@ export function scoreAndGrade(candidate: {
             severity: 'WARN',
             message: 'High-beta thematic names require tighter FCN guardrails because valuation, sentiment, and narrative shifts can amplify downside risk'
         });
+        decisions.push({
+            type: 'GRADE_CAP_HIGH_BETA',
+            failType: 'SUITABILITY_FAIL',
+            passed: false,
+            severity: 'WARN',
+            message: 'High-beta thematic guardrail capped GO at CAUTION',
+            details: {
+                moneyness: moneynessPct,
+                iv: strikeData.iv,
+                pct_from_52w_high: symbolData.pct_from_52w_high,
+                ref_coupon_pct: refCouponPct
+            },
+            old_grade: oldGrade,
+            new_grade: overallGrade
+        });
     }
 
     if ((candidate.hasMaterialNegativeNews ?? false) && overallGrade === 'GO') {
+        const oldGrade = overallGrade;
         compositeScore = Math.min(compositeScore, 0.62);
         overallGrade = 'CAUTION';
+        decisions.push({
+            type: 'GRADE_CAP_NEWS_SHOCK',
+            failType: 'SUITABILITY_FAIL',
+            passed: false,
+            severity: 'WARN',
+            message: 'Material negative news capped GO at CAUTION',
+            details: {
+                one_day_move_pct: oneDayMovePct,
+                pct_from_52w_high: symbolData.pct_from_52w_high
+            },
+            old_grade: oldGrade,
+            new_grade: overallGrade
+        });
     }
 
     if (overextendedUptrend && overallGrade === 'GO') {
+        const oldGrade = overallGrade;
         compositeScore = Math.min(compositeScore, isHighBetaTheme ? 0.58 : 0.62);
         overallGrade = 'CAUTION';
+        decisions.push({
+            type: 'GRADE_CAP_OVEREXTENDED',
+            failType: 'SUITABILITY_FAIL',
+            passed: false,
+            severity: 'WARN',
+            message: 'Overextended uptrend capped GO at CAUTION',
+            details: {
+                is_high_beta_theme: isHighBetaTheme,
+                pct_from_52w_high: symbolData.pct_from_52w_high,
+                current_price: symbolData.current_price,
+                ma20: symbolData.ma20,
+                ma50: symbolData.ma50
+            },
+            old_grade: oldGrade,
+            new_grade: overallGrade
+        });
     }
 
     if (assignmentQuality.score < PB_ASSIGNMENT_CONFIG.goMinScore && overallGrade === 'GO') {
+        const oldGrade = overallGrade;
         compositeScore = Math.min(compositeScore, PB_ASSIGNMENT_CONFIG.cautionCapScore);
         overallGrade = 'CAUTION';
         flags.push({
             type: 'ASSIGNMENT_QUALITY_CAP',
             severity: 'WARN',
             message: 'Assignment quality is below PB GO threshold, so the setup is capped at CAUTION even if short-term setup quality looks strong'
+        });
+        decisions.push({
+            type: 'GRADE_CAP_ASSIGNMENT_QUALITY',
+            failType: 'SUITABILITY_FAIL',
+            passed: false,
+            severity: 'WARN',
+            message: 'Assignment quality capped GO at CAUTION',
+            details: {
+                assignment_quality_score: assignmentQuality.score,
+                assignment_quality_label: assignmentQuality.label,
+                go_min_score: PB_ASSIGNMENT_CONFIG.goMinScore
+            },
+            old_grade: oldGrade,
+            new_grade: overallGrade
         });
     }
 
@@ -1237,6 +1359,7 @@ export function scoreAndGrade(candidate: {
 
     let actionableCaution = false;
     if (qualityDipCandidate && (overallGrade === 'AVOID' || overallGrade === 'CAUTION')) {
+        const oldGrade = overallGrade;
         actionableCaution = true;
         flags.push({
             type: 'QUALITY_DIP_EXCEPTION',
@@ -1253,6 +1376,21 @@ export function scoreAndGrade(candidate: {
             compositeScore = clamp(Math.max(compositeScore, 0.49), 0, 0.58);
             overallGrade = 'CAUTION';
         }
+        decisions.push({
+            type: 'QUALITY_DIP_RESCUE',
+            failType: 'SUITABILITY_FAIL',
+            passed: true,
+            severity: 'INFO',
+            message: 'Quality dip exception applied as actionable CAUTION',
+            details: {
+                assignment_quality_score: assignmentQuality.score,
+                ref_coupon_pct: refCouponPct,
+                iv: strikeData.iv,
+                pct_from_52w_high: symbolData.pct_from_52w_high
+            },
+            old_grade: oldGrade,
+            new_grade: overallGrade
+        });
     }
 
     const reasoningText = buildReasoningText(
@@ -1263,6 +1401,20 @@ export function scoreAndGrade(candidate: {
         estimatedCouponRange,
         flags
     );
+    const engineMode = getEngineMode();
+    let shadowGrade: OverallGrade | null = null;
+    if (isShadowMode() || isGatedLive()) {
+        const shadowResult = evaluateShadowGates({
+            symbol,
+            symbolData,
+            strikeData,
+            weightedGrade: overallGrade
+        });
+        if (isShadowMode()) {
+            decisions.push(...shadowResult.decisions.map((decision) => ({ ...decision, shadow: true })));
+            shadowGrade = null;
+        }
+    }
 
     return {
         symbol,
@@ -1291,6 +1443,9 @@ export function scoreAndGrade(candidate: {
         assignment_quality_label: assignmentQuality.label,
         actionable_caution: actionableCaution,
         wait_reason: deriveWaitReason(overallGrade, flags),
+        gate_decisions: decisions,
+        shadow_grade: shadowGrade,
+        engine_mode: engineMode,
         reasoning_text: reasoningText,
         flags
     };
@@ -1413,6 +1568,20 @@ function applyHighVolCautionOverride(input: {
 
     const adjustedCompositeScore = Math.max(input.result.composite_score * 0.65, 0.45);
     const adjustedGrade = deriveOverallGrade(adjustedCompositeScore);
+    const decision: GateDecision = {
+        type: 'HIGH_VOL_CAUTION_OVERRIDE',
+        failType: 'SUITABILITY_FAIL',
+        passed: true,
+        severity: 'WARN',
+        message: 'High-volatility caution override adjusted score and grade',
+        details: {
+            historical_volatility: Number(historicalVolatility.toFixed(4)),
+            ref_coupon_pct: input.result.ref_coupon_pct,
+            adjusted_composite_score: Number(adjustedCompositeScore.toFixed(4))
+        },
+        old_grade: input.result.overall_grade,
+        new_grade: adjustedGrade
+    };
 
     return {
         ...input.result,
@@ -1427,7 +1596,8 @@ function applyHighVolCautionOverride(input: {
             input.result.recommended_strike,
             input.result.estimated_coupon_range,
             flags
-        )
+        ),
+        gate_decisions: [...(input.result.gate_decisions ?? []), decision]
     };
 }
 
@@ -1466,6 +1636,9 @@ export async function runDailyScreener(
                 ma50: symbolData.ma50,
                 ma200: symbolData.ma200,
                 pct_from_52w_high: symbolData.pct_from_52w_high,
+                gate_decisions: [],
+                shadow_grade: null,
+                engine_mode: getEngineMode(),
                 reasoning_text: buildReasoningText(symbol, 'AVOID', null, null, null, eligibility.flags),
                 flags: eligibility.flags
             });
@@ -1532,6 +1705,9 @@ export async function runDailyScreener(
                 ma50: symbolData.ma50,
                 ma200: symbolData.ma200,
                 pct_from_52w_high: symbolData.pct_from_52w_high,
+                gate_decisions: [],
+                shadow_grade: null,
+                engine_mode: getEngineMode(),
                 reasoning_text: buildReasoningText(symbol, 'AVOID', null, null, null, flags),
                 flags
             });
@@ -1596,6 +1772,9 @@ export async function runDailyScreener(
                     ma50: symbolData.ma50,
                     ma200: symbolData.ma200,
                     pct_from_52w_high: symbolData.pct_from_52w_high,
+                    gate_decisions: [],
+                    shadow_grade: null,
+                    engine_mode: getEngineMode(),
                     reasoning_text: buildReasoningText(symbol, 'AVOID', tenorData.tenor_days, null, null, emptyStrikeFlags),
                     flags: emptyStrikeFlags
                 };
@@ -1710,6 +1889,9 @@ export async function runDailyScreener(
                 ma50: symbolData.ma50,
                 ma200: symbolData.ma200,
                 pct_from_52w_high: symbolData.pct_from_52w_high,
+                gate_decisions: [],
+                shadow_grade: null,
+                engine_mode: getEngineMode(),
                 reasoning_text: buildReasoningText(symbol, 'AVOID', null, null, null, flags),
                 flags
             });
