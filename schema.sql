@@ -47,6 +47,10 @@ CREATE TABLE underlyings (
     currency CHAR(3) NOT NULL,
     themes TEXT[] NOT NULL DEFAULT '{}',
     tier INTEGER NOT NULL DEFAULT 1,
+    classification TEXT,
+    adr_risk BOOLEAN DEFAULT FALSE,
+    turnaround_watch BOOLEAN DEFAULT FALSE,
+    holdable_concern TEXT,
     active BOOLEAN NOT NULL DEFAULT TRUE,
     status TEXT NOT NULL DEFAULT 'active',
     status_reason TEXT,
@@ -57,7 +61,8 @@ CREATE TABLE underlyings (
     CONSTRAINT underlyings_symbol_format_chk CHECK (symbol = UPPER(symbol)),
     CONSTRAINT underlyings_currency_format_chk CHECK (currency = UPPER(currency)),
     CONSTRAINT underlyings_tier_chk CHECK (tier IN (1, 2)),
-    CONSTRAINT underlyings_status_chk CHECK (status IN ('active', 'suspended', 'under_review', 'deprecated'))
+    CONSTRAINT underlyings_status_chk CHECK (status IN ('active', 'suspended', 'under_review', 'deprecated')),
+    CONSTRAINT underlyings_classification_chk CHECK (classification IN ('blue_chip', 'theme', 'both'))
 );
 
 COMMENT ON TABLE underlyings IS
@@ -470,7 +475,11 @@ ALTER TABLE underlyings
     ADD COLUMN IF NOT EXISTS reviewed_by TEXT,
     ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS added_at TIMESTAMPTZ DEFAULT NOW(),
-    ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ;
+    ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS classification TEXT,
+    ADD COLUMN IF NOT EXISTS adr_risk BOOLEAN DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS turnaround_watch BOOLEAN DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS holdable_concern TEXT;
 
 UPDATE underlyings
 SET status = 'deprecated'
@@ -491,6 +500,19 @@ BEGIN
         ALTER TABLE underlyings
             ADD CONSTRAINT underlyings_status_chk
             CHECK (status IN ('active', 'suspended', 'under_review', 'deprecated'));
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'underlyings_classification_chk'
+    ) THEN
+        ALTER TABLE underlyings
+            ADD CONSTRAINT underlyings_classification_chk
+            CHECK (classification IN ('blue_chip', 'theme', 'both'));
     END IF;
 END $$;
 

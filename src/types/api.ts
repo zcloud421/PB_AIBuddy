@@ -78,6 +78,23 @@ export interface HouseOverrideStatus {
     set_at: string;
 }
 
+export type UnderlyingClassification = 'blue_chip' | 'theme' | 'both';
+
+export interface UnderlyingUniverseItem {
+    symbol: string;
+    exchange: string;
+    company_name: string | null;
+    sector: string | null;
+    themes: string[];
+    tier: number;
+    active: boolean;
+    status?: 'active' | 'suspended' | 'under_review' | 'deprecated';
+    classification?: UnderlyingClassification | null;
+    adr_risk?: boolean | null;
+    turnaround_watch?: boolean | null;
+    holdable_concern?: string | null;
+}
+
 export type FcnEngineMode = 'weighted' | 'gated_shadow' | 'gated_live';
 export type GateFailType = 'HARD_FAIL' | 'TIMING_FAIL' | 'SUITABILITY_FAIL';
 export type GateSeverity = 'INFO' | 'WARN' | 'BLOCK';

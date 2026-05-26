@@ -24,6 +24,10 @@ export interface UnderlyingRow {
     reviewed_at: string | null;
     added_at: string | null;
     removed_at: string | null;
+    classification: 'blue_chip' | 'theme' | 'both' | null;
+    adr_risk: boolean | null;
+    turnaround_watch: boolean | null;
+    holdable_concern: string | null;
 }
 
 export interface HouseOverrideRow {
@@ -401,7 +405,11 @@ export async function getUnderlyingBySymbol(symbol: string): Promise<UnderlyingR
             reviewed_by,
             reviewed_at::text AS reviewed_at,
             added_at::text AS added_at,
-            removed_at::text AS removed_at
+            removed_at::text AS removed_at,
+            classification,
+            adr_risk,
+            turnaround_watch,
+            holdable_concern
         FROM underlyings
         WHERE symbol = $1
         LIMIT 1
@@ -506,7 +514,11 @@ export async function listUniverse(): Promise<UniverseAdminRow[]> {
             reviewed_by,
             reviewed_at::text AS reviewed_at,
             added_at::text AS added_at,
-            removed_at::text AS removed_at
+            removed_at::text AS removed_at,
+            classification,
+            adr_risk,
+            turnaround_watch,
+            holdable_concern
         FROM underlyings
         ORDER BY tier ASC, symbol ASC
     `);
@@ -537,7 +549,11 @@ export async function updateUnderlyingStatus(input: {
                 reviewed_by,
                 reviewed_at::text AS reviewed_at,
                 added_at::text AS added_at,
-                removed_at::text AS removed_at
+                removed_at::text AS removed_at,
+                classification,
+                adr_risk,
+                turnaround_watch,
+                holdable_concern
             FROM underlyings
             WHERE symbol = $1
             FOR UPDATE
@@ -574,7 +590,11 @@ export async function updateUnderlyingStatus(input: {
                 reviewed_by,
                 reviewed_at::text AS reviewed_at,
                 added_at::text AS added_at,
-                removed_at::text AS removed_at
+                removed_at::text AS removed_at,
+                classification,
+                adr_risk,
+                turnaround_watch,
+                holdable_concern
             `,
             [input.symbol, input.newStatus, active, input.reason, input.changedBy]
         );
@@ -1398,7 +1418,11 @@ export async function ensureUnderlyingsGovernanceColumns(): Promise<void> {
         ADD COLUMN IF NOT EXISTS reviewed_by TEXT,
         ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ,
         ADD COLUMN IF NOT EXISTS added_at TIMESTAMPTZ DEFAULT NOW(),
-        ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ
+        ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS classification TEXT,
+        ADD COLUMN IF NOT EXISTS adr_risk BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS turnaround_watch BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS holdable_concern TEXT
     `);
 
     await pool.query(`
@@ -1425,6 +1449,21 @@ export async function ensureUnderlyingsGovernanceColumns(): Promise<void> {
                 ALTER TABLE underlyings
                     ADD CONSTRAINT underlyings_status_chk
                     CHECK (status IN ('active', 'suspended', 'under_review', 'deprecated'));
+            END IF;
+        END $$;
+    `);
+
+    await pool.query(`
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_constraint
+                WHERE conname = 'underlyings_classification_chk'
+            ) THEN
+                ALTER TABLE underlyings
+                    ADD CONSTRAINT underlyings_classification_chk
+                    CHECK (classification IN ('blue_chip', 'theme', 'both'));
             END IF;
         END $$;
     `);
