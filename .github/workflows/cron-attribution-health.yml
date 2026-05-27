@@ -19,16 +19,24 @@ jobs:
           set -euo pipefail
           echo "Triggering attribution health at $(date -u)..."
 
-          RESPONSE=$(curl -sS -w "\n%{http_code}" \
-            -X POST "${BACKEND_URL}/attribution-health/check" \
-            -H "x-setup-token: ${SETUP_TOKEN}" \
-            --max-time 30)
+          HTTP_CODE=""
+          BODY=""
+          for i in 1 2 3; do
+            RESPONSE=$(curl -sS -w "\n%{http_code}" \
+              -X POST "${BACKEND_URL}/attribution-health/check" \
+              -H "x-setup-token: ${SETUP_TOKEN}" \
+              --max-time 30) || true
 
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | sed '$d')
+            echo "Attempt $i HTTP $HTTP_CODE"
+            echo "$BODY"
 
-          echo "HTTP $HTTP_CODE"
-          echo "$BODY"
+            if [ "$HTTP_CODE" = "202" ] || [ "$HTTP_CODE" = "200" ]; then
+              break
+            fi
+            [ "$i" -lt 3 ] && sleep 30
+          done
 
           if [ "$HTTP_CODE" != "202" ] && [ "$HTTP_CODE" != "200" ]; then
             echo "❌ Trigger failed"

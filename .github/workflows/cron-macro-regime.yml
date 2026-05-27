@@ -8,7 +8,7 @@ on:
     # UTC 23:30 = 北京时间 07:30 (next day) = US 19:30 ET (after close)
     # Ideal time: post-US-close so HY OAS / VIX / Treasury daily data are settled.
     - cron: '30 23 * * *'
-  workflow_dispatch:  # 允许 GitHub UI 手动触发(调试用)
+  workflow_dispatch:
 
 jobs:
   trigger-snapshot:
@@ -21,19 +21,24 @@ jobs:
           SETUP_TOKEN: ${{ secrets.SETUP_TOKEN }}
         run: |
           set -euo pipefail
-
           echo "Triggering snapshot at $(date -u +'%Y-%m-%dT%H:%M:%SZ')..."
 
-          RESPONSE=$(curl -sS -w "\n%{http_code}" \
-            -X POST "${BACKEND_URL}/macro-regime/refresh" \
-            -H "x-setup-token: ${SETUP_TOKEN}" \
-            --max-time 60)
+          HTTP_CODE=""
+          BODY=""
+          for i in 1 2 3; do
+            RESPONSE=$(curl -sS -w "\n%{http_code}" \
+              -X POST "${BACKEND_URL}/macro-regime/refresh" \
+              -H "x-setup-token: ${SETUP_TOKEN}" \
+              --max-time 60) || true
 
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | sed '$d')
+            echo "Attempt $i HTTP $HTTP_CODE"
+            echo "$BODY" | head -c 2000
 
-          echo "HTTP $HTTP_CODE"
-          echo "$BODY" | head -c 2000  # truncate huge payload in logs
+            [ "$HTTP_CODE" = "200" ] && break
+            [ "$i" -lt 3 ] && sleep 30
+          done
 
           if [ "$HTTP_CODE" != "200" ]; then
             echo "❌ Snapshot trigger failed with HTTP $HTTP_CODE"

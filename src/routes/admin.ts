@@ -9,6 +9,8 @@ import {
     updateUnderlyingStatus
 } from '../db/queries/ideas';
 import { seedUnderlyingsInline } from '../scripts/seed-underlyings';
+import { runGateDistributionCheck } from '../scripts/check-gate-distribution';
+import { runGradeDistributionCheck } from '../scripts/check-grade-distribution';
 
 export const adminRouter = Router();
 
@@ -60,6 +62,16 @@ adminRouter.delete('/overrides/:symbol', asyncHandler(async (req, res) => {
 
 adminRouter.get('/universe', asyncHandler(async (_req, res) => {
     res.json({ underlyings: await listUniverse() });
+}));
+
+adminRouter.post('/grade-distribution/check', asyncHandler(async (_req, res) => {
+    const result = await runGradeDistributionCheck();
+    res.json(result);
+}));
+
+adminRouter.post('/gate-distribution/check', asyncHandler(async (_req, res) => {
+    const result = await runGateDistributionCheck();
+    res.json(result);
 }));
 
 adminRouter.post('/universe/seed', asyncHandler(async (req, res) => {

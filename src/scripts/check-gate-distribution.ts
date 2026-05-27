@@ -27,6 +27,12 @@ export interface GateDistributionMetrics {
     }>;
 }
 
+export interface GateDistributionCheckResult {
+    status: 'ok';
+    distribution: GateDistributionMetrics | null;
+    alerts_fired: boolean;
+}
+
 export function computeGateDistributionMetrics(input: {
     run_id: string;
     run_date: string;
@@ -100,7 +106,7 @@ export function formatGateDistributionReport(metrics: GateDistributionMetrics): 
     ].join('\n');
 }
 
-export async function runGateDistributionCheck(): Promise<GateDistributionMetrics | null> {
+export async function runGateDistributionCheck(): Promise<GateDistributionCheckResult> {
     await ensureGateDecisionColumns();
     const latest = await pool.query<{ run_id: string; run_date: string }>(`
         SELECT run_id, run_date::text AS run_date
@@ -112,7 +118,11 @@ export async function runGateDistributionCheck(): Promise<GateDistributionMetric
     const run = latest.rows[0];
     if (!run) {
         console.log('[gate-distribution] no completed run found');
-        return null;
+        return {
+            status: 'ok',
+            distribution: null,
+            alerts_fired: false
+        };
     }
 
     const rows = await pool.query<GateDistributionRow>(
@@ -132,7 +142,11 @@ export async function runGateDistributionCheck(): Promise<GateDistributionMetric
     const report = formatGateDistributionReport(metrics);
     console.log(report);
     await sendTelegramMessage(report);
-    return metrics;
+    return {
+        status: 'ok',
+        distribution: metrics,
+        alerts_fired: metrics.type_counts.length > 0
+    };
 }
 
 async function ensureGateDecisionColumns(): Promise<void> {

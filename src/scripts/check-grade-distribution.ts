@@ -39,6 +39,12 @@ export interface GradeDistributionMetrics {
     issues: string[];
 }
 
+export interface GradeDistributionCheckResult {
+    status: 'ok';
+    distribution: GradeDistributionMetrics | null;
+    alerts_fired: boolean;
+}
+
 const EXPECTED_GRADES = new Set<Grade>(['GO', 'CAUTION', 'AVOID']);
 
 export function computeGradeDistributionMetrics(
@@ -116,24 +122,33 @@ export function formatGradeDistributionReport(metrics: GradeDistributionMetrics)
     ].join('\n');
 }
 
-export async function runGradeDistributionCheck(): Promise<GradeDistributionMetrics | null> {
+export async function runGradeDistributionCheck(): Promise<GradeDistributionCheckResult> {
     const latest = await fetchLatestRunSnapshot();
     if (!latest) {
         console.log('[grade-distribution] no completed run found');
-        return null;
+        return {
+            status: 'ok',
+            distribution: null,
+            alerts_fired: false
+        };
     }
 
     const history = await fetchHistorySnapshots(latest.run_id);
     const metrics = computeGradeDistributionMetrics(latest, history);
     console.log('[grade-distribution]', JSON.stringify(metrics, null, 2));
 
-    if (metrics.issues.length > 0) {
+    const alertsFired = metrics.issues.length > 0;
+    if (alertsFired) {
         await sendTelegramMessage(formatGradeDistributionReport(metrics));
     } else {
         console.log('[grade-distribution] healthy, no alert sent');
     }
 
-    return metrics;
+    return {
+        status: 'ok',
+        distribution: metrics,
+        alerts_fired: alertsFired
+    };
 }
 
 async function fetchLatestRunSnapshot(): Promise<RunGradeSnapshot | null> {
