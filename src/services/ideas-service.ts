@@ -86,8 +86,15 @@ import { enqueueSymbolScoringJob, getSymbolScoringJob } from './scoring-queue';
 
 interface EligibilityResult {
     eligible: boolean;
-    reason?: 'outside_universe' | 'status_suspended' | 'status_under_review' | 'status_deprecated' | 'restricted';
+    reason?:
+        | 'outside_universe'
+        | 'status_suspended'
+        | 'status_under_review'
+        | 'status_deprecated'
+        | 'restricted'
+        | 'house_override_avoid';
     message?: string;
+    in_recommendation_pool: boolean;
 }
 
 interface RestrictedSymbolEntry {
@@ -4210,33 +4217,32 @@ function buildDataFetcher(): DataFetcherInterface {
 
 async function checkSymbolEligibility(symbol: string): Promise<EligibilityResult> {
     const normalized = symbol.toUpperCase();
-    const underlying = await getUnderlyingBySymbol(normalized);
-    if (!underlying) {
-        return {
-            eligible: false,
-            reason: 'outside_universe',
-            message: '该标的未在私行 FCN 推荐池中，需 IC 审批后加入'
-        };
-    }
-
-    if (underlying.status !== 'active') {
-        return {
-            eligible: false,
-            reason: `status_${underlying.status}` as EligibilityResult['reason'],
-            message: getStatusMessage(underlying.status)
-        };
-    }
-
     const restricted = getRestrictedSymbols().get(normalized);
     if (restricted) {
         return {
             eligible: false,
             reason: 'restricted',
-            message: restricted.reason ? `该标的暂受限，不可推介：${restricted.reason}` : '该标的暂受限，不可推介'
+            message: restricted.reason ? `该标的暂受限，不可推介：${restricted.reason}` : '该标的暂受限，不可推介',
+            in_recommendation_pool: false
         };
     }
 
-    return { eligible: true };
+    const houseOverride = await getActiveHouseOverrideBySymbol(normalized).catch(() => null);
+    if (houseOverride?.override_type === 'FORCE_AVOID') {
+        return {
+            eligible: false,
+            reason: 'house_override_avoid',
+            message: `IC 已对该标的设置 FORCE_AVOID：${houseOverride.reason}`,
+            in_recommendation_pool: false
+        };
+    }
+
+    const underlying = await getUnderlyingBySymbol(normalized).catch(() => null);
+
+    return {
+        eligible: true,
+        in_recommendation_pool: underlying?.status === 'active'
+    };
 }
 
 function getStatusMessage(status: string): string {
@@ -4802,6 +4808,7 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             run_date: cachedRow.run_date,
             cached: true,
             grade: cachedRow.overall_grade,
+            in_recommendation_pool: eligibility.in_recommendation_pool,
             composite_score: toNullableNumber(cachedRow.composite_score) ?? 0,
             risk_reward_score: toNullableNumber(cachedRow.risk_reward_score),
             trend_score: toNullableNumber(cachedRow.trend_score),
@@ -5138,7 +5145,8 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
             underlying?.company_name ?? null,
             narrative,
             newsItems,
-            effectiveFlags
+            effectiveFlags,
+            underlying?.status === 'active'
         );
         const activeOverride = await getActiveHouseOverrideBySymbol(symbol).catch(() => null);
         if (activeOverride) {
@@ -5170,6 +5178,7 @@ function buildUnavailableIdeaResponse(symbol: string): SymbolIdeaResponse {
         run_date: todayIsoDate(),
         cached: false,
         grade: 'AVOID',
+        in_recommendation_pool: false,
         composite_score: 0,
         risk_reward_score: null,
         trend_score: null,
@@ -5222,6 +5231,7 @@ function buildNotRecommendableIdeaResponse(symbol: string, eligibility: Eligibil
         run_date: todayIsoDate(),
         cached: false,
         grade: 'NOT_RECOMMENDABLE',
+        in_recommendation_pool: eligibility.in_recommendation_pool,
         eligibility: {
             passed: false,
             reason: eligibility.reason,
@@ -5627,7 +5637,8 @@ function mapScoringResultToSymbolIdea(
     companyName: string | null,
     narrative: NarrativeOutput | null,
     newsItems: NewsItem[],
-    flags: Flag[] = scoring.flags
+    flags: Flag[] = scoring.flags,
+    inRecommendationPool = false
 ): SymbolIdeaResponse {
     return {
         symbol,
@@ -5636,6 +5647,7 @@ function mapScoringResultToSymbolIdea(
         run_date: todayIsoDate(),
         cached: false,
         grade: scoring.overall_grade,
+        in_recommendation_pool: inRecommendationPool,
         composite_score: scoring.composite_score,
         risk_reward_score: scoring.risk_reward_score,
         trend_score: scoring.trend_score,

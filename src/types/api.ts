@@ -67,7 +67,13 @@ export interface NarrativeOutput {
 
 export interface EligibilityStatus {
     passed: boolean;
-    reason?: 'outside_universe' | 'status_suspended' | 'status_under_review' | 'status_deprecated' | 'restricted';
+    reason?:
+        | 'outside_universe'
+        | 'status_suspended'
+        | 'status_under_review'
+        | 'status_deprecated'
+        | 'restricted'
+        | 'house_override_avoid';
     message?: string;
 }
 
@@ -682,6 +688,7 @@ export interface SymbolIdeaResponse {
     run_date: string;
     cached: boolean;
     grade: Grade;
+    in_recommendation_pool: boolean;
     eligibility?: EligibilityStatus;
     composite_score: number;
     risk_reward_score: number | null;

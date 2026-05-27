@@ -1574,12 +1574,12 @@ export async function updateIdeaCandidateNarrative(
             sentiment_score = $5,
             key_events = $6::jsonb,
             news_items = COALESCE($7::jsonb, news_items),
-            source_quality = COALESCE($8, source_quality),
-            narrative_engine_version = $9
+            source_quality = COALESCE($8::text, source_quality),
+            narrative_engine_version = $9::text
         WHERE run_id = $1
           AND symbol = $2
           AND (
-              ($9 IS NOT NULL AND COALESCE(narrative_engine_version, '') <> $9)
+              ($9::text IS NOT NULL AND COALESCE(narrative_engine_version, '') <> $9::text)
               OR ($10 >= CASE source_quality
                   WHEN 'go_pitch_hybrid_validated' THEN 60
                   WHEN 'caution_pitch_hybrid_validated' THEN 60
@@ -1797,7 +1797,8 @@ export async function upsertUnderlyingReference(input: {
             themes,
             tier,
             active,
-            status
+            status,
+            status_reason
         )
         VALUES (
             $1,
@@ -1809,7 +1810,8 @@ export async function upsertUnderlyingReference(input: {
             '{}'::text[],
             2,
             false,
-            'deprecated'
+            'under_review',
+            'Auto-created from symbol search; pending IC universe review'
         )
         ON CONFLICT (symbol) DO UPDATE
         SET exchange = COALESCE(EXCLUDED.exchange, underlyings.exchange),
