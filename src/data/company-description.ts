@@ -25,6 +25,7 @@ export const CURATED_DESCRIPTIONS: Record<string, string> = {
     MU: 'Micron 是 DRAM / NAND 与 HBM 供应商',
     TSM: '台积电是先进制程晶圆代工核心龙头',
     ASML: 'ASML 是 EUV 光刻机全球核心供应商',
+    ARM: 'Arm Holdings 是芯片架构 IP 全球龙头',
     TXN: 'Texas Instruments 是模拟芯片龙头',
     ADI: 'Analog Devices 是模拟与信号链芯片龙头',
     LRCX: 'Lam Research 是晶圆制造设备供应商',
@@ -115,7 +116,24 @@ export const CURATED_DESCRIPTIONS: Record<string, string> = {
     NEM: 'Newmont 是全球黄金矿业龙头',
     MSTR: 'MicroStrategy 是比特币资产持有平台',
     CRCL: 'Circle 是稳定币支付基础设施平台',
-    DELL: 'Dell 是服务器与企业硬件供应商'
+    DELL: 'Dell 是服务器与企业硬件供应商',
+    RIVN: 'Rivian 是美国电动卡车与商用车制造商',
+    UBER: 'Uber 是全球网约车与外卖平台龙头',
+    ABNB: 'Airbnb 是全球短租与民宿平台龙头',
+    SMCI: 'Supermicro 是 AI 服务器与液冷系统供应商',
+    APP: 'AppLovin 是移动应用广告与发行平台龙头',
+    MELI: 'MercadoLibre 是拉美电商与金融科技平台',
+    SE: 'Sea Limited 是东南亚电商与游戏综合龙头',
+    TTD: 'The Trade Desk 是程序化广告需求方平台龙头',
+    NOW: 'ServiceNow 是企业 IT 工作流软件龙头',
+    INTU: 'Intuit 是 TurboTax 与 QuickBooks 母公司',
+    ADP: 'ADP 是企业薪资与人力资源服务龙头',
+    ISRG: 'Intuitive Surgical 是手术机器人达芬奇制造商',
+    ELV: 'Elevance Health 是美国第二大健康保险',
+    CI: 'Cigna 是美国健康保险与药品福利管理',
+    REGN: 'Regeneron 是抗体药物生物科技龙头',
+    VRTX: 'Vertex 是囊性纤维化药物龙头',
+    NEE: 'NextEra Energy 是美国清洁能源公用事业龙头'
 };
 
 export async function getCompanyDescription(symbol: string): Promise<CompanyDescription | null> {

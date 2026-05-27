@@ -1,1 +1,62 @@
-[]
+[
+  {
+    "symbol": "TQQQ",
+    "reason": "3x leveraged QQQ — leverage decay 使长持显著亏损，不适合 sell-put 承接",
+    "added_at": "2026-05-27",
+    "reviewed_by": "system-5.8a"
+  },
+  {
+    "symbol": "SQQQ",
+    "reason": "3x inverse QQQ — inverse + leverage decay，长持几乎必亏",
+    "added_at": "2026-05-27",
+    "reviewed_by": "system-5.8a"
+  },
+  {
+    "symbol": "SOXL",
+    "reason": "3x leveraged semiconductors — leverage decay 使长持显著亏损，不适合 sell-put 承接",
+    "added_at": "2026-05-27",
+    "reviewed_by": "system-5.8a"
+  },
+  {
+    "symbol": "SOXS",
+    "reason": "3x inverse semiconductors — inverse + leverage decay，不适合 sell-put 承接",
+    "added_at": "2026-05-27",
+    "reviewed_by": "system-5.8a"
+  },
+  {
+    "symbol": "UVXY",
+    "reason": "1.5x leveraged VIX futures — contango 严重，持有显著负 carry",
+    "added_at": "2026-05-27",
+    "reviewed_by": "system-5.8a"
+  },
+  {
+    "symbol": "BOIL",
+    "reason": "2x leveraged Nat Gas futures — contango + leverage decay，不适合 sell-put 承接",
+    "added_at": "2026-05-27",
+    "reviewed_by": "system-5.8a"
+  },
+  {
+    "symbol": "KOLD",
+    "reason": "2x inverse Nat Gas futures — inverse + contango + leverage decay，不适合 sell-put 承接",
+    "added_at": "2026-05-27",
+    "reviewed_by": "system-5.8a"
+  },
+  {
+    "symbol": "USO",
+    "reason": "Oil futures ETF — contango decay 结构性不适配 short-vol FCN",
+    "added_at": "2026-05-27",
+    "reviewed_by": "system-5.8a"
+  },
+  {
+    "symbol": "TMF",
+    "reason": "3x leveraged 20+ Year Treasury — leverage decay 使长持显著亏损，不适合 sell-put 承接",
+    "added_at": "2026-05-27",
+    "reviewed_by": "system-5.8a"
+  },
+  {
+    "symbol": "TMV",
+    "reason": "3x inverse 20+ Year Treasury — inverse + leverage decay，不适合 sell-put 承接",
+    "added_at": "2026-05-27",
+    "reviewed_by": "system-5.8a"
+  }
+]

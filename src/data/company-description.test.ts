@@ -1,11 +1,37 @@
 import assert from 'node:assert/strict';
 import { CURATED_DESCRIPTIONS, getCompanyDescription, getDisplayDescription } from './company-description';
+import restrictedSymbols from '../../data/restricted-symbols.json';
 
 const originalKey = process.env.MASSIVE_API_KEY;
 const originalFetch = global.fetch;
 
 async function run(): Promise<void> {
     assert.ok(Object.keys(CURATED_DESCRIPTIONS).length >= 80);
+    const expectedCurated = [
+        'ARM',
+        'RIVN',
+        'UBER',
+        'ABNB',
+        'SMCI',
+        'APP',
+        'MELI',
+        'SE',
+        'TTD',
+        'NOW',
+        'GS',
+        'PYPL',
+        'INTU',
+        'ADP',
+        'ISRG',
+        'ELV',
+        'CI',
+        'REGN',
+        'VRTX',
+        'NEE'
+    ];
+    for (const symbol of expectedCurated) {
+        assert.ok(CURATED_DESCRIPTIONS[symbol], `${symbol} missing curated description`);
+    }
 
     const curated = await getDisplayDescription('NVDA');
     assert.ok(curated.includes('NVIDIA'));
@@ -20,6 +46,12 @@ async function run(): Promise<void> {
     for (const symbol of Object.keys(CURATED_DESCRIPTIONS)) {
         const desc = await getDisplayDescription(symbol);
         assert.equal(/是.*是美股核心标的/.test(desc), false, `${symbol} has duplicate fallback wording: ${desc}`);
+    }
+    assert.equal(await getDisplayDescription('ARM'), 'Arm Holdings 是芯片架构 IP 全球龙头');
+
+    const restrictedSet = new Set(restrictedSymbols.map((entry) => entry.symbol));
+    for (const symbol of ['TQQQ', 'SQQQ', 'SOXL', 'SOXS', 'UVXY', 'BOIL', 'KOLD', 'USO', 'TMF', 'TMV']) {
+        assert.ok(restrictedSet.has(symbol), `${symbol} missing restricted symbol entry`);
     }
 
     process.env.MASSIVE_API_KEY = 'test-key';
