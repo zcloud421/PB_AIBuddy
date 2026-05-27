@@ -156,6 +156,7 @@ async function fetchLatestRunSnapshot(): Promise<RunGradeSnapshot | null> {
         SELECT run_id, run_date::text AS run_date
         FROM idea_runs
         WHERE status = 'completed'
+          AND triggered_by = 'scheduled'::trigger_source
         ORDER BY run_date DESC, completed_at DESC, started_at DESC
         LIMIT 1
     `);
@@ -169,6 +170,7 @@ async function fetchHistorySnapshots(excludeRunId: string): Promise<RunGradeSnap
         SELECT run_id, run_date::text AS run_date
         FROM idea_runs
         WHERE status = 'completed'
+          AND triggered_by = 'scheduled'::trigger_source
           AND run_id <> $1
         ORDER BY run_date DESC, completed_at DESC, started_at DESC
         LIMIT 7
