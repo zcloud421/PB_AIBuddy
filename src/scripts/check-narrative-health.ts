@@ -64,25 +64,29 @@ async function computeNarrativeMetrics(): Promise<NarrativeMetrics> {
 
     const distRes = await pool.query<DistributionRow>(`
         SELECT
-            COALESCE(source_quality, 'unknown') AS sq,
+            COALESCE(ic.source_quality, 'unknown') AS sq,
             COUNT(*)::text AS cnt
-        FROM idea_candidates
-        WHERE created_at >= NOW() - INTERVAL '7 days'
-          AND why_now IS NOT NULL
-          AND why_now <> ''
+        FROM idea_candidates ic
+        JOIN idea_runs r ON r.run_id = ic.run_id
+        WHERE ic.created_at >= NOW() - INTERVAL '7 days'
+          AND r.triggered_by = 'scheduled'::trigger_source
+          AND ic.why_now IS NOT NULL
+          AND ic.why_now <> ''
         GROUP BY 1
     `);
 
     const persistentRes = await pool.query<PersistentTemplateRow>(`
         SELECT
-            symbol,
-            COUNT(DISTINCT DATE(created_at))::text AS days_in_template
-        FROM idea_candidates
-        WHERE created_at >= NOW() - INTERVAL '7 days'
-          AND source_quality IN ('template_fallback', 'llm_failed_validation', 'blocked')
-        GROUP BY symbol
-        HAVING COUNT(DISTINCT DATE(created_at)) >= 3
-        ORDER BY COUNT(DISTINCT DATE(created_at)) DESC, symbol ASC
+            ic.symbol,
+            COUNT(DISTINCT DATE(ic.created_at))::text AS days_in_template
+        FROM idea_candidates ic
+        JOIN idea_runs r ON r.run_id = ic.run_id
+        WHERE ic.created_at >= NOW() - INTERVAL '7 days'
+          AND r.triggered_by = 'scheduled'::trigger_source
+          AND ic.source_quality IN ('template_fallback', 'llm_failed_validation', 'blocked')
+        GROUP BY ic.symbol
+        HAVING COUNT(DISTINCT DATE(ic.created_at)) >= 3
+        ORDER BY COUNT(DISTINCT DATE(ic.created_at)) DESC, ic.symbol ASC
         LIMIT 10
     `);
 
