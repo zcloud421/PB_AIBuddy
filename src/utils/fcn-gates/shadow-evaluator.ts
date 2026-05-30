@@ -36,11 +36,27 @@ export function evaluateShadowGates(_input: {
         macro: _input.macroContext ?? DEFAULT_MACRO_CONTEXT
     });
 
+    // Gates are a downgrade-only safety overlay: they may pull the weighted
+    // grade DOWN (GO->CAUTION->AVOID) but must never push it up. A stock the
+    // weighted engine rated AVOID for reasons outside the gate set (low score,
+    // weak fundamentals, poor risk-reward) has no gate firing, so the raw gate
+    // grade defaults to GO — taking the more conservative of the two prevents
+    // that permissive reset.
     return {
         decisions: gates.decisions,
-        final_grade: gates.grade,
+        final_grade: moreConservativeGrade(_input.weightedGrade, gates.grade),
         engine_mode: getEngineMode()
     };
+}
+
+function gradeRank(grade: OverallGrade): number {
+    if (grade === 'GO') return 2;
+    if (grade === 'CAUTION') return 1;
+    return 0;
+}
+
+function moreConservativeGrade(a: OverallGrade, b: OverallGrade): OverallGrade {
+    return gradeRank(a) <= gradeRank(b) ? a : b;
 }
 
 function latestReturnPct(history: Array<{ close: number }>, barsBack: number): number | null {
