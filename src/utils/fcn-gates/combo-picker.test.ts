@@ -17,6 +17,20 @@ assert.ok(lite);
 assert.equal(lite?.strike.strike, 85);
 assert.equal(lite?.target_unreachable, false);
 
+const bufferFirst = selectStrikeAtTargetCoupon({
+    currentPrice: 100,
+    tenorDays: 90,
+    strikes: [
+        { ...base, strike: 90, open_interest: 100, mid_price: 3.4 },
+        { ...base, strike: 80, open_interest: 100, mid_price: 3.0 },
+        { ...base, strike: 70, open_interest: 100, mid_price: 2.6 }
+    ]
+});
+
+assert.ok(bufferFirst);
+assert.equal(bufferFirst?.strike.strike, 70);
+assert.equal(bufferFirst?.buffer_pct, 30);
+
 const unreachable = selectStrikeAtTargetCoupon({
     currentPrice: 200,
     tenorDays: 90,

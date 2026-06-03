@@ -21,6 +21,7 @@ export type FlagType =
     | 'BEARISH_STRUCTURE'
     | 'LOWER_HIGH_RISK'
     | 'LOW_COUPON'
+    | 'BUFFER_QUALITY'
     | 'LOW_LIQUIDITY'
     | 'NO_APPROVED_TENOR'
     | 'NO_APPROVED_STRIKE'
@@ -156,6 +157,8 @@ export interface IdeaCard {
     trend_score?: number | null;
     event_risk_score?: number | null;
     iv_premium_score?: number | null;
+    realized_volatility?: number | null;
+    volatility_risk_premium?: number | null;
     recommended_strike: number | null;
     recommended_tenor_days: number | null;
     recommended_expiry_date: string | null;
@@ -209,6 +212,8 @@ export interface DailyBestCard {
     trend_score?: number | null;
     event_risk_score?: number | null;
     iv_premium_score?: number | null;
+    realized_volatility?: number | null;
+    volatility_risk_premium?: number | null;
     recommended_strike: number;
     recommended_tenor_days: number;
     recommended_expiry_date: string | null;
@@ -695,6 +700,8 @@ export interface SymbolIdeaResponse {
     trend_score?: number | null;
     event_risk_score?: number | null;
     iv_premium_score?: number | null;
+    realized_volatility?: number | null;
+    volatility_risk_premium?: number | null;
     verdict_headline: string;
     verdict_sub: string;
     data_as_of_date: string | null;

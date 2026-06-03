@@ -31,6 +31,7 @@ export type FlagType =
     | 'BEARISH_STRUCTURE'
     | 'LOWER_HIGH_RISK'
     | 'LOW_COUPON'
+    | 'BUFFER_QUALITY'
     | 'LOW_LIQUIDITY'
     | 'NO_APPROVED_TENOR'
     | 'NO_APPROVED_STRIKE'
@@ -108,8 +109,12 @@ export interface ScoringResult {
     skew_score: number;
     event_risk_score: number;
     iv_premium_score: number;
+    buffer_score?: number | null;
+    buffer_pct?: number | null;
     premium_score: number | null;
     selected_implied_volatility: number | null;
+    realized_volatility: number | null;
+    volatility_risk_premium: number | null;
     recommended_strike: number | null;
     // actual DTE from the selected exchange-listed option expiry
     recommended_tenor_days: number | null;
@@ -666,7 +671,17 @@ function buildReasoningText(
     tenorDays: number | null,
     strike: number | null,
     couponRange: string | null,
-    flags: Flag[]
+    flags: Flag[],
+    volatilityContext?: {
+        impliedVolatility: number | null;
+        realizedVolatility: number | null;
+        volatilityRiskPremium: number | null;
+    },
+    bufferContext?: {
+        bufferPct: number | null;
+        bufferScore: number | null;
+        bufferModifier: number | null;
+    }
 ): string {
     const gradeText =
         grade === 'GO'
@@ -687,7 +702,22 @@ function buildReasoningText(
             ? `Key watchpoints: ${flags.map((flag) => flag.message).join('; ')}.`
             : `No immediate event or structure flags were triggered for ${symbol}.`;
 
-    return `${gradeText} ${structureText} ${flagSummary}`;
+    const volSummary =
+        volatilityContext &&
+        volatilityContext.impliedVolatility !== null &&
+        volatilityContext.realizedVolatility !== null &&
+        volatilityContext.volatilityRiskPremium !== null
+            ? `Vol context: IV ${(volatilityContext.impliedVolatility * 100).toFixed(1)}% vs 30d RV ${(volatilityContext.realizedVolatility * 100).toFixed(1)}% -> VRP ${(volatilityContext.volatilityRiskPremium * 100).toFixed(1)}%.`
+            : '';
+    const bufferSummary =
+        bufferContext &&
+        bufferContext.bufferPct !== null &&
+        bufferContext.bufferScore !== null &&
+        bufferContext.bufferModifier !== null
+            ? `Buffer context: ${(bufferContext.bufferPct).toFixed(1)}% buffer -> suitability ${bufferContext.bufferScore.toFixed(2)}, score modifier ${bufferContext.bufferModifier.toFixed(3)}.`
+            : '';
+
+    return `${gradeText} ${structureText} ${flagSummary}${volSummary ? ` ${volSummary}` : ''}${bufferSummary ? ` ${bufferSummary}` : ''}`;
 }
 
 function deriveOverallGrade(compositeScore: number): OverallGrade {
@@ -895,8 +925,27 @@ export function approveStrikes(
         .sort((a, b) => {
             const refCouponPctA = calculateRefCouponPct(a, tenorData.tenor_days);
             const refCouponPctB = calculateRefCouponPct(b, tenorData.tenor_days);
-            const targetBiasA = targetSelection?.strike === a ? -0.5 : 0;
-            const targetBiasB = targetSelection?.strike === b ? -0.5 : 0;
+            const targetMetA = refCouponPctA !== null && refCouponPctA >= targetCouponPct;
+            const targetMetB = refCouponPctB !== null && refCouponPctB >= targetCouponPct;
+            if (targetMetA !== targetMetB) {
+                return targetMetA ? -1 : 1;
+            }
+
+            const bufferA = ((symbolData.current_price - a.strike) / symbolData.current_price) * 100;
+            const bufferB = ((symbolData.current_price - b.strike) / symbolData.current_price) * 100;
+            if (targetMetA && targetMetB && bufferA !== bufferB) {
+                return bufferB - bufferA;
+            }
+
+            if (!targetMetA && !targetMetB) {
+                const couponDistance =
+                    (refCouponPctB ?? Number.NEGATIVE_INFINITY) - (refCouponPctA ?? Number.NEGATIVE_INFINITY);
+                if (couponDistance !== 0) return couponDistance;
+                if (bufferA !== bufferB) return bufferB - bufferA;
+            }
+
+            const targetBiasA = targetSelection?.strike === a ? -0.25 : 0;
+            const targetBiasB = targetSelection?.strike === b ? -0.25 : 0;
             const couponDistanceA =
                 refCouponPctA === null ? Number.POSITIVE_INFINITY : Math.abs(refCouponPctA - targetCouponPct) + targetBiasA;
             const couponDistanceB =
@@ -935,6 +984,19 @@ export function scoreAndGrade(candidate: {
     const decisions: GateDecision[] = [];
 
     const ivRankScore = clamp(strikeData.iv, 0, 1);
+    const realizedVolatility = computeRealizedVol(symbolData.price_history, 30);
+    const volatilityRiskPremium =
+        realizedVolatility !== null && Number.isFinite(strikeData.iv)
+            ? strikeData.iv - realizedVolatility
+            : null;
+    const vrpScore = scoreVolatilityRiskPremium(volatilityRiskPremium);
+    // VRP is an attractiveness/ranking signal (whether the desk is paid enough to sell vol),
+    // not a suitability signal (whether the client can emotionally hold assignment).
+    // Phase 5.4 should move this out of suitability grade into explanatory_score.
+    const volRichnessScore = clamp((vrpScore * 0.70) + (ivRankScore * 0.30), 0, 1);
+    const rawBufferPct = ((symbolData.current_price - strikeData.strike) / symbolData.current_price) * 100;
+    const bufferSuitabilityScore = scoreBufferSuitability(rawBufferPct);
+    const bufferCompositeModifier = 0.85 + (bufferSuitabilityScore * 0.15);
 
     let structureScore = 0.5;
     if (
@@ -1005,7 +1067,7 @@ export function scoreAndGrade(candidate: {
 
     const premiumScore = adjustedPremiumScore(strikeData);
 
-    const ivPremiumScore = clamp((ivRankScore * 0.40) + ((premiumScore ?? 0.5) * 0.40) + (skewScore * 0.20), 0, 1);
+    const ivPremiumScore = clamp((volRichnessScore * 0.45) + ((premiumScore ?? 0.5) * 0.35) + (skewScore * 0.20), 0, 1);
     const baseCompositeScore = clamp(
         (trendScore * 0.40) +
             (eventRiskScore * 0.25) +
@@ -1053,7 +1115,14 @@ export function scoreAndGrade(candidate: {
         });
     }
 
-    let compositeScore = baseCompositeScore;
+    let compositeScore = clamp(baseCompositeScore * bufferCompositeModifier, 0, 1);
+    if (bufferSuitabilityScore < 0.85) {
+        flags.push({
+            type: 'BUFFER_QUALITY',
+            severity: bufferSuitabilityScore < 0.5 ? 'WARN' : 'INFO',
+            message: `Buffer ${(rawBufferPct).toFixed(1)}% provides limited downside room for assignment risk`
+        });
+    }
     if (overextendedUptrend) {
         compositeScore = clamp(
             compositeScore - (HIGH_BETA_THEME_SYMBOLS.has(normalizedSymbol) ? 0.08 : 0.05),
@@ -1421,7 +1490,17 @@ export function scoreAndGrade(candidate: {
         tenorData.tenor_days,
         strikeData.strike,
         estimatedCouponRange,
-        flags
+        flags,
+        {
+            impliedVolatility: Number.isFinite(strikeData.iv) ? strikeData.iv : null,
+            realizedVolatility,
+            volatilityRiskPremium
+        },
+        {
+            bufferPct: Number.isFinite(rawBufferPct) ? rawBufferPct : null,
+            bufferScore: bufferSuitabilityScore,
+            bufferModifier: bufferCompositeModifier
+        }
     );
     const engineMode = getEngineMode();
     let shadowGrade: OverallGrade | null = null;
@@ -1457,8 +1536,12 @@ export function scoreAndGrade(candidate: {
         skew_score: Number(skewScore.toFixed(4)),
         event_risk_score: Number(eventRiskScore.toFixed(4)),
         iv_premium_score: Number(ivPremiumScore.toFixed(4)),
+        buffer_score: Number(bufferSuitabilityScore.toFixed(4)),
+        buffer_pct: Number.isFinite(rawBufferPct) ? Number(rawBufferPct.toFixed(2)) : null,
         premium_score: premiumScore !== null ? Number(premiumScore.toFixed(4)) : null,
         selected_implied_volatility: Number.isFinite(strikeData.iv) ? Number(strikeData.iv.toFixed(4)) : null,
+        realized_volatility: realizedVolatility !== null ? Number(realizedVolatility.toFixed(4)) : null,
+        volatility_risk_premium: volatilityRiskPremium !== null ? Number(volatilityRiskPremium.toFixed(4)) : null,
         recommended_strike: strikeData.strike,
         recommended_tenor_days: tenorData.tenor_days,
         recommended_expiry_date: tenorData.expiry_date,
@@ -1630,7 +1713,12 @@ function applyHighVolCautionOverride(input: {
             input.result.recommended_tenor_days,
             input.result.recommended_strike,
             input.result.estimated_coupon_range,
-            flags
+            flags,
+            {
+                impliedVolatility: input.result.selected_implied_volatility,
+                realizedVolatility: input.result.realized_volatility,
+                volatilityRiskPremium: input.result.volatility_risk_premium
+            }
         ),
         gate_decisions: [...(input.result.gate_decisions ?? []), decision]
     };
@@ -1661,6 +1749,8 @@ export async function runDailyScreener(
                 iv_premium_score: 0,
                 premium_score: null,
                 selected_implied_volatility: null,
+                realized_volatility: null,
+                volatility_risk_premium: null,
                 recommended_strike: null,
                 recommended_tenor_days: null,
                 recommended_expiry_date: null,
@@ -1734,6 +1824,8 @@ export async function runDailyScreener(
                 iv_premium_score: 0,
                 premium_score: null,
                 selected_implied_volatility: null,
+                realized_volatility: null,
+                volatility_risk_premium: null,
                 recommended_strike: null,
                 recommended_tenor_days: null,
                 recommended_expiry_date: null,
@@ -1759,15 +1851,34 @@ export async function runDailyScreener(
         }
 
         const targetCouponPct = STANDARD_TARGET_COUPON_PCT;
-        let best90: { result: ScoringResult; couponDistance: number; strikeData: StrikeData; tenorBucketDays: number } | null = null;
-        let best180: { result: ScoringResult; couponDistance: number; strikeData: StrikeData; tenorBucketDays: number } | null = null;
+        let best90: { result: ScoringResult; couponDistance: number; strikeData: StrikeData; tenorBucketDays: number; bufferPct: number; targetMet: boolean } | null = null;
+        let best180: { result: ScoringResult; couponDistance: number; strikeData: StrikeData; tenorBucketDays: number; bufferPct: number; targetMet: boolean } | null = null;
 
         const shouldReplaceSameTenorChoice = (
-            candidate: { result: ScoringResult; couponDistance: number },
-            current: { result: ScoringResult; couponDistance: number } | null
+            candidate: { result: ScoringResult; couponDistance: number; bufferPct: number; targetMet: boolean },
+            current: { result: ScoringResult; couponDistance: number; bufferPct: number; targetMet: boolean } | null
         ) => {
             if (!current) {
                 return true;
+            }
+
+            if (candidate.targetMet !== current.targetMet) {
+                return candidate.targetMet;
+            }
+
+            if (candidate.targetMet && current.targetMet && candidate.bufferPct !== current.bufferPct) {
+                return candidate.bufferPct > current.bufferPct;
+            }
+
+            if (!candidate.targetMet && !current.targetMet) {
+                const candidateCoupon = candidate.result.ref_coupon_pct ?? Number.NEGATIVE_INFINITY;
+                const currentCoupon = current.result.ref_coupon_pct ?? Number.NEGATIVE_INFINITY;
+                if (candidateCoupon !== currentCoupon) {
+                    return candidateCoupon > currentCoupon;
+                }
+                if (candidate.bufferPct !== current.bufferPct) {
+                    return candidate.bufferPct > current.bufferPct;
+                }
             }
 
             return (
@@ -1805,6 +1916,8 @@ export async function runDailyScreener(
                     iv_premium_score: 0,
                     premium_score: null,
                     selected_implied_volatility: null,
+                    realized_volatility: null,
+                    volatility_risk_premium: null,
                     recommended_strike: null,
                     recommended_tenor_days: tenorData.tenor_days,
                     recommended_expiry_date: tenorData.expiry_date,
@@ -1831,6 +1944,8 @@ export async function runDailyScreener(
                     result: emptyStrikeResult,
                     couponDistance: Number.POSITIVE_INFINITY,
                     tenorBucketDays: tenorData.preferred_tenor_days,
+                    bufferPct: 0,
+                    targetMet: false,
                     strikeData: {
                         strike: 0,
                         iv: 0,
@@ -1870,9 +1985,12 @@ export async function runDailyScreener(
                     candidateResult.ref_coupon_pct === null
                         ? Number.POSITIVE_INFINITY
                         : Math.abs(candidateResult.ref_coupon_pct - targetCouponPct);
+                const candidateBufferPct = candidateResult.buffer_pct ?? (100 - (candidateResult.moneyness_pct ?? 100));
                 const candidateChoice = {
                     result: candidateResult,
                     couponDistance,
+                    bufferPct: candidateBufferPct,
+                    targetMet: candidateResult.ref_coupon_pct !== null && candidateResult.ref_coupon_pct >= targetCouponPct,
                     tenorBucketDays: tenorData.preferred_tenor_days,
                     strikeData
                 };
@@ -1927,6 +2045,8 @@ export async function runDailyScreener(
                 iv_premium_score: 0,
                 premium_score: null,
                 selected_implied_volatility: null,
+                realized_volatility: null,
+                volatility_risk_premium: null,
                 recommended_strike: null,
                 recommended_tenor_days: null,
                 recommended_expiry_date: null,
@@ -1977,9 +2097,20 @@ export function calculateHistoricalVolatility(
         close: number;
     }>
 ): number {
-    const closes = priceHistory.slice(-30).map((row) => row.close).filter((close) => Number.isFinite(close) && close > 0);
+    return computeRealizedVol(priceHistory, 30) ?? 0;
+}
+
+export function computeRealizedVol(
+    priceHistory: Array<{
+        date?: string;
+        close: number;
+    }>,
+    lookbackDays = 30
+): number | null {
+    const lookback = Math.max(2, Math.round(lookbackDays));
+    const closes = priceHistory.slice(-lookback).map((row) => row.close).filter((close) => Number.isFinite(close) && close > 0);
     if (closes.length < 10) {
-        return 0;
+        return null;
     }
 
     const returns: number[] = [];
@@ -1988,12 +2119,31 @@ export function calculateHistoricalVolatility(
     }
 
     if (returns.length < 2) {
-        return 0;
+        return null;
     }
 
     const mean = returns.reduce((sum, value) => sum + value, 0) / returns.length;
     const variance = returns.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / (returns.length - 1);
     return Math.sqrt(variance) * Math.sqrt(252);
+}
+
+function scoreVolatilityRiskPremium(vrp: number | null): number {
+    if (vrp === null || !Number.isFinite(vrp)) {
+        return 0.5;
+    }
+
+    return clamp((vrp + 0.05) / 0.20, 0, 1);
+}
+
+export function scoreBufferSuitability(bufferPct: number | null): number {
+    if (bufferPct === null || !Number.isFinite(bufferPct)) {
+        return 0.5;
+    }
+    if (bufferPct < 10) return 0;
+    if (bufferPct >= 25) return 1;
+    if (bufferPct >= 20) return 0.9 + ((bufferPct - 20) / 5) * 0.1;
+    if (bufferPct >= 15) return 0.7 + ((bufferPct - 15) / 5) * 0.2;
+    return 0.4 + ((bufferPct - 10) / 5) * 0.3;
 }
 
 function scoreMacdMomentum(symbolData: SymbolData): number {

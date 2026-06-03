@@ -204,6 +204,8 @@ export interface TodayIdeaRow {
     ma200: number | null;
     pct_from_52w_high: number | null;
     selected_implied_volatility: number | null;
+    realized_volatility: number | null;
+    volatility_risk_premium: number | null;
 }
 
 export interface RiskFlagRow {
@@ -255,6 +257,8 @@ export interface CachedIdeaRow {
     ma200: number | null;
     pct_from_52w_high: number | null;
     selected_implied_volatility: number | null;
+    realized_volatility: number | null;
+    volatility_risk_premium: number | null;
     earnings_date: string | null;
     days_to_earnings: number | null;
 }
@@ -276,6 +280,8 @@ export interface SaveIdeaCandidateInput {
     refCouponPct: number | null;
     moneynessPct: number | null;
     selectedImpliedVolatility?: number | null;
+    realizedVolatility?: number | null;
+    volatilityRiskPremium?: number | null;
     currentPrice?: number | null;
     ma20?: number | null;
     ma50?: number | null;
@@ -778,7 +784,9 @@ export async function getIdeasByRunId(runId: string): Promise<TodayIdeaRow[]> {
             ic.ma50,
             ic.ma200,
             ic.pct_from_52w_high,
-            ic.selected_implied_volatility
+            ic.selected_implied_volatility,
+            ic.realized_volatility,
+            ic.volatility_risk_premium
         FROM idea_candidates ic
         JOIN idea_runs ir
             ON ir.run_id = ic.run_id
@@ -893,6 +901,8 @@ export async function getIdeaBySymbolAndDate(symbol: string, date: string): Prom
             ic.ma200,
             ic.pct_from_52w_high,
             ic.selected_implied_volatility,
+            ic.realized_volatility,
+            ic.volatility_risk_premium,
             COALESCE(ec.report_date, recent_ec.report_date)::text AS earnings_date,
             CASE
                 WHEN ec.report_date IS NOT NULL THEN (ec.report_date - CURRENT_DATE)
@@ -973,6 +983,8 @@ export async function getIdeaBySymbolAndRunId(symbol: string, runId: string): Pr
             ic.ma200,
             ic.pct_from_52w_high,
             ic.selected_implied_volatility,
+            ic.realized_volatility,
+            ic.volatility_risk_premium,
             ec.report_date::text AS earnings_date,
             CASE
                 WHEN ec.report_date IS NOT NULL THEN (ec.report_date - CURRENT_DATE)
@@ -1223,6 +1235,8 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             ref_coupon_pct,
             moneyness_pct,
             selected_implied_volatility,
+            realized_volatility,
+            volatility_risk_premium,
             current_price,
             ma20,
             ma50,
@@ -1246,7 +1260,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             news_items,
             reasoning_text
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::date, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27::jsonb, $28, $29, $30, $31, $32, $33, $34, $35::jsonb, $36::jsonb, $37::jsonb, $38
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::date, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29::jsonb, $30, $31, $32, $33, $34, $35, $36, $37::jsonb, $38::jsonb, $39::jsonb, $40
         )
         ON CONFLICT (run_id, symbol) DO UPDATE
         SET overall_grade = EXCLUDED.overall_grade,
@@ -1263,6 +1277,8 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             ref_coupon_pct = EXCLUDED.ref_coupon_pct,
             moneyness_pct = EXCLUDED.moneyness_pct,
             selected_implied_volatility = EXCLUDED.selected_implied_volatility,
+            realized_volatility = EXCLUDED.realized_volatility,
+            volatility_risk_premium = EXCLUDED.volatility_risk_premium,
             current_price = EXCLUDED.current_price,
             ma20 = EXCLUDED.ma20,
             ma50 = EXCLUDED.ma50,
@@ -1303,6 +1319,8 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             result.refCouponPct,
             result.moneynessPct,
             result.selectedImpliedVolatility ?? null,
+            result.realizedVolatility ?? null,
+            result.volatilityRiskPremium ?? null,
             result.currentPrice ?? null,
             result.ma20 ?? null,
             result.ma50 ?? null,
@@ -1373,6 +1391,8 @@ export async function ensureIdeaCandidatePriceColumns(): Promise<void> {
         ADD COLUMN IF NOT EXISTS sentiment_score NUMERIC(10, 4),
         ADD COLUMN IF NOT EXISTS iv_premium_score NUMERIC(8, 4),
         ADD COLUMN IF NOT EXISTS selected_implied_volatility NUMERIC(10, 6),
+        ADD COLUMN IF NOT EXISTS realized_volatility NUMERIC(10, 6),
+        ADD COLUMN IF NOT EXISTS volatility_risk_premium NUMERIC(10, 6),
         ADD COLUMN IF NOT EXISTS current_price NUMERIC(18, 6),
         ADD COLUMN IF NOT EXISTS ma20 NUMERIC(18, 6),
         ADD COLUMN IF NOT EXISTS ma50 NUMERIC(18, 6),
@@ -1731,6 +1751,7 @@ export async function ensureRiskFlagEnumValues(): Promise<void> {
         'LOWER_HIGH_RISK',
         'HIGH_BETA_THEME_CAUTION',
         'LOW_COUPON',
+        'BUFFER_QUALITY',
         'LOW_LIQUIDITY',
         'MACRO_SENSITIVITY',
         'NO_APPROVED_TENOR',
@@ -2379,6 +2400,8 @@ export function mapTodayIdeasResponse(
                 trend_score: parseNumeric(idea.trend_score),
                 event_risk_score: parseNumeric(idea.event_risk_score),
                 iv_premium_score: parseNumeric(idea.iv_premium_score),
+                realized_volatility: parseNumeric(idea.realized_volatility),
+                volatility_risk_premium: parseNumeric(idea.volatility_risk_premium),
                 recommended_strike: parseNumeric(idea.recommended_strike),
                 recommended_tenor_days: parseNumeric(idea.recommended_tenor_days),
                 recommended_expiry_date: idea.expiry_date ?? null,
@@ -2424,6 +2447,8 @@ export function mapTodayIdeasResponse(
                 trend_score: parseNumeric(idea.trend_score),
                 event_risk_score: parseNumeric(idea.event_risk_score),
                 iv_premium_score: parseNumeric(idea.iv_premium_score),
+                realized_volatility: parseNumeric(idea.realized_volatility),
+                volatility_risk_premium: parseNumeric(idea.volatility_risk_premium),
                 recommended_strike: parseNumeric(idea.recommended_strike),
                 recommended_tenor_days: parseNumeric(idea.recommended_tenor_days),
                 recommended_expiry_date: idea.expiry_date ?? null,

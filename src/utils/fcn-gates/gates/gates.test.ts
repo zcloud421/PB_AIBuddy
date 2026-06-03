@@ -4,9 +4,49 @@ import { evaluateBufferFloorGate } from './buffer-floor';
 import { evaluateDistributionFallingKnifeGate } from './distribution-falling-knife';
 import { evaluateEarningsWindowGate } from './earnings-window';
 import { evaluateFundamentalDeteriorationGate } from './fundamental-deterioration';
-import { evaluatePathRiskGate } from './path-risk';
+import { computePathRiskTrendConfirmation, computeRollingBreachFrequency, evaluatePathRiskGate } from './path-risk';
 import { DEFAULT_MACRO_CONTEXT } from '../macro-context';
 import type { GateInput } from './shared';
+
+function risingHistory(length: number): Array<{ date: string; close: number }> {
+    return Array.from({ length }, (_, index) => ({
+        date: `2026-01-${String((index % 28) + 1).padStart(2, '0')}`,
+        close: 100 + index * 0.1
+    }));
+}
+
+function sawtoothHistory(length: number): Array<{ date: string; close: number }> {
+    return Array.from({ length }, (_, index) => {
+        const phase = index % 30;
+        return {
+            date: `2026-01-${String((index % 28) + 1).padStart(2, '0')}`,
+            close: phase < 5 ? 100 : phase < 18 ? 78 : 95
+        };
+    });
+}
+
+function fallingHistory(length: number): Array<{ date: string; close: number }> {
+    return Array.from({ length }, (_, index) => ({
+        date: `2026-01-${String((index % 28) + 1).padStart(2, '0')}`,
+        close: 130 - index * 0.4
+    }));
+}
+
+function recoveredBreachHistory(length: number): Array<{ date: string; close: number }> {
+    return Array.from({ length }, (_, index) => {
+        if (index > length - 25) {
+            return {
+                date: `2026-01-${String((index % 28) + 1).padStart(2, '0')}`,
+                close: 95 + (index - (length - 24)) * 0.4
+            };
+        }
+        const phase = index % 35;
+        return {
+            date: `2026-01-${String((index % 28) + 1).padStart(2, '0')}`,
+            close: phase < 31 ? 110 : phase < 34 ? 78 : 100
+        };
+    });
+}
 
 function base(overrides: Partial<GateInput> = {}): GateInput {
     return {
@@ -16,6 +56,7 @@ function base(overrides: Partial<GateInput> = {}): GateInput {
             current_price: 100,
             ma50: 95,
             ma200: 90,
+            price_history: risingHistory(150),
             days_to_earnings: 30
         } as any,
         strikeData: {
@@ -61,8 +102,61 @@ assert.equal(evaluateDistributionFallingKnifeGate(base({
 }))?.failType, 'HARD_FAIL');
 assert.equal(evaluateDistributionFallingKnifeGate(base({ change5dPct: -4 })), null);
 
-assert.equal(evaluatePathRiskGate(base({ historicalMaxDrawdownPct: 20 }))?.failType, 'HARD_FAIL');
-assert.equal(evaluatePathRiskGate(base({ historicalMaxDrawdownPct: 8 })), null);
+const risingBreach = computeRollingBreachFrequency({
+    priceHistory: risingHistory(150),
+    currentPrice: 100,
+    strike: 85,
+    tenorDays: 30
+});
+assert.equal(risingBreach?.breach_frequency, 0);
 assert.equal(evaluatePathRiskGate(base()), null);
+
+assert.equal(computeRollingBreachFrequency({
+    priceHistory: risingHistory(60),
+    currentPrice: 100,
+    strike: 85,
+    tenorDays: 30
+}), null);
+
+const sawtoothBreach = computeRollingBreachFrequency({
+    priceHistory: sawtoothHistory(150),
+    currentPrice: 100,
+    strike: 85,
+    tenorDays: 30
+});
+assert.ok((sawtoothBreach?.breach_frequency ?? 0) > 0.2);
+const severeBreach = computeRollingBreachFrequency({
+    priceHistory: fallingHistory(150),
+    currentPrice: 100,
+    strike: 85,
+    tenorDays: 90
+});
+assert.ok((severeBreach?.breach_frequency ?? 0) > 0.8);
+assert.equal(computePathRiskTrendConfirmation({
+    priceHistory: fallingHistory(150),
+    currentPrice: 100,
+    ma50: 95,
+    ma200: 90
+}).confirmed, true);
+const recoveredBreach = computeRollingBreachFrequency({
+    priceHistory: recoveredBreachHistory(180),
+    currentPrice: 100,
+    strike: 85,
+    tenorDays: 90
+});
+assert.ok((recoveredBreach?.breach_frequency ?? 0) > 0.8);
+assert.equal(evaluatePathRiskGate(base({
+    symbolData: {
+        ...base().symbolData,
+        current_price: 104,
+        ma50: 101,
+        ma200: 95,
+        price_history: recoveredBreachHistory(180)
+    } as any
+})), null);
+const pathRisk = evaluatePathRiskGate(base({ symbolData: { ...base().symbolData, price_history: fallingHistory(150) } as any }));
+assert.equal(pathRisk?.failType, 'SUITABILITY_FAIL');
+assert.equal(pathRisk?.severity, 'WARN');
+assert.equal(typeof pathRisk?.details?.breach_freq, 'number');
 
 console.log('fcn-gates individual gate tests passed');

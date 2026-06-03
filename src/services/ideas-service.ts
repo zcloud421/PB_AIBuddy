@@ -4814,6 +4814,8 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             trend_score: toNullableNumber(cachedRow.trend_score),
             event_risk_score: toNullableNumber(cachedRow.event_risk_score),
             iv_premium_score: toNullableNumber(cachedRow.iv_premium_score),
+            realized_volatility: toNullableNumber(cachedRow.realized_volatility),
+            volatility_risk_premium: toNullableNumber(cachedRow.volatility_risk_premium),
             verdict_headline: gradeToHeadline(cachedRow.overall_grade),
             verdict_sub: generateVerdictSub(cachedRow.overall_grade, effectiveFlags),
             data_as_of_date: effectiveDataAsOfDate,
@@ -5090,6 +5092,8 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
                     refCouponPct: scoring.ref_coupon_pct,
                     moneynessPct: scoring.moneyness_pct,
                     selectedImpliedVolatility: scoring.selected_implied_volatility,
+                    realizedVolatility: scoring.realized_volatility,
+                    volatilityRiskPremium: scoring.volatility_risk_premium,
                     currentPrice: symbolData.current_price,
                     ma20: symbolData.ma20,
                     ma50: symbolData.ma50,
@@ -5308,6 +5312,8 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 iv_premium_score: 0,
                 premium_score: null,
                 selected_implied_volatility: null,
+                realized_volatility: null,
+                volatility_risk_premium: null,
                 recommended_strike: null,
                 recommended_tenor_days: null,
                 recommended_expiry_date: null,
@@ -5388,6 +5394,8 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 iv_premium_score: 0,
                 premium_score: null,
                 selected_implied_volatility: null,
+                realized_volatility: null,
+                volatility_risk_premium: null,
                 recommended_strike: null,
                 recommended_tenor_days: null,
                 recommended_expiry_date: null,
@@ -5534,6 +5542,8 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 iv_premium_score: 0,
                 premium_score: null,
                 selected_implied_volatility: null,
+                realized_volatility: null,
+                volatility_risk_premium: null,
                 recommended_strike: null,
                 recommended_tenor_days: null,
                 recommended_expiry_date: null,
@@ -5653,6 +5663,8 @@ function mapScoringResultToSymbolIdea(
         trend_score: scoring.trend_score,
         event_risk_score: scoring.event_risk_score,
         iv_premium_score: scoring.iv_premium_score,
+        realized_volatility: scoring.realized_volatility,
+        volatility_risk_premium: scoring.volatility_risk_premium,
         verdict_headline: gradeToHeadline(scoring.overall_grade),
         verdict_sub: generateVerdictSub(scoring.overall_grade, flags),
         data_as_of_date: symbolData.price_history[symbolData.price_history.length - 1]?.date ?? todayIsoDate(),
@@ -9806,6 +9818,8 @@ async function mapDailyBestCard(
         trend_score?: number | null;
         event_risk_score?: number | null;
         iv_premium_score?: number | null;
+        realized_volatility?: number | null;
+        volatility_risk_premium?: number | null;
         moneyness_pct: number | null;
         selected_implied_volatility?: number | null;
         current_price?: number | null;
@@ -9913,6 +9927,8 @@ async function mapDailyBestCard(
         trend_score: parseNullableNumber(idea.trend_score ?? null),
         event_risk_score: parseNullableNumber(idea.event_risk_score ?? null),
         iv_premium_score: parseNullableNumber(idea.iv_premium_score ?? null),
+        realized_volatility: parseNullableNumber(idea.realized_volatility ?? null),
+        volatility_risk_premium: parseNullableNumber(idea.volatility_risk_premium ?? null),
         recommended_strike: recommendedStrike,
         recommended_tenor_days: recommendedTenorDays,
         recommended_expiry_date: idea.expiry_date ?? null,

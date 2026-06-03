@@ -189,6 +189,8 @@ export async function runDailyScreener(): Promise<void> {
                     refCouponPct: result.ref_coupon_pct,
                     moneynessPct: result.moneyness_pct,
                     selectedImpliedVolatility: result.selected_implied_volatility,
+                    realizedVolatility: result.realized_volatility,
+                    volatilityRiskPremium: result.volatility_risk_premium,
                     currentPrice: result.current_price,
                     ma20: result.ma20,
                     ma50: result.ma50,

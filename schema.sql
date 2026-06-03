@@ -15,6 +15,7 @@ CREATE TYPE risk_flag_type AS ENUM (
     'LOWER_HIGH_RISK',
     'HIGH_BETA_THEME_CAUTION',
     'LOW_COUPON',
+    'BUFFER_QUALITY',
     'EXTREME_SKEW',
     'EVENT_RISK',
     'LIQUIDITY',
@@ -151,6 +152,8 @@ CREATE TABLE idea_candidates (
     ref_coupon_pct NUMERIC(10, 4) CHECK (ref_coupon_pct IS NULL OR ref_coupon_pct >= 0),
     moneyness_pct NUMERIC(10, 4),
     selected_implied_volatility NUMERIC(10, 6),
+    realized_volatility NUMERIC(10, 6),
+    volatility_risk_premium NUMERIC(10, 6),
     current_price NUMERIC(18, 6),
     ma20 NUMERIC(18, 6),
     ma50 NUMERIC(18, 6),
@@ -467,7 +470,9 @@ ALTER TABLE idea_candidates
     ADD COLUMN IF NOT EXISTS target_unreachable BOOLEAN DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS generated_under_regime TEXT,
     ADD COLUMN IF NOT EXISTS macro_overrides_applied JSONB DEFAULT '[]'::jsonb,
-    ADD COLUMN IF NOT EXISTS iv_premium_score NUMERIC(8, 4);
+    ADD COLUMN IF NOT EXISTS iv_premium_score NUMERIC(8, 4),
+    ADD COLUMN IF NOT EXISTS realized_volatility NUMERIC(10, 6),
+    ADD COLUMN IF NOT EXISTS volatility_risk_premium NUMERIC(10, 6);
 
 ALTER TABLE underlyings
     ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active',
