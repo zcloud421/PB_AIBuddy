@@ -1410,6 +1410,47 @@ export async function ensureUnderlyingCompanyNameColumn(): Promise<void> {
     `);
 }
 
+/**
+ * Self-healing security guard: Supabase exposes a public PostgREST API over the
+ * `public` schema, so any table without RLS is world-readable/writable by anyone
+ * with the project's anon key. This app reaches Postgres only via the `postgres`
+ * role (rolbypassrls=true), never PostgREST/anon, so blanket RLS is safe — it
+ * locks out the public API while the backend is unaffected. Run last at startup
+ * so it covers every table created earlier in the same boot, including any added
+ * by future migrations, with no per-table maintenance.
+ */
+export async function ensureRowLevelSecurity(): Promise<void> {
+    // Enable RLS (deny-all, no policies) on every public base table missing it.
+    await pool.query(`
+        DO $$
+        DECLARE r RECORD;
+        BEGIN
+            FOR r IN
+                SELECT tablename FROM pg_tables
+                WHERE schemaname = 'public' AND NOT rowsecurity
+            LOOP
+                EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', r.tablename);
+            END LOOP;
+        END $$;
+    `);
+
+    // Force every public view to security_invoker so a SECURITY DEFINER view can
+    // never leak base-table rows past RLS when queried via PostgREST. Idempotent.
+    await pool.query(`
+        DO $$
+        DECLARE r RECORD;
+        BEGIN
+            FOR r IN
+                SELECT c.relname FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relkind = 'v'
+            LOOP
+                EXECUTE format('ALTER VIEW public.%I SET (security_invoker = on)', r.relname);
+            END LOOP;
+        END $$;
+    `);
+}
+
 export async function ensureUnderlyingsGovernanceColumns(): Promise<void> {
     await pool.query(`
         ALTER TABLE underlyings

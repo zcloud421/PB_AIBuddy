@@ -15,6 +15,7 @@ import {
     ensureIdeaCandidatePriceColumns,
     ensureRecommendationTrackerTable,
     ensureRiskFlagEnumValues,
+    ensureRowLevelSecurity,
     ensureSourceQualityColumn,
     ensureUnderlyingCompanyNameColumn,
     ensureUnderlyingsGovernanceColumns
@@ -183,6 +184,9 @@ async function ensureSchemaGuards(): Promise<void> {
     await ensureLateCyclePillarHistoryTable();
     await ensureIndicatorPersistenceTable();
     await ensureIndicatorHistoryTable();
+    // Must run LAST: secures every table created by the guards above, plus any
+    // future table, against Supabase's public PostgREST API.
+    await ensureRowLevelSecurity();
 }
 
 if (require.main === module) {
