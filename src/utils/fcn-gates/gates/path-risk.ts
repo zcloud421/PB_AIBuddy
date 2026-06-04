@@ -3,7 +3,7 @@ import { bufferPct, decision, type GateInput } from './shared';
 
 const PATH_RISK_LOOKBACK_BARS = 252;
 const PATH_RISK_MIN_HISTORY_BARS = 120;
-// PROVISIONAL — overlapping-window breach_freq is bimodal; re-calibrate after Workstream C changes buffers.
+// Demoted to display-only: overlapping-window breach_freq is useful context, but no longer caps grade.
 const PATH_RISK_BREACH_FREQUENCY_THRESHOLD = 0.70;
 const PATH_RISK_NEGATIVE_RETURN_BARS = 20;
 const PATH_RISK_NEGATIVE_RETURN_THRESHOLD_PCT = -3;
@@ -126,9 +126,9 @@ export function evaluatePathRiskGate(input: GateInput): GateDecision | null {
     if (breach.breach_frequency > PATH_RISK_BREACH_FREQUENCY_THRESHOLD && trendConfirmation.confirmed) {
         return decision({
             type: 'PATH_RISK',
-            failType: 'SUITABILITY_FAIL',
-            severity: 'WARN',
-            message: `历史 ${breach.tenor_days} 日窗口中 ${(breach.breach_frequency * 100).toFixed(1)}% 曾跌穿当前 buffer ${breach.buffer_pct.toFixed(1)}%,且当前趋势确认偏弱,路径风险 cap at CAUTION`,
+            passed: true,
+            severity: 'INFO',
+            message: `历史 ${breach.tenor_days} 日窗口中 ${(breach.breach_frequency * 100).toFixed(1)}% 曾跌穿当前 buffer ${breach.buffer_pct.toFixed(1)}%,且当前趋势确认偏弱;仅作路径风险展示,不改变评级`,
             details: {
                 breach_freq: Number(breach.breach_frequency.toFixed(4)),
                 breaching_windows: breach.breaching_windows,

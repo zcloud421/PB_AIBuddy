@@ -155,8 +155,9 @@ assert.equal(evaluatePathRiskGate(base({
     } as any
 })), null);
 const pathRisk = evaluatePathRiskGate(base({ symbolData: { ...base().symbolData, price_history: fallingHistory(150) } as any }));
-assert.equal(pathRisk?.failType, 'SUITABILITY_FAIL');
-assert.equal(pathRisk?.severity, 'WARN');
+assert.equal(pathRisk?.failType, undefined);
+assert.equal(pathRisk?.severity, 'INFO');
+assert.equal(pathRisk?.passed, true);
 assert.equal(typeof pathRisk?.details?.breach_freq, 'number');
 
 console.log('fcn-gates individual gate tests passed');

@@ -228,6 +228,27 @@ const COMMODITY_BETA_STRIKE_SELECTION: StrikeSelectionConfig = {
 
 const COMMODITY_BETA_SYMBOLS = new Set(['GDX', 'USO']);
 const HIGH_BETA_THEME_SYMBOLS = new Set(['PLTR', 'TSLA', 'MSTR', 'CRCL', 'COIN', 'LI', 'FUTU']);
+const COMPUTED_SPECULATIVE_RV_THRESHOLD = 0.60;
+const COMPUTED_SPECULATIVE_MODERATE_RV_THRESHOLD = 0.30;
+const COMPUTED_SPECULATIVE_NEAR_HIGH_THRESHOLD_PCT = -10;
+const HOLDABLE_HIGH_VOL_SYMBOLS = new Set([
+    'NVDA',
+    'AMD',
+    'AVGO',
+    'TSM',
+    'ANET',
+    'LITE',
+    'VRT',
+    'ORCL',
+    'INTC',
+    'ASML',
+    'KLAC',
+    'AMAT',
+    'LRCX',
+    'QCOM',
+    'TXN',
+    'MU'
+]);
 const HIGH_VOL_EARNINGS_SYMBOLS = new Set([
     'NVDA',
     'TSLA',
@@ -329,6 +350,14 @@ interface AssignmentQualityBreakdown {
     narrativeStabilityScore: number;
 }
 
+interface ComputedSpeculativeResult {
+    isSpeculative: boolean;
+    realizedVolatility: number | null;
+    trigger: 'known_high_beta' | 'rv_extreme' | 'rv_moderate_non_core_near_high' | 'holdable_high_vol_exempt' | 'none';
+    coreAssetQualityScore: number;
+    narrativeStabilityScore: number;
+}
+
 function clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
 }
@@ -408,6 +437,77 @@ function narrativeStabilityScore(symbol: string): number {
         return 0.4;
     }
     return 0.65;
+}
+
+export function evaluateComputedSpeculative(symbol: string, symbolData: SymbolData): ComputedSpeculativeResult {
+    const normalized = symbol.toUpperCase();
+    const realizedVolatility = computeRealizedVol(symbolData.price_history, 30);
+    const coreScore = coreAssetQualityScore(normalized);
+    const narrativeScore = narrativeStabilityScore(normalized);
+
+    if (HIGH_BETA_THEME_SYMBOLS.has(normalized)) {
+        return {
+            isSpeculative: true,
+            realizedVolatility,
+            trigger: 'known_high_beta',
+            coreAssetQualityScore: coreScore,
+            narrativeStabilityScore: narrativeScore
+        };
+    }
+
+    if (HOLDABLE_HIGH_VOL_SYMBOLS.has(normalized)) {
+        return {
+            isSpeculative: false,
+            realizedVolatility,
+            trigger: 'holdable_high_vol_exempt',
+            coreAssetQualityScore: coreScore,
+            narrativeStabilityScore: narrativeScore
+        };
+    }
+
+    if (realizedVolatility === null || !Number.isFinite(realizedVolatility)) {
+        return {
+            isSpeculative: false,
+            realizedVolatility,
+            trigger: 'none',
+            coreAssetQualityScore: coreScore,
+            narrativeStabilityScore: narrativeScore
+        };
+    }
+
+    if (realizedVolatility >= COMPUTED_SPECULATIVE_RV_THRESHOLD) {
+        return {
+            isSpeculative: true,
+            realizedVolatility,
+            trigger: 'rv_extreme',
+            coreAssetQualityScore: coreScore,
+            narrativeStabilityScore: narrativeScore
+        };
+    }
+
+    const nonCoreLongTail = coreScore <= 0.6 && narrativeScore <= 0.65;
+    const nearHigh = symbolData.pct_from_52w_high >= COMPUTED_SPECULATIVE_NEAR_HIGH_THRESHOLD_PCT;
+    if (
+        realizedVolatility >= COMPUTED_SPECULATIVE_MODERATE_RV_THRESHOLD &&
+        nonCoreLongTail &&
+        nearHigh
+    ) {
+        return {
+            isSpeculative: true,
+            realizedVolatility,
+            trigger: 'rv_moderate_non_core_near_high',
+            coreAssetQualityScore: coreScore,
+            narrativeStabilityScore: narrativeScore
+        };
+    }
+
+    return {
+        isSpeculative: false,
+        realizedVolatility,
+        trigger: 'none',
+        coreAssetQualityScore: coreScore,
+        narrativeStabilityScore: narrativeScore
+    };
 }
 
 function buildThresholdRecoveryObservations(
@@ -1289,7 +1389,8 @@ export function scoreAndGrade(candidate: {
     }
 
     const isCommodityBeta = COMMODITY_BETA_SYMBOLS.has(symbol.toUpperCase());
-    const isHighBetaTheme = HIGH_BETA_THEME_SYMBOLS.has(symbol.toUpperCase());
+    const computedSpeculative = evaluateComputedSpeculative(symbol, symbolData);
+    const isHighBetaTheme = computedSpeculative.isSpeculative;
     const hasBearishStructureFlag = flags.some((flag) => flag.type === 'BEARISH_STRUCTURE');
     const hasLowerHighRiskFlag = flags.some((flag) => flag.type === 'LOWER_HIGH_RISK');
     const commodityBetaNeedsCaution =
@@ -1356,6 +1457,16 @@ export function scoreAndGrade(candidate: {
             severity: 'WARN',
             message: 'High-beta thematic guardrail capped GO at CAUTION',
             details: {
+                known_high_beta_symbol: HIGH_BETA_THEME_SYMBOLS.has(symbol.toUpperCase()),
+                computed_speculative: computedSpeculative.isSpeculative,
+                computed_speculative_trigger: computedSpeculative.trigger,
+                realized_volatility: computedSpeculative.realizedVolatility !== null
+                    ? Number(computedSpeculative.realizedVolatility.toFixed(4))
+                    : null,
+                realized_volatility_threshold: COMPUTED_SPECULATIVE_RV_THRESHOLD,
+                moderate_realized_volatility_threshold: COMPUTED_SPECULATIVE_MODERATE_RV_THRESHOLD,
+                core_asset_quality_score: computedSpeculative.coreAssetQualityScore,
+                narrative_stability_score: computedSpeculative.narrativeStabilityScore,
                 moneyness: moneynessPct,
                 iv: strikeData.iv,
                 pct_from_52w_high: symbolData.pct_from_52w_high,

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
     computeRealizedVol,
+    evaluateComputedSpeculative,
     scoreBufferSuitability,
     scoreAndGrade,
     type StrikeData,
@@ -80,6 +81,43 @@ const choppyResult = scoreAndGrade({
 assert.ok((calmResult.volatility_risk_premium ?? 0) > (choppyResult.volatility_risk_premium ?? 0));
 assert.ok(calmResult.iv_premium_score > choppyResult.iv_premium_score);
 assert.ok(calmResult.reasoning_text.includes('IV 50.0% vs 30d RV'));
+assert.equal(evaluateComputedSpeculative('ROKU', {
+    ...symbolData(choppyHistory),
+    pct_from_52w_high: -5
+}).isSpeculative, true);
+assert.equal(evaluateComputedSpeculative('NVDA', {
+    ...symbolData(choppyHistory),
+    pct_from_52w_high: -5
+}).isSpeculative, false);
+
+const rokuLikeResult = scoreAndGrade({
+    symbol: 'ROKU',
+    symbolData: {
+        ...symbolData(choppyHistory),
+        pct_from_52w_high: -5
+    },
+    tenorData: {
+        ...tenor,
+        strikes: [{ ...strike, iv: 0.6, mid_price: 4 }]
+    },
+    strikeData: { ...strike, iv: 0.6, mid_price: 4 }
+});
+assert.equal(rokuLikeResult.overall_grade, 'CAUTION');
+assert.ok(rokuLikeResult.gate_decisions?.some((item) => item.type === 'GRADE_CAP_HIGH_BETA'));
+
+const nvdaLikeResult = scoreAndGrade({
+    symbol: 'NVDA',
+    symbolData: {
+        ...symbolData(choppyHistory),
+        pct_from_52w_high: -5
+    },
+    tenorData: {
+        ...tenor,
+        strikes: [{ ...strike, iv: 0.6, mid_price: 4 }]
+    },
+    strikeData: { ...strike, iv: 0.6, mid_price: 4 }
+});
+assert.equal(nvdaLikeResult.gate_decisions?.some((item) => item.type === 'GRADE_CAP_HIGH_BETA'), false);
 assert.equal(scoreBufferSuitability(8), 0);
 assert.ok(scoreBufferSuitability(20) > scoreBufferSuitability(12));
 assert.equal(scoreBufferSuitability(25), 1);
