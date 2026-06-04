@@ -154,6 +154,7 @@ export interface IdeaCard {
     tier: number;
     grade: Extract<Grade, 'GO' | 'CAUTION'>;
     composite_score: number;
+    ranking_score?: number | null;
     trend_score?: number | null;
     event_risk_score?: number | null;
     iv_premium_score?: number | null;
@@ -209,6 +210,7 @@ export interface DailyBestCard {
     theme: string;
     theme_narrative: string;
     grade: 'GO';
+    ranking_score?: number | null;
     trend_score?: number | null;
     event_risk_score?: number | null;
     iv_premium_score?: number | null;
@@ -696,6 +698,7 @@ export interface SymbolIdeaResponse {
     in_recommendation_pool: boolean;
     eligibility?: EligibilityStatus;
     composite_score: number;
+    ranking_score?: number | null;
     risk_reward_score: number | null;
     trend_score?: number | null;
     event_risk_score?: number | null;

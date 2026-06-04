@@ -172,6 +172,7 @@ export interface TodayIdeaRow {
     tier: number;
     overall_grade: 'GO' | 'CAUTION' | 'AVOID';
     composite_score: number;
+    ranking_score: number | null;
     risk_reward_score: number | null;
     trend_score: number | null;
     event_risk_score: number | null;
@@ -225,6 +226,7 @@ export interface CachedIdeaRow {
     company_name: string | null;
     overall_grade: 'GO' | 'CAUTION' | 'AVOID';
     composite_score: number | null;
+    ranking_score: number | null;
     risk_reward_score: number | null;
     trend_score: number | null;
     event_risk_score: number | null;
@@ -273,6 +275,7 @@ export interface SaveIdeaCandidateInput {
     eventRiskScore: number;
     ivPremiumScore: number;
     compositeScore: number;
+    rankingScore?: number | null;
     riskRewardScore?: number | null;
     recommendedStrike: number | null;
     recommendedTenorDays: number | null;
@@ -753,6 +756,7 @@ export async function getIdeasByRunId(runId: string): Promise<TodayIdeaRow[]> {
             u.tier,
             ic.overall_grade,
             ic.composite_score,
+            ic.ranking_score,
             ic.risk_reward_score,
             ic.trend_score,
             ic.event_risk_score,
@@ -793,7 +797,14 @@ export async function getIdeasByRunId(runId: string): Promise<TodayIdeaRow[]> {
         JOIN underlyings u
             ON u.symbol = ic.symbol
         WHERE ic.run_id = $1
-        ORDER BY ic.composite_score DESC, ic.symbol ASC
+        ORDER BY
+            CASE ic.overall_grade
+                WHEN 'GO' THEN 0
+                WHEN 'CAUTION' THEN 1
+                ELSE 2
+            END ASC,
+            COALESCE(ic.ranking_score, ic.composite_score) DESC,
+            ic.symbol ASC
         `,
         [runId]
     );
@@ -869,6 +880,7 @@ export async function getIdeaBySymbolAndDate(symbol: string, date: string): Prom
             u.company_name,
             ic.overall_grade,
             ic.composite_score,
+            ic.ranking_score,
             ic.risk_reward_score,
             ic.trend_score,
             ic.event_risk_score,
@@ -951,6 +963,7 @@ export async function getIdeaBySymbolAndRunId(symbol: string, runId: string): Pr
             u.company_name,
             ic.overall_grade,
             ic.composite_score,
+            ic.ranking_score,
             ic.risk_reward_score,
             ic.trend_score,
             ic.event_risk_score,
@@ -1228,6 +1241,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             event_risk_score,
             iv_premium_score,
             composite_score,
+            ranking_score,
             risk_reward_score,
             recommended_strike,
             recommended_tenor_days,
@@ -1260,7 +1274,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             news_items,
             reasoning_text
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::date, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29::jsonb, $30, $31, $32, $33, $34, $35, $36, $37::jsonb, $38::jsonb, $39::jsonb, $40
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::date, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30::jsonb, $31, $32, $33, $34, $35, $36, $37, $38::jsonb, $39::jsonb, $40::jsonb, $41
         )
         ON CONFLICT (run_id, symbol) DO UPDATE
         SET overall_grade = EXCLUDED.overall_grade,
@@ -1270,6 +1284,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             event_risk_score = EXCLUDED.event_risk_score,
             iv_premium_score = EXCLUDED.iv_premium_score,
             composite_score = EXCLUDED.composite_score,
+            ranking_score = EXCLUDED.ranking_score,
             risk_reward_score = EXCLUDED.risk_reward_score,
             recommended_strike = EXCLUDED.recommended_strike,
             recommended_tenor_days = EXCLUDED.recommended_tenor_days,
@@ -1312,6 +1327,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             result.eventRiskScore,
             result.ivPremiumScore,
             result.compositeScore,
+            result.rankingScore ?? null,
             result.riskRewardScore ?? null,
             result.recommendedStrike,
             result.recommendedTenorDays,
@@ -1403,6 +1419,7 @@ export async function ensureIdeaCandidatePriceColumns(): Promise<void> {
         ADD COLUMN IF NOT EXISTS news_items JSONB DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS source_quality TEXT NULL,
         ADD COLUMN IF NOT EXISTS narrative_engine_version TEXT NULL,
+        ADD COLUMN IF NOT EXISTS ranking_score NUMERIC(10, 4),
         ADD COLUMN IF NOT EXISTS gate_decisions JSONB DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS shadow_grade TEXT,
         ADD COLUMN IF NOT EXISTS engine_mode TEXT NOT NULL DEFAULT 'gated_shadow',
@@ -2397,6 +2414,7 @@ export function mapTodayIdeasResponse(
                 tier: idea.tier,
                 grade: 'GO',
                 composite_score: Number(idea.composite_score),
+                ranking_score: parseNumeric(idea.ranking_score),
                 trend_score: parseNumeric(idea.trend_score),
                 event_risk_score: parseNumeric(idea.event_risk_score),
                 iv_premium_score: parseNumeric(idea.iv_premium_score),
@@ -2444,6 +2462,7 @@ export function mapTodayIdeasResponse(
                 tier: idea.tier,
                 grade: 'CAUTION',
                 composite_score: Number(idea.composite_score),
+                ranking_score: parseNumeric(idea.ranking_score),
                 trend_score: parseNumeric(idea.trend_score),
                 event_risk_score: parseNumeric(idea.event_risk_score),
                 iv_premium_score: parseNumeric(idea.iv_premium_score),

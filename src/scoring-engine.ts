@@ -103,6 +103,7 @@ export interface ScoringResult {
     symbol: string;
     overall_grade: OverallGrade;
     composite_score: number;
+    ranking_score: number | null;
     risk_reward_score: number | null;
     iv_rank_score: number;
     trend_score: number;
@@ -1090,10 +1091,10 @@ export function scoreAndGrade(candidate: {
             ? strikeData.iv - realizedVolatility
             : null;
     const vrpScore = scoreVolatilityRiskPremium(volatilityRiskPremium);
-    // VRP is an attractiveness/ranking signal (whether the desk is paid enough to sell vol),
-    // not a suitability signal (whether the client can emotionally hold assignment).
-    // Phase 5.4 should move this out of suitability grade into explanatory_score.
-    const volRichnessScore = clamp((vrpScore * 0.70) + (ivRankScore * 0.30), 0, 1);
+    // VRP is primarily an attractiveness/ranking signal (whether the desk is paid enough to sell vol),
+    // not a suitability signal (whether the client can emotionally hold assignment). Keep only a
+    // reduced VRP contribution in composite suitability; ranking_score carries the main VRP signal.
+    const volRichnessScore = clamp((vrpScore * 0.45) + (ivRankScore * 0.55), 0, 1);
     const rawBufferPct = ((symbolData.current_price - strikeData.strike) / symbolData.current_price) * 100;
     const bufferSuitabilityScore = scoreBufferSuitability(rawBufferPct);
     const bufferCompositeModifier = 0.85 + (bufferSuitabilityScore * 0.15);
@@ -1167,7 +1168,13 @@ export function scoreAndGrade(candidate: {
 
     const premiumScore = adjustedPremiumScore(strikeData);
 
-    const ivPremiumScore = clamp((volRichnessScore * 0.45) + ((premiumScore ?? 0.5) * 0.35) + (skewScore * 0.20), 0, 1);
+    const ivPremiumScore = clamp((volRichnessScore * 0.35) + ((premiumScore ?? 0.5) * 0.45) + (skewScore * 0.20), 0, 1);
+    const rankingScore = scoreRankingAttractiveness({
+        vrpScore,
+        premiumScore,
+        skewScore,
+        bufferScore: bufferSuitabilityScore
+    });
     const baseCompositeScore = clamp(
         (trendScore * 0.40) +
             (eventRiskScore * 0.25) +
@@ -1641,6 +1648,7 @@ export function scoreAndGrade(candidate: {
         symbol,
         overall_grade: overallGrade,
         composite_score: Number(compositeScore.toFixed(4)),
+        ranking_score: Number(rankingScore.toFixed(4)),
         risk_reward_score: null,
         iv_rank_score: Number(ivRankScore.toFixed(4)),
         trend_score: Number(trendScore.toFixed(4)),
@@ -1852,6 +1860,7 @@ export async function runDailyScreener(
                 symbol,
                 overall_grade: 'AVOID',
                 composite_score: 0,
+                ranking_score: null,
                 risk_reward_score: null,
                 iv_rank_score: 0,
                 trend_score: 0,
@@ -1927,6 +1936,7 @@ export async function runDailyScreener(
                 symbol,
                 overall_grade: 'AVOID',
                 composite_score: 0.2,
+                ranking_score: null,
                 risk_reward_score: null,
                 iv_rank_score: 0,
                 trend_score: 0,
@@ -2019,6 +2029,7 @@ export async function runDailyScreener(
                     symbol,
                     overall_grade: 'AVOID',
                     composite_score: 0.25,
+                    ranking_score: null,
                     risk_reward_score: null,
                     iv_rank_score: 0,
                     trend_score: 0,
@@ -2148,6 +2159,7 @@ export async function runDailyScreener(
                 symbol,
                 overall_grade: 'AVOID',
                 composite_score: 0.2,
+                ranking_score: null,
                 risk_reward_score: null,
                 iv_rank_score: 0,
                 trend_score: 0,
@@ -2244,6 +2256,22 @@ function scoreVolatilityRiskPremium(vrp: number | null): number {
     }
 
     return clamp((vrp + 0.05) / 0.20, 0, 1);
+}
+
+function scoreRankingAttractiveness(input: {
+    vrpScore: number;
+    premiumScore: number | null;
+    skewScore: number;
+    bufferScore: number;
+}): number {
+    return clamp(
+        (input.vrpScore * 0.45) +
+            ((input.premiumScore ?? 0.5) * 0.35) +
+            (input.skewScore * 0.15) +
+            (input.bufferScore * 0.05),
+        0,
+        1
+    );
 }
 
 export function scoreBufferSuitability(bufferPct: number | null): number {

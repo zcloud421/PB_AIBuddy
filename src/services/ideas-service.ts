@@ -4468,7 +4468,7 @@ export async function selectDailyBest(candidates: ScoringResult[]): Promise<{
             );
 
         const adjustedScore =
-            candidate.composite_score +
+            rankingScoreForCandidate(candidate) +
             tierBonus -
             freshnessPenalty -
             macroPenalty -
@@ -4883,6 +4883,7 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
             grade: cachedRow.overall_grade,
             in_recommendation_pool: eligibility.in_recommendation_pool,
             composite_score: toNullableNumber(cachedRow.composite_score) ?? 0,
+            ranking_score: toNullableNumber(cachedRow.ranking_score),
             risk_reward_score: toNullableNumber(cachedRow.risk_reward_score),
             trend_score: toNullableNumber(cachedRow.trend_score),
             event_risk_score: toNullableNumber(cachedRow.event_risk_score),
@@ -5273,6 +5274,7 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
                     eventRiskScore: scoring.event_risk_score,
                     ivPremiumScore: scoring.iv_premium_score,
                     compositeScore: scoring.composite_score,
+                    rankingScore: scoring.ranking_score ?? null,
                     riskRewardScore: scoring.risk_reward_score,
                     recommendedStrike: scoring.recommended_strike,
                     recommendedTenorDays: scoring.recommended_tenor_days,
@@ -5372,6 +5374,7 @@ function buildUnavailableIdeaResponse(symbol: string): SymbolIdeaResponse {
         grade: 'AVOID',
         in_recommendation_pool: false,
         composite_score: 0,
+        ranking_score: null,
         risk_reward_score: null,
         trend_score: null,
         event_risk_score: null,
@@ -5430,6 +5433,7 @@ function buildNotRecommendableIdeaResponse(symbol: string, eligibility: Eligibil
             message
         },
         composite_score: 0,
+        ranking_score: null,
         risk_reward_score: null,
         trend_score: null,
         event_risk_score: null,
@@ -5492,6 +5496,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 symbol,
                 overall_grade: 'AVOID',
                 composite_score: 0,
+                ranking_score: null,
                 risk_reward_score: null,
                 iv_rank_score: 0,
                 trend_score: 0,
@@ -5571,6 +5576,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                     postEarningsShockFlag || (daysToEarnings !== null && daysToEarnings >= 0 && daysToEarnings <= 3 && !earningsAlreadyReported)
                         ? 0.2
                         : 0.35,
+                ranking_score: null,
                 risk_reward_score: null,
                 iv_rank_score: 0,
                 trend_score: 0,
@@ -5722,6 +5728,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 symbol,
                 overall_grade: lowLiquidity ? 'AVOID' : 'CAUTION',
                 composite_score: lowLiquidity ? 0.2 : 0.35,
+                ranking_score: null,
                 risk_reward_score: null,
                 iv_rank_score: 0,
                 trend_score: 0,
@@ -5847,6 +5854,7 @@ function mapScoringResultToSymbolIdea(
         grade: scoring.overall_grade,
         in_recommendation_pool: inRecommendationPool,
         composite_score: scoring.composite_score,
+        ranking_score: scoring.ranking_score ?? null,
         risk_reward_score: scoring.risk_reward_score,
         trend_score: scoring.trend_score,
         event_risk_score: scoring.event_risk_score,
@@ -6969,7 +6977,11 @@ function adjustedShowcaseScore(
         );
     const repeatPenalty = candidate.symbol === dailyBestSymbol ? 0 : (appearedYesterday ? 0.03 : 0) + (wasYesterdayHero ? 0.05 : 0);
 
-    return candidate.composite_score - freshnessPenalty - repeatPenalty;
+    return rankingScoreForCandidate(candidate) - freshnessPenalty - repeatPenalty;
+}
+
+function rankingScoreForCandidate(candidate: Pick<ScoringResult, 'ranking_score' | 'composite_score'>): number {
+    return candidate.ranking_score ?? candidate.composite_score;
 }
 
 function buildInteractiveDrawdownEpisodesForAttribution(priceHistory: Array<{ date: string; close: number }>): Array<{
@@ -10024,6 +10036,7 @@ async function mapDailyBestCard(
         achieved_coupon_pct?: number | null;
         max_achievable_coupon_pct?: number | null;
         target_unreachable?: boolean | null;
+        ranking_score?: number | null;
         reasoning_text: string;
     }>,
     flagsBySymbol: Map<string, Flag[]>
@@ -10112,6 +10125,7 @@ async function mapDailyBestCard(
         theme,
         theme_narrative: themeNarrative,
         grade: 'GO',
+        ranking_score: parseNullableNumber(idea.ranking_score ?? null),
         trend_score: parseNullableNumber(idea.trend_score ?? null),
         event_risk_score: parseNullableNumber(idea.event_risk_score ?? null),
         iv_premium_score: parseNullableNumber(idea.iv_premium_score ?? null),

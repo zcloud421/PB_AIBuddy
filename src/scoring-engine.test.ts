@@ -80,6 +80,9 @@ const choppyResult = scoreAndGrade({
 
 assert.ok((calmResult.volatility_risk_premium ?? 0) > (choppyResult.volatility_risk_premium ?? 0));
 assert.ok(calmResult.iv_premium_score > choppyResult.iv_premium_score);
+assert.equal(typeof calmResult.composite_score, 'number');
+assert.equal(typeof calmResult.ranking_score, 'number');
+assert.ok((calmResult.ranking_score ?? 0) > (choppyResult.ranking_score ?? 0));
 assert.ok(calmResult.reasoning_text.includes('IV 50.0% vs 30d RV'));
 assert.equal(evaluateComputedSpeculative('ROKU', {
     ...symbolData(choppyHistory),

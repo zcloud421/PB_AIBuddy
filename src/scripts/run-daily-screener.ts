@@ -183,6 +183,7 @@ export async function runDailyScreener(): Promise<void> {
                     eventRiskScore: result.event_risk_score,
                     ivPremiumScore: result.iv_premium_score,
                     compositeScore: result.composite_score,
+                    rankingScore: result.ranking_score ?? null,
                     recommendedStrike: result.recommended_strike,
                     recommendedTenorDays: result.recommended_tenor_days,
                     recommendedExpiryDate: result.recommended_expiry_date,

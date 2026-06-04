@@ -146,6 +146,7 @@ CREATE TABLE idea_candidates (
     event_risk_score NUMERIC(8, 4) NOT NULL CHECK (event_risk_score >= 0),
     iv_premium_score NUMERIC(8, 4) CHECK (iv_premium_score IS NULL OR iv_premium_score >= 0),
     composite_score NUMERIC(10, 4) NOT NULL CHECK (composite_score >= 0),
+    ranking_score NUMERIC(10, 4) CHECK (ranking_score IS NULL OR ranking_score >= 0),
     risk_reward_score NUMERIC(10, 4) CHECK (risk_reward_score IS NULL OR risk_reward_score >= 0),
     recommended_strike NUMERIC(18, 6) CHECK (recommended_strike IS NULL OR recommended_strike > 0),
     recommended_tenor_days INTEGER CHECK (recommended_tenor_days IS NULL OR recommended_tenor_days > 0),
@@ -278,7 +279,7 @@ CREATE INDEX idx_idea_candidates_symbol_created_at
     ON idea_candidates (symbol, created_at DESC);
 
 CREATE INDEX idx_idea_candidates_run_grade
-    ON idea_candidates (run_id, overall_grade, composite_score DESC);
+    ON idea_candidates (run_id, overall_grade, ranking_score DESC, composite_score DESC);
 
 CREATE INDEX idx_risk_flags_run_id
     ON risk_flags (run_id);
