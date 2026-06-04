@@ -6,14 +6,12 @@ import {
     getSymbolNarrativeController,
     getSymbolPriceHistoryController,
     getSymbolIdeaStatusController,
-    getTodayIdeasController,
-    rescoreSymbolIdeaController
+    getTodayIdeasController
 } from '../controllers/ideas-controller';
 
 export const ideasRouter = Router();
 
 ideasRouter.get('/today', asyncHandler(getTodayIdeasController));
-ideasRouter.post('/:symbol/rescore', asyncHandler(rescoreSymbolIdeaController));
 ideasRouter.get('/:symbol/price-history', asyncHandler(getSymbolPriceHistoryController));
 ideasRouter.get('/:symbol/narrative', asyncHandler(getSymbolNarrativeController));
 ideasRouter.get('/:symbol', asyncHandler(getSymbolIdeaController));
