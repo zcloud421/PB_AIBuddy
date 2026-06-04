@@ -1116,9 +1116,12 @@ export function scoreAndGrade(candidate: {
 
     const normalizedPctFromHigh = clamp((symbolData.pct_from_52w_high + 60) / 60, 0, 1);
     const macdScore = scoreMacdMomentum(symbolData);
+    // RSI is a weak boundary/context signal for FCN selection. It should not
+    // materially move suitability grade; keep it out of trend_score and route a
+    // small contribution to ranking_score instead.
     const rsiScore = scoreRsiStrength(symbolData.rsi_14 ?? null);
     const trendScore = clamp(
-        (structureScore * 0.40) + (normalizedPctFromHigh * 0.20) + (macdScore * 0.25) + (rsiScore * 0.15),
+        (structureScore * 0.45) + (normalizedPctFromHigh * 0.25) + (macdScore * 0.30),
         0,
         1
     );
@@ -1169,12 +1172,6 @@ export function scoreAndGrade(candidate: {
     const premiumScore = adjustedPremiumScore(strikeData);
 
     const ivPremiumScore = clamp((volRichnessScore * 0.35) + ((premiumScore ?? 0.5) * 0.45) + (skewScore * 0.20), 0, 1);
-    const rankingScore = scoreRankingAttractiveness({
-        vrpScore,
-        premiumScore,
-        skewScore,
-        bufferScore: bufferSuitabilityScore
-    });
     const baseCompositeScore = clamp(
         (trendScore * 0.40) +
             (eventRiskScore * 0.25) +
@@ -1210,6 +1207,14 @@ export function scoreAndGrade(candidate: {
         targetCouponPct: STANDARD_TARGET_COUPON_PCT
     });
     const achievedCouponPct = calculateRefCouponPct(strikeData, tenorData.tenor_days);
+    const couponAttractivenessScore = scoreCouponAttractiveness(achievedCouponPct ?? refCouponPct);
+    const rankingScore = scoreRankingAttractiveness({
+        vrpScore,
+        couponAttractivenessScore,
+        skewScore,
+        bufferScore: bufferSuitabilityScore,
+        rsiScore
+    });
 
     if (refCouponPct !== null && refCouponPct < 8) {
         flags.push({
@@ -2260,18 +2265,30 @@ function scoreVolatilityRiskPremium(vrp: number | null): number {
 
 function scoreRankingAttractiveness(input: {
     vrpScore: number;
-    premiumScore: number | null;
+    couponAttractivenessScore: number;
     skewScore: number;
     bufferScore: number;
+    rsiScore: number;
 }): number {
     return clamp(
-        (input.vrpScore * 0.45) +
-            ((input.premiumScore ?? 0.5) * 0.35) +
-            (input.skewScore * 0.15) +
-            (input.bufferScore * 0.05),
+        (input.couponAttractivenessScore * 0.45) +
+            (input.vrpScore * 0.30) +
+            (input.skewScore * 0.10) +
+            (input.bufferScore * 0.10) +
+            (input.rsiScore * 0.05),
         0,
         1
     );
+}
+
+function scoreCouponAttractiveness(couponPct: number | null): number {
+    if (couponPct === null || !Number.isFinite(couponPct)) {
+        return 0.5;
+    }
+
+    if (couponPct <= 6) return 0.1;
+    if (couponPct >= 20) return 1;
+    return clamp((couponPct - 6) / 14, 0.1, 1);
 }
 
 export function scoreBufferSuitability(bufferPct: number | null): number {

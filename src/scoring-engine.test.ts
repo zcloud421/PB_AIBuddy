@@ -84,6 +84,41 @@ assert.equal(typeof calmResult.composite_score, 'number');
 assert.equal(typeof calmResult.ranking_score, 'number');
 assert.ok((calmResult.ranking_score ?? 0) > (choppyResult.ranking_score ?? 0));
 assert.ok(calmResult.reasoning_text.includes('IV 50.0% vs 30d RV'));
+
+const lowCouponRichVolResult = scoreAndGrade({
+    symbol: 'LOWCOUPON',
+    symbolData: symbolData(calmHistory),
+    tenorData: {
+        ...tenor,
+        strikes: [{ ...strike, iv: 0.6, mid_price: 1 }]
+    },
+    strikeData: { ...strike, iv: 0.6, mid_price: 1 }
+});
+const highCouponModestVrpResult = scoreAndGrade({
+    symbol: 'HIGHCOUPON',
+    symbolData: symbolData(calmHistory),
+    tenorData: {
+        ...tenor,
+        strikes: [{ ...strike, iv: 0.45, mid_price: 3.5 }]
+    },
+    strikeData: { ...strike, iv: 0.45, mid_price: 3.5 }
+});
+assert.ok((highCouponModestVrpResult.ranking_score ?? 0) > (lowCouponRichVolResult.ranking_score ?? 0));
+
+const lowRsiResult = scoreAndGrade({
+    symbol: 'LOWRSI',
+    symbolData: { ...symbolData(calmHistory), rsi_14: 30 },
+    tenorData: tenor,
+    strikeData: strike
+});
+const highRsiResult = scoreAndGrade({
+    symbol: 'HIGHRSI',
+    symbolData: { ...symbolData(calmHistory), rsi_14: 70 },
+    tenorData: tenor,
+    strikeData: strike
+});
+assert.equal(lowRsiResult.composite_score, highRsiResult.composite_score);
+assert.ok((highRsiResult.ranking_score ?? 0) > (lowRsiResult.ranking_score ?? 0));
 assert.equal(evaluateComputedSpeculative('ROKU', {
     ...symbolData(choppyHistory),
     pct_from_52w_high: -5
