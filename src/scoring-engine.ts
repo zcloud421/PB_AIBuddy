@@ -232,6 +232,11 @@ const HIGH_BETA_THEME_SYMBOLS = new Set(['PLTR', 'TSLA', 'MSTR', 'CRCL', 'COIN',
 const COMPUTED_SPECULATIVE_RV_THRESHOLD = 0.60;
 const COMPUTED_SPECULATIVE_MODERATE_RV_THRESHOLD = 0.30;
 const COMPUTED_SPECULATIVE_NEAR_HIGH_THRESHOLD_PCT = -10;
+// Known debt: this static exemption keeps flagship/holdable high-vol names from
+// being treated like speculative long-tail search names. It is intentionally
+// conservative for unlisted high-vol search tickers: names not in this list can
+// still be capped by computed realized-volatility checks until IC explicitly
+// reviews whether they are emotionally holdable after FCN assignment.
 const HOLDABLE_HIGH_VOL_SYMBOLS = new Set([
     'NVDA',
     'AMD',
@@ -1457,19 +1462,25 @@ export function scoreAndGrade(candidate: {
         const oldGrade = overallGrade;
         compositeScore = Math.min(compositeScore, 0.6);
         overallGrade = 'CAUTION';
+        const highBetaGuardrailKnownTheme = HIGH_BETA_THEME_SYMBOLS.has(normalizedSymbol);
+        const highBetaGuardrailCopy = highBetaGuardrailKnownTheme
+            ? 'High-beta thematic names require tighter FCN guardrails because valuation, sentiment, and narrative shifts can amplify downside risk'
+            : 'High-realized-volatility names require tighter FCN guardrails when trend, buffer, or coupon conditions are not clean';
         flags.push({
             type: 'HIGH_BETA_THEME_CAUTION',
             severity: 'WARN',
-            message: 'High-beta thematic names require tighter FCN guardrails because valuation, sentiment, and narrative shifts can amplify downside risk'
+            message: highBetaGuardrailCopy
         });
         decisions.push({
             type: 'GRADE_CAP_HIGH_BETA',
             failType: 'SUITABILITY_FAIL',
             passed: false,
             severity: 'WARN',
-            message: 'High-beta thematic guardrail capped GO at CAUTION',
+            message: highBetaGuardrailKnownTheme
+                ? 'High-beta thematic guardrail capped GO at CAUTION'
+                : 'High realized-volatility guardrail capped GO at CAUTION',
             details: {
-                known_high_beta_symbol: HIGH_BETA_THEME_SYMBOLS.has(symbol.toUpperCase()),
+                known_high_beta_symbol: highBetaGuardrailKnownTheme,
                 computed_speculative: computedSpeculative.isSpeculative,
                 computed_speculative_trigger: computedSpeculative.trigger,
                 realized_volatility: computedSpeculative.realizedVolatility !== null

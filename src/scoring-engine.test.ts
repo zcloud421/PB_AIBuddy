@@ -142,6 +142,8 @@ const rokuLikeResult = scoreAndGrade({
 });
 assert.equal(rokuLikeResult.overall_grade, 'CAUTION');
 assert.ok(rokuLikeResult.gate_decisions?.some((item) => item.type === 'GRADE_CAP_HIGH_BETA'));
+assert.ok(rokuLikeResult.flags.some((item) => item.message.includes('High-realized-volatility names')));
+assert.ok(rokuLikeResult.gate_decisions?.some((item) => item.message.includes('High realized-volatility guardrail')));
 
 const nvdaLikeResult = scoreAndGrade({
     symbol: 'NVDA',

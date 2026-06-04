@@ -165,9 +165,10 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
     if (input.grade === 'GO' && !goPitchEarningsWait) {
         const goPitch = await generateGoPitch(input);
         if (goPitch) {
-            logNarrativeOutput(input.symbol, goPitch);
-            logNarrativeComplete(input, mode, goPitch, null);
-            return goPitch;
+            const result = await enforceNarrativeGradeConsistency(input, goPitch);
+            logNarrativeOutput(input.symbol, result);
+            logNarrativeComplete(input, mode, result, null);
+            return result;
         }
         const fallback = await buildGoPitchFailClosed(input);
         console.log(JSON.stringify({
@@ -178,18 +179,20 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
             ts: new Date().toISOString()
         }));
         if (fallback) {
-            logNarrativeOutput(input.symbol, fallback);
-            logNarrativeComplete(input, mode, fallback, null);
-            return fallback;
+            const result = await enforceNarrativeGradeConsistency(input, fallback);
+            logNarrativeOutput(input.symbol, result);
+            logNarrativeComplete(input, mode, result, null);
+            return result;
         }
     }
 
     if ((input.grade === 'CAUTION' || input.grade === 'AVOID') && !goPitchEarningsWait) {
         const concernPitch = await generateConcernPitch(input);
         if (concernPitch) {
-            logNarrativeOutput(input.symbol, concernPitch);
-            logNarrativeComplete(input, mode, concernPitch, null);
-            return concernPitch;
+            const result = await enforceNarrativeGradeConsistency(input, concernPitch);
+            logNarrativeOutput(input.symbol, result);
+            logNarrativeComplete(input, mode, result, null);
+            return result;
         }
         const fallback = await buildConcernPitchFailClosed(input);
         console.log(JSON.stringify({
@@ -200,9 +203,10 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
             ts: new Date().toISOString()
         }));
         if (fallback) {
-            logNarrativeOutput(input.symbol, fallback);
-            logNarrativeComplete(input, mode, fallback, null);
-            return fallback;
+            const result = await enforceNarrativeGradeConsistency(input, fallback);
+            logNarrativeOutput(input.symbol, result);
+            logNarrativeComplete(input, mode, result, null);
+            return result;
         }
     }
 
@@ -373,13 +377,14 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
                         source_quality: 'llm_failed_validation',
                         engine_version: PITCH_ENGINE_VERSION
                     };
-                    logNarrativeOutput(input.symbol, result);
-                    logNarrativeComplete(input, mode, result, retryNumberValidation, retryEventValidation, {
+                    const finalResult = await enforceNarrativeGradeConsistency(input, result);
+                    logNarrativeOutput(input.symbol, finalResult);
+                    logNarrativeComplete(input, mode, finalResult, retryNumberValidation, retryEventValidation, {
                         retried,
                         retrySucceeded: false,
                         ...retryOutputValidation.failureLocation
                     });
-                    return result;
+                    return finalResult;
                 }
             } else {
                 console.log(JSON.stringify({
@@ -398,30 +403,148 @@ export async function generateNarrative(input: NarrativeInput): Promise<Narrativ
                     source_quality: 'llm_failed_validation',
                     engine_version: PITCH_ENGINE_VERSION
                 };
-                logNarrativeOutput(input.symbol, result);
-                logNarrativeComplete(input, mode, result, validation, eventValidation, {
+                const finalResult = await enforceNarrativeGradeConsistency(input, result);
+                logNarrativeOutput(input.symbol, finalResult);
+                logNarrativeComplete(input, mode, finalResult, validation, eventValidation, {
                     retried,
                     retrySucceeded: false,
                     ...outputValidation.failureLocation
                 });
-                return result;
+                return finalResult;
             }
         }
 
         console.log(`[narrative] ${input.symbol} validation PASSED, ${validation.authorizedCount} numbers verified`);
         const result = withSourceQuality(llmResult, firstFailed ? 'llm_retry_validated' : 'llm_validated');
-        logNarrativeOutput(input.symbol, result);
-        logNarrativeComplete(input, mode, result, validation, eventValidation, {
+        const finalResult = await enforceNarrativeGradeConsistency(input, result);
+        logNarrativeOutput(input.symbol, finalResult);
+        logNarrativeComplete(input, mode, finalResult, validation, eventValidation, {
             retried,
             retrySucceeded: retried,
             ...outputValidation.failureLocation
         });
-        return result;
+        return finalResult;
     } catch {
         logNarrativeOutput(input.symbol, fallback);
         logNarrativeComplete(input, mode, fallback, null);
         return fallback;
     }
+}
+
+export interface NarrativeGradeMismatch {
+    mismatched: boolean;
+    reasons: string[];
+}
+
+const GO_SOURCE_QUALITY_PATTERN = /^go_pitch_/;
+const CAUTION_SOURCE_QUALITY_PATTERN = /^caution_pitch_/;
+const AVOID_SOURCE_QUALITY_PATTERN = /^avoid_pitch_/;
+
+const GO_CONFLICT_PATTERNS = [
+    /当前不建议/,
+    /暂缓/,
+    /暂不/,
+    /不适合/,
+    /不够友好/,
+    /建议观望/,
+    /本期先以观察为主/,
+    /待[^。；，]*后再评估/,
+    /避免在信号确认前急于卖 put/
+];
+
+const CONCERN_CONFLICT_PATTERNS = [
+    /让您以\s*\$/,
+    /承接\s+[A-Z]{1,6}，年化票息/,
+    /若股价未跌破/,
+    /收取票息并赎回本金/,
+    /条款上，让您以/
+];
+
+const AVOID_BULLISH_CONFLICT_PATTERNS = [
+    /可推进/,
+    /可询价/,
+    /适合承接/,
+    /当前是机会/,
+    /具吸引力/,
+    /可以考虑卖 put/
+];
+
+export function detectNarrativeGradeMismatch(input: Pick<NarrativeInput, 'grade'>, output: NarrativeOutput): NarrativeGradeMismatch {
+    const reasons: string[] = [];
+    const sourceQuality = output.source_quality ?? '';
+    const text = `${output.why_now}\n${output.risk_note}`;
+
+    if (input.grade === 'GO') {
+        if (sourceQuality && !GO_SOURCE_QUALITY_PATTERN.test(sourceQuality)) {
+            reasons.push(`source_quality_not_go:${sourceQuality}`);
+        }
+        if ((output.sentiment_score ?? 0.5) < 0.5) {
+            reasons.push(`sentiment_below_go:${output.sentiment_score}`);
+        }
+        const hit = firstPatternHit(text, GO_CONFLICT_PATTERNS);
+        if (hit) reasons.push(`go_text_contains_concern:${hit}`);
+    }
+
+    if (input.grade === 'CAUTION') {
+        if (sourceQuality && !CAUTION_SOURCE_QUALITY_PATTERN.test(sourceQuality)) {
+            reasons.push(`source_quality_not_caution:${sourceQuality}`);
+        }
+        const hit = firstPatternHit(text, CONCERN_CONFLICT_PATTERNS);
+        if (hit) reasons.push(`caution_text_contains_go_terms:${hit}`);
+    }
+
+    if (input.grade === 'AVOID') {
+        if (sourceQuality && !AVOID_SOURCE_QUALITY_PATTERN.test(sourceQuality)) {
+            reasons.push(`source_quality_not_avoid:${sourceQuality}`);
+        }
+        const goHit = firstPatternHit(text, CONCERN_CONFLICT_PATTERNS);
+        if (goHit) reasons.push(`avoid_text_contains_go_terms:${goHit}`);
+        const bullishHit = firstPatternHit(text, AVOID_BULLISH_CONFLICT_PATTERNS);
+        if (bullishHit) reasons.push(`avoid_text_contains_bullish_terms:${bullishHit}`);
+    }
+
+    return { mismatched: reasons.length > 0, reasons };
+}
+
+export async function enforceNarrativeGradeConsistency(
+    input: NarrativeInput,
+    output: NarrativeOutput
+): Promise<NarrativeOutput> {
+    const mismatch = detectNarrativeGradeMismatch(input, output);
+    if (!mismatch.mismatched) return output;
+
+    const fallback = await buildGradeConsistentNarrativeFallback(input);
+    console.log(JSON.stringify({
+        tag: 'narrative_grade_mismatch',
+        symbol: input.symbol,
+        grade: input.grade,
+        source_quality: output.source_quality ?? null,
+        fallback_source_quality: fallback?.source_quality ?? null,
+        reasons: mismatch.reasons,
+        text_preview: output.why_now.slice(0, 140),
+        ts: new Date().toISOString()
+    }));
+
+    return fallback ?? output;
+}
+
+async function buildGradeConsistentNarrativeFallback(input: NarrativeInput): Promise<NarrativeOutput | null> {
+    if (input.grade === 'GO') {
+        return buildGoPitchFailClosed(input);
+    }
+    if (input.grade === 'CAUTION' || input.grade === 'AVOID') {
+        return buildConcernPitchFailClosed(input);
+    }
+    return null;
+}
+
+function firstPatternHit(text: string, patterns: RegExp[]): string | null {
+    for (const pattern of patterns) {
+        pattern.lastIndex = 0;
+        const match = pattern.exec(text);
+        if (match?.[0]) return match[0];
+    }
+    return null;
 }
 
 function logNarrativeInput(input: NarrativeInput): void {

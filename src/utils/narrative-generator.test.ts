@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
-import { generateNarrative, type NarrativeInput } from './narrative-generator';
+import {
+    detectNarrativeGradeMismatch,
+    enforceNarrativeGradeConsistency,
+    generateNarrative,
+    type NarrativeInput
+} from './narrative-generator';
 
 const previousDeepSeekKey = process.env.DEEPSEEK_API_KEY;
 process.env.DEEPSEEK_API_KEY = '';
@@ -55,6 +60,49 @@ async function run(): Promise<void> {
         grade: 'WATCH'
     });
     assert.equal(unknown.source_quality, 'template_fallback');
+
+    const goMismatch = detectNarrativeGradeMismatch(
+        { grade: 'GO' },
+        {
+            why_now: '当前不建议推进该 FCN 结构，本期先以观察为主。',
+            risk_note: '',
+            sentiment_score: 0.45,
+            key_events: [],
+            source_quality: 'caution_pitch_template'
+        }
+    );
+    assert.equal(goMismatch.mismatched, true);
+    assert.ok(goMismatch.reasons.some((reason) => reason.startsWith('source_quality_not_go')));
+    assert.ok(goMismatch.reasons.some((reason) => reason.startsWith('go_text_contains_concern')));
+
+    const cautionFixed = await enforceNarrativeGradeConsistency(baseInput, {
+        why_now: '让您以 $300 承接 ADBE，年化票息 10%-14%；若股价未跌破 $300，您收取票息并赎回本金。',
+        risk_note: '',
+        sentiment_score: 0.6,
+        key_events: [],
+        source_quality: 'go_pitch_hybrid_validated'
+    });
+    assert.equal(cautionFixed.source_quality, 'caution_pitch_template');
+    assert.ok(!cautionFixed.why_now.includes('若股价未跌破'));
+
+    const avoidFixed = await enforceNarrativeGradeConsistency(
+        {
+            ...baseInput,
+            grade: 'AVOID',
+            days_to_earnings: null,
+            news_headlines: [],
+            news_items: []
+        },
+        {
+            why_now: '条款上，让您以 $300 承接 ADBE，年化票息 10%-14%，当前是机会。',
+            risk_note: '',
+            sentiment_score: 0.6,
+            key_events: [],
+            source_quality: 'go_pitch_hybrid_validated'
+        }
+    );
+    assert.equal(avoidFixed.source_quality, 'avoid_pitch_deterministic');
+    assert.ok(avoidFixed.why_now.includes('当前不建议推进'));
 
     process.env.DEEPSEEK_API_KEY = previousDeepSeekKey;
     console.log('narrative-generator tests passed');
