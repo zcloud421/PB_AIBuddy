@@ -18,7 +18,9 @@ import {
     scoreAndGrade,
     type DataFetcherInterface,
     type ScoringResult,
-    type SymbolData
+    type StrikeData,
+    type SymbolData,
+    type TenorWindow
 } from '../scoring-engine';
 import {
     createIdeaRun,
@@ -78,6 +80,7 @@ import type {
     SignalRow,
     StrikeRiskGroupedDrawdownEvent,
     SymbolIdeaResponse,
+    SymbolIdeaRescoreResponse,
     SymbolNarrativeResponse,
     SymbolPriceHistoryResponse,
     TodayIdeasResponse
@@ -109,6 +112,22 @@ interface FreshSymbolAnalysis {
     scoring: ScoringResult;
     symbolData: SymbolData;
     macroContext?: Awaited<ReturnType<typeof loadMacroContext>>;
+}
+
+interface CustomStrikeMatchMetadata {
+    requested_strike: number;
+    matched_strike: number;
+    match_type: 'exact' | 'nearest';
+    strike_distance: number;
+    requested_tenor_days: number | null;
+    matched_tenor_days: number;
+    expiry_date: string;
+}
+
+interface CustomStrikeMatch {
+    tenorData: TenorWindow;
+    strikeData: StrikeData;
+    metadata: CustomStrikeMatchMetadata;
 }
 
 interface ThresholdDrawdownEvent {
@@ -4215,6 +4234,60 @@ function buildDataFetcher(): DataFetcherInterface {
     return sharedDataFetcher;
 }
 
+const CUSTOM_STRIKE_MAX_RELATIVE_DISTANCE = 0.05;
+
+export function selectCustomStrikeMatch(input: {
+    tenors: TenorWindow[];
+    requestedStrike: number;
+    requestedTenorDays?: number | null;
+}): CustomStrikeMatch | null {
+    const requestedTenorDays = input.requestedTenorDays ?? null;
+    const candidates: CustomStrikeMatch[] = [];
+
+    for (const tenorData of input.tenors) {
+        for (const strikeData of tenorData.strikes) {
+            const strikeDistance = Math.abs(strikeData.strike - input.requestedStrike);
+            const relativeDistance =
+                input.requestedStrike > 0 ? strikeDistance / input.requestedStrike : Number.POSITIVE_INFINITY;
+            if (relativeDistance > CUSTOM_STRIKE_MAX_RELATIVE_DISTANCE) {
+                continue;
+            }
+
+            candidates.push({
+                tenorData,
+                strikeData,
+                metadata: {
+                    requested_strike: input.requestedStrike,
+                    matched_strike: strikeData.strike,
+                    match_type: strikeDistance <= 0.0001 ? 'exact' : 'nearest',
+                    strike_distance: Number(strikeDistance.toFixed(4)),
+                    requested_tenor_days: requestedTenorDays,
+                    matched_tenor_days: tenorData.tenor_days,
+                    expiry_date: tenorData.expiry_date
+                }
+            });
+        }
+    }
+
+    return candidates.sort((left, right) => {
+        const leftTenorDistance =
+            requestedTenorDays === null
+                ? Math.abs(left.tenorData.preferred_tenor_days - 90)
+                : Math.abs(left.tenorData.tenor_days - requestedTenorDays);
+        const rightTenorDistance =
+            requestedTenorDays === null
+                ? Math.abs(right.tenorData.preferred_tenor_days - 90)
+                : Math.abs(right.tenorData.tenor_days - requestedTenorDays);
+        if (leftTenorDistance !== rightTenorDistance) {
+            return leftTenorDistance - rightTenorDistance;
+        }
+        if (left.metadata.strike_distance !== right.metadata.strike_distance) {
+            return left.metadata.strike_distance - right.metadata.strike_distance;
+        }
+        return right.strikeData.open_interest - left.strikeData.open_interest;
+    })[0] ?? null;
+}
+
 async function checkSymbolEligibility(symbol: string): Promise<EligibilityResult> {
     const normalized = symbol.toUpperCase();
     const restricted = getRestrictedSymbols().get(normalized);
@@ -4907,6 +4980,121 @@ export async function getSymbolIdea(symbol: string): Promise<SymbolIdeaResponse 
 }
 
 export { deleteTodayIdeaCandidate };
+
+async function scoreSymbolWithStrike(input: {
+    symbol: string;
+    requestedStrike: number;
+    requestedTenorDays?: number | null;
+}): Promise<FreshSymbolAnalysis & { customStrikeMatch: CustomStrikeMatchMetadata }> {
+    const { symbol, requestedStrike, requestedTenorDays } = input;
+    const fetcher = buildDataFetcher();
+    const symbolData = await fetcher.fetchSymbolData(symbol);
+    const chainData = await fetcher.fetchChainData(symbol, symbolData.current_price);
+
+    const underlying = await getUnderlyingBySymbol(symbol).catch(() => null);
+    const newsContext = await fetchStockNewsContext(symbol, underlying?.company_name ?? undefined);
+    const macroContext = await loadMacroContext();
+    const eligibility = checkEligibility(symbolData);
+    const approvedTenors = approveTenors(symbolData, chainData);
+
+    if (approvedTenors.length === 0) {
+        throw new HttpError(
+            503,
+            'SCORING_ENGINE_UNAVAILABLE',
+            `No approved tenor window is available for ${symbol}; custom strike re-score cannot be produced.`
+        );
+    }
+
+    const match = selectCustomStrikeMatch({
+        tenors: approvedTenors,
+        requestedStrike,
+        requestedTenorDays
+    });
+
+    if (!match) {
+        throw new HttpError(
+            503,
+            'SCORING_ENGINE_UNAVAILABLE',
+            `Requested strike ${requestedStrike} is outside the currently listed chain range for approved tenors.`
+        );
+    }
+
+    const extendedPriceHistory = await loadExtendedPriceHistory(symbol, symbolData.price_history);
+    const scoring = scoreAndGrade({
+        symbol,
+        symbolData,
+        tenorData: match.tenorData,
+        strikeData: match.strikeData,
+        hasRecentEarnings: newsContext.hasRecentEarnings,
+        daysSinceEarnings: newsContext.daysSinceEarnings,
+        sentimentProxy: newsContext.sentimentProxy,
+        hasMaterialNegativeNews: newsContext.hasMaterialNegativeNews,
+        macroContext
+    });
+
+    const enhancedScoring = applyRiskRewardOverlay({
+        scoring: {
+            ...scoring,
+            flags: mergeUniqueFlags(eligibility.flags, scoring.flags)
+        },
+        symbolData,
+        extendedPriceHistory
+    });
+
+    return {
+        exchange: underlying?.exchange ?? 'UNKNOWN',
+        symbolData,
+        macroContext,
+        scoring: enhancedScoring,
+        customStrikeMatch: match.metadata
+    };
+}
+
+export async function rescoreSymbolIdea(input: {
+    symbol: string;
+    strike: number;
+    tenorDays?: number | null;
+}): Promise<SymbolIdeaRescoreResponse | SymbolIdeaResponse> {
+    const normalizedSymbol = input.symbol.toUpperCase();
+    const eligibility = await checkSymbolEligibility(normalizedSymbol);
+    if (!eligibility.eligible) {
+        return buildNotRecommendableIdeaResponse(normalizedSymbol, eligibility);
+    }
+
+    const underlying = await getUnderlyingBySymbol(normalizedSymbol).catch(() => null);
+    const analysis = await scoreSymbolWithStrike({
+        symbol: normalizedSymbol,
+        requestedStrike: input.strike,
+        requestedTenorDays: input.tenorDays ?? null
+    });
+    const { exchange, scoring, symbolData, customStrikeMatch } = analysis;
+    const extendedPriceHistory = await loadExtendedPriceHistory(normalizedSymbol, symbolData.price_history);
+    const newsContext = await fetchStockNewsContext(
+        normalizedSymbol,
+        underlying?.company_name ?? getCompanyName(normalizedSymbol)
+    );
+    const response = mapScoringResultToSymbolIdea(
+        normalizedSymbol,
+        scoring,
+        symbolData,
+        extendedPriceHistory,
+        exchange,
+        underlying?.company_name ?? null,
+        null,
+        newsContext.displayItems,
+        scoring.flags,
+        eligibility.in_recommendation_pool
+    );
+
+    return {
+        ...response,
+        cached: false,
+        rescore: {
+            triggered_by: 'ad_hoc_rescore',
+            ...customStrikeMatch
+        }
+    };
+}
 
 export async function getSymbolPriceHistory(symbol: string, strikePct?: number | null): Promise<SymbolPriceHistoryResponse> {
     const normalizedSymbol = symbol.toUpperCase();

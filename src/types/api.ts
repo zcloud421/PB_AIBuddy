@@ -732,6 +732,19 @@ export interface SymbolIdeaResponse {
     sentiment_score: number | null;
 }
 
+export interface SymbolIdeaRescoreResponse extends SymbolIdeaResponse {
+    rescore: {
+        triggered_by: 'ad_hoc_rescore';
+        requested_strike: number;
+        matched_strike: number;
+        match_type: 'exact' | 'nearest';
+        strike_distance: number;
+        requested_tenor_days: number | null;
+        matched_tenor_days: number;
+        expiry_date: string;
+    };
+}
+
 export interface SymbolNarrativeResponse {
     ready: boolean;
     narrative: NarrativeOutput | null;

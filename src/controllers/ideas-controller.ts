@@ -5,7 +5,8 @@ import {
     getSymbolNarrative,
     getSymbolPriceHistory,
     getSymbolIdeaStatus,
-    getTodayIdeas
+    getTodayIdeas,
+    rescoreSymbolIdea
 } from '../services/ideas-service';
 
 export async function getTodayIdeasController(_req: Request, res: Response): Promise<void> {
@@ -26,6 +27,45 @@ export async function getSymbolIdeaController(req: Request, res: Response): Prom
 
     res.setHeader('Cache-Control', payload.cached ? 'private, max-age=300' : 'private, no-cache');
     res.setHeader('X-Cache', payload.cached ? 'HIT' : 'MISS');
+    res.status(200).json(payload);
+}
+
+export async function rescoreSymbolIdeaController(req: Request, res: Response): Promise<void> {
+    const strike = Number(req.body?.strike);
+    const tenorDays =
+        req.body?.tenor_days === undefined || req.body?.tenor_days === null
+            ? null
+            : Number(req.body.tenor_days);
+
+    if (!Number.isFinite(strike) || strike <= 0) {
+        res.status(400).json({
+            error: {
+                code: 'SCORING_ENGINE_UNAVAILABLE',
+                message: 'Body field "strike" must be a positive number.',
+                request_id: (req as Request & { requestId?: string }).requestId ?? 'unknown'
+            }
+        });
+        return;
+    }
+
+    if (tenorDays !== null && (!Number.isFinite(tenorDays) || tenorDays <= 0)) {
+        res.status(400).json({
+            error: {
+                code: 'SCORING_ENGINE_UNAVAILABLE',
+                message: 'Body field "tenor_days" must be a positive number when provided.',
+                request_id: (req as Request & { requestId?: string }).requestId ?? 'unknown'
+            }
+        });
+        return;
+    }
+
+    const payload = await rescoreSymbolIdea({
+        symbol: req.params.symbol,
+        strike,
+        tenorDays
+    });
+
+    res.setHeader('Cache-Control', 'private, no-cache');
     res.status(200).json(payload);
 }
 
