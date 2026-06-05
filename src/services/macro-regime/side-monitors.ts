@@ -12,6 +12,7 @@
 import type {
     AiCloudStressReport,
     AiCloudStressStatus,
+    CreditRegimeState,
     AiCloudStressTickerSignal,
     CreditFundingStressReport,
     RegimeSeverity,
@@ -32,6 +33,13 @@ function statusFromScore(score: 0 | 1 | 2 | 3): SideMonitorStatus {
     if (score === 1) return 'watch';
     if (score === 2) return 'stress';
     return 'crisis';
+}
+
+function clampCreditScore(score: number): 0 | 1 | 2 | 3 {
+    if (score <= 0) return 0;
+    if (score === 1) return 1;
+    if (score === 2) return 2;
+    return 3;
 }
 
 function aiCloudStatusFromScore(score: 0 | 1 | 2 | 3): AiCloudStressStatus {
@@ -314,6 +322,133 @@ export function scoreHyOasAcceleration(delta4w: number, delta8w: number, latestB
     return evaluateHyOasAcceleration(delta4w, delta8w, latestBp).score;
 }
 
+export function evaluateCccLeadsHy(
+    cccOasSeriesBp: number[],
+    hyOasSeriesBp: number[]
+): SideSubSignal {
+    if (cccOasSeriesBp.length < 21 || hyOasSeriesBp.length < 21) {
+        return {
+            name: 'CCC leads HY',
+            value: null,
+            score: 0,
+            status: 'normal',
+            notes: ['CCC/HY OAS 历史数据不足']
+        };
+    }
+
+    const latestCcc = cccOasSeriesBp[cccOasSeriesBp.length - 1];
+    const latestHy = hyOasSeriesBp[hyOasSeriesBp.length - 1];
+    const ccc4wBack = cccOasSeriesBp[cccOasSeriesBp.length - 1 - 20];
+    const hy4wBack = hyOasSeriesBp[hyOasSeriesBp.length - 1 - 20];
+    const cccDelta4w = latestCcc - ccc4wBack;
+    const hyDelta4w = latestHy - hy4wBack;
+    const leadSpread = cccDelta4w - hyDelta4w;
+
+    let score: 0 | 1 | 2 | 3 = 0;
+    if (cccDelta4w > 0 && leadSpread >= 25) score = 1;
+    if (cccDelta4w >= 75 && leadSpread >= 50) score = 2;
+    if (cccDelta4w >= 150 && leadSpread >= 100) score = 3;
+
+    // Absolute CCC stress can upgrade one notch, but still requires CCC to be
+    // widening faster than HY so level alone does not fire a leading signal.
+    if (cccDelta4w > 0 && leadSpread >= 50 && latestCcc >= 900) {
+        score = clampCreditScore(Math.max(score, 2));
+    }
+    if (cccDelta4w > 0 && leadSpread >= 100 && latestCcc >= 1100) {
+        score = clampCreditScore(Math.max(score, 3));
+    }
+
+    const notes = [
+        `CCC Δ4w ${cccDelta4w >= 0 ? '+' : ''}${cccDelta4w.toFixed(0)}bp vs HY Δ4w ${hyDelta4w >= 0 ? '+' : ''}${hyDelta4w.toFixed(0)}bp`,
+        `CCC-HY lead ${leadSpread >= 0 ? '+' : ''}${leadSpread.toFixed(0)}bp`,
+        `CCC latest ${latestCcc.toFixed(0)}bp; HY latest ${latestHy.toFixed(0)}bp`
+    ];
+    if (score === 0) notes.push('CCC 尚未显著领先 HY 走阔');
+
+    return {
+        name: 'CCC leads HY',
+        value: Math.round(leadSpread * 10) / 10,
+        score,
+        status: statusFromScore(score),
+        notes
+    };
+}
+
+export function evaluateCreditEquityDivergence(
+    equityBars: DailyPriceBar[],
+    hyOasSeriesBp: number[],
+    cccOasSeriesBp: number[] = []
+): SideSubSignal {
+    if (equityBars.length < 40 || hyOasSeriesBp.length < 21) {
+        return {
+            name: 'Credit-equity divergence',
+            value: null,
+            score: 0,
+            status: 'normal',
+            notes: ['QQQ/credit 历史数据不足']
+        };
+    }
+
+    const closes = equityBars.map((bar) => bar.close).filter((close) => Number.isFinite(close) && close > 0);
+    if (closes.length < 40) {
+        return {
+            name: 'Credit-equity divergence',
+            value: null,
+            score: 0,
+            status: 'normal',
+            notes: ['QQQ 收盘价历史数据不足']
+        };
+    }
+
+    const lastClose = closes[closes.length - 1];
+    const trailingHigh = Math.max(...closes.slice(-60));
+    const pctFromHigh = trailingHigh > 0 ? ((lastClose / trailingHigh) - 1) * 100 : null;
+    const hyDelta4w = hyOasSeriesBp[hyOasSeriesBp.length - 1] - hyOasSeriesBp[hyOasSeriesBp.length - 1 - 20];
+    const cccDelta4w = cccOasSeriesBp.length >= 21
+        ? cccOasSeriesBp[cccOasSeriesBp.length - 1] - cccOasSeriesBp[cccOasSeriesBp.length - 1 - 20]
+        : 0;
+    const creditWidening = Math.max(hyDelta4w, cccDelta4w);
+    const nearHigh = pctFromHigh !== null && pctFromHigh >= -3;
+
+    let score: 0 | 1 | 2 | 3 = 0;
+    if (nearHigh && creditWidening >= 25) score = 1;
+    if (nearHigh && creditWidening >= 50) score = 2;
+    if (nearHigh && creditWidening >= 100) score = 3;
+    if (pctFromHigh !== null && pctFromHigh >= -1 && creditWidening >= 75) {
+        score = clampCreditScore(Math.max(score, 3));
+    }
+
+    const notes = [
+        `QQQ 距 60日高点 ${pctFromHigh !== null ? pctFromHigh.toFixed(1) : 'N/A'}%`,
+        `HY Δ4w ${hyDelta4w >= 0 ? '+' : ''}${hyDelta4w.toFixed(0)}bp; CCC Δ4w ${cccDelta4w >= 0 ? '+' : ''}${cccDelta4w.toFixed(0)}bp`
+    ];
+    if (!nearHigh) notes.push('权益未接近高点,不构成信用-权益背离');
+    if (nearHigh && score === 0) notes.push('信用走阔未达背离阈值');
+
+    return {
+        name: 'Credit-equity divergence',
+        value: pctFromHigh !== null ? Math.round(pctFromHigh * 10) / 10 : null,
+        score,
+        status: statusFromScore(score),
+        notes
+    };
+}
+
+export function classifyCreditRegimeState(input: {
+    cccLeadsHy: SideSubSignal;
+    creditEquityDivergence: SideSubSignal;
+    hyAcceleration: SideSubSignal;
+}): CreditRegimeState {
+    const signals = [input.cccLeadsHy, input.creditEquityDivergence, input.hyAcceleration];
+    const corroborating = signals.filter((signal) => signal.score >= 2).length;
+    const watchSignals = signals.filter((signal) => signal.score >= 1).length;
+    const maxScore = Math.max(...signals.map((signal) => signal.score));
+
+    if (corroborating >= 2 && maxScore >= 3) return 'BREAK';
+    if (corroborating >= 1 || watchSignals >= 2) return 'BREAK_FORMING';
+    return 'NOISE';
+}
+
 async function computeFundingProxySubSignal(): Promise<SideSubSignal> {
     const [dgs3mo, dgs2] = await Promise.all([
         fetchFredSeries('DGS3MO', 10),
@@ -359,22 +494,42 @@ async function computeFundingProxySubSignal(): Promise<SideSubSignal> {
 
 export async function computeCreditFundingStress(
     massiveFetcher: MassiveDataFetcher,
-    hyOasSeriesBp: number[]
+    hyOasSeriesBp: number[],
+    cccOasSeriesBp: number[] = []
 ): Promise<CreditFundingStressReport> {
-    const [kbe, hyAccel, funding] = await Promise.all([
+    const [kbe, hyAccel, funding, qqqBars] = await Promise.all([
         computeKbeSubSignal(massiveFetcher),
         computeHyAccelerationSubSignal(hyOasSeriesBp),
-        computeFundingProxySubSignal()
+        computeFundingProxySubSignal(),
+        massiveFetcher.fetchPriceHistory('QQQ', 100).catch(() => [] as DailyPriceBar[])
     ]);
 
-    const maxScore = Math.max(kbe.score, hyAccel.score, funding.score) as 0 | 1 | 2 | 3;
+    const cccLeadsHy = evaluateCccLeadsHy(cccOasSeriesBp, hyOasSeriesBp);
+    const creditEquityDivergence = evaluateCreditEquityDivergence(qqqBars, hyOasSeriesBp, cccOasSeriesBp);
+    const creditRegimeState = classifyCreditRegimeState({
+        cccLeadsHy,
+        creditEquityDivergence,
+        hyAcceleration: hyAccel
+    });
+
+    const baseScore = Math.max(kbe.score, hyAccel.score, funding.score) as 0 | 1 | 2 | 3;
+    const newSignalMax = Math.max(cccLeadsHy.score, creditEquityDivergence.score) as 0 | 1 | 2 | 3;
+    const combinedScore = creditRegimeState === 'BREAK'
+        ? Math.max(baseScore, newSignalMax, 3)
+        : creditRegimeState === 'BREAK_FORMING'
+            ? Math.max(baseScore, Math.min(newSignalMax, 2))
+            : Math.max(baseScore, Math.min(newSignalMax, 1));
+    const maxScore = clampCreditScore(combinedScore);
 
     return {
         overall_score: maxScore,
         overall_status: statusFromScore(maxScore),
         kbe_signal: kbe,
         hy_acceleration_signal: hyAccel,
-        funding_proxy_signal: funding
+        funding_proxy_signal: funding,
+        ccc_leads_hy_signal: cccLeadsHy,
+        credit_equity_divergence_signal: creditEquityDivergence,
+        credit_regime_state: creditRegimeState
     };
 }
 
@@ -385,6 +540,12 @@ export async function computeCreditFundingStress(
  */
 export async function fetchHyOasSeriesBp(): Promise<number[]> {
     const series = await fetchFredSeries('BAMLH0A0HYM2', 90);
+    if (!series) return [];
+    return series.map((p) => p.value * 100);
+}
+
+export async function fetchCccOasSeriesBp(): Promise<number[]> {
+    const series = await fetchFredSeries('BAMLH0A3HYC', 90);
     if (!series) return [];
     return series.map((p) => p.value * 100);
 }

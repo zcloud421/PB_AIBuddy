@@ -27,6 +27,7 @@ import {
     computeAiCloudStress,
     computeCreditFundingStress,
     computeHyOasDelta4wBp,
+    fetchCccOasSeriesBp,
     fetchHyOasSeriesBp
 } from './side-monitors';
 import { annotateSoxEscalationEligibility, applyEscalationsDetailed, computeBaseSeverity } from './aggregate';
@@ -74,8 +75,9 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
 
     // Side monitor pre-requisites (HY OAS series in bp + Δ4w) reused for
     // indicator and Credit/Funding stress acceleration sub-signal.
-    const [hyOasSeries, hyOasDelta4w, spyHoldings, soxHistory] = await Promise.all([
+    const [hyOasSeries, cccOasSeries, hyOasDelta4w, spyHoldings, soxHistory] = await Promise.all([
         fetchHyOasSeriesBp(),
+        fetchCccOasSeriesBp(),
         computeHyOasDelta4wBp(),
         fetchSpyHoldings(),
         fetchSoxIndexHistoryWithSource()
@@ -104,7 +106,7 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         Promise.resolve(computeSox200DmaDeviation(soxHistory.points, soxHistory.source)),
         computeBroadBreadth(fetcher),
         computeAiCloudStress(fetcher, hyOasDelta4w, hyOas.status),
-        computeCreditFundingStress(fetcher, hyOasSeries)
+        computeCreditFundingStress(fetcher, hyOasSeries, cccOasSeries)
     ]);
 
     const indicators: MacroRegimeIndicators = {
@@ -178,7 +180,8 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
                     note: escalationResult.guardrail.note
                 }
                 : undefined
-        }
+        },
+        leading_flags: buildLeadingFlags(creditFundingStress)
     };
 
     console.log(
@@ -186,4 +189,21 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
             `(overall=${overall}, base=${baseOverall})`
     );
     return snapshot;
+}
+
+function buildLeadingFlags(creditFundingStress: MacroRegimeSnapshot['credit_funding_stress']): string[] {
+    const flags: string[] = [];
+    if (creditFundingStress.credit_regime_state && creditFundingStress.credit_regime_state !== 'NOISE') {
+        flags.push(`credit_regime:${creditFundingStress.credit_regime_state}`);
+    }
+    if ((creditFundingStress.ccc_leads_hy_signal?.score ?? 0) >= 2) {
+        flags.push('credit:ccc_leads_hy');
+    }
+    if ((creditFundingStress.credit_equity_divergence_signal?.score ?? 0) >= 2) {
+        flags.push('credit:equity_divergence');
+    }
+    if (creditFundingStress.hy_acceleration_signal.score >= 2) {
+        flags.push('credit:hy_acceleration');
+    }
+    return flags;
 }

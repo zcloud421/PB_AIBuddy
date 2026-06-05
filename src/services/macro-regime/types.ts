@@ -14,6 +14,8 @@ export type SideMonitorStatus = 'normal' | 'watch' | 'stress' | 'crisis';
 
 export type AiCloudStressStatus = 'Normal' | 'Watch' | 'Stress' | 'Crisis';
 
+export type CreditRegimeState = 'NOISE' | 'BREAK_FORMING' | 'BREAK';
+
 export type PillarState = 'normal' | 'elevated' | 'extreme';
 
 export interface IndicatorReading {
@@ -86,6 +88,9 @@ export interface CreditFundingStressReport {
     kbe_signal: SideSubSignal;
     hy_acceleration_signal: SideSubSignal;
     funding_proxy_signal: SideSubSignal;
+    ccc_leads_hy_signal?: SideSubSignal;
+    credit_equity_divergence_signal?: SideSubSignal;
+    credit_regime_state?: CreditRegimeState;
 }
 
 export interface FundamentalModifier {
@@ -148,6 +153,7 @@ export interface MacroRegimeSnapshot {
         capped_to: 'Warning';
     };
     escalation_summary?: EscalationSummary;
+    leading_flags?: string[];
 }
 
 export interface EscalationSummary {
