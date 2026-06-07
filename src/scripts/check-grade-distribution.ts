@@ -9,13 +9,16 @@ type Grade = 'GO' | 'CAUTION' | 'AVOID';
 
 export const ALERT_THRESHOLDS = {
     go_count_change_pct: 40,
-    go_share_max: 0.25,
+    go_share_max: 0.35,
     go_share_min: 0.05,
     hard_fail_change_pct: 50,
     unknown_grade_value: true
 };
 
-// Phase 5.0 baseline thresholds. Revisit after 5.2b deploys real gates.
+// Phase 5.0 baseline thresholds. go_share_max raised 0.25 -> 0.35 (2026-06-07):
+// the curated 53-universe of quality names legitimately runs ~40% GO in a
+// quality-holds/junk-sells tape, so 25% (old-universe baseline) was a chronic
+// false alarm. 0.35 still catches genuine over-generosity.
 
 interface RunGradeSnapshot {
     run_id: string;

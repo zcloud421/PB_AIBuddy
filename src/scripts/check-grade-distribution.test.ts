@@ -14,9 +14,10 @@ const goDrop = computeGradeDistributionMetrics(
 assert.ok(goDrop.issues.some((issue) => issue.includes('GO count changed')));
 
 const highShare = computeGradeDistributionMetrics(
-    { run_id: 'latest', run_date: '2026-05-21', grade_counts: { GO: 9, CAUTION: 10, AVOID: 11 }, hard_fail_count: 4 },
+    { run_id: 'latest', run_date: '2026-05-21', grade_counts: { GO: 13, CAUTION: 9, AVOID: 8 }, hard_fail_count: 4 },
     history
 );
+// GO share 13/30 = 43.3% > 35% (raised from 25% on 2026-06-07); GO 13 vs avg 10 = +30% < 40% so only the share issue fires.
 assert.ok(highShare.issues.some((issue) => issue.includes('GO share')));
 
 const hardFailSpike = computeGradeDistributionMetrics(
