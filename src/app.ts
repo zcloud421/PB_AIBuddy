@@ -31,6 +31,7 @@ import {
     ensureIndicatorPersistenceTable,
     ensureIndicatorHistoryTable,
     ensureLateCyclePillarHistoryTable,
+    ensureMacroRegimeAuditLogTable,
     ensureMacroRegimeSnapshotsTable
 } from './db/queries/macro-regime';
 import { asyncHandler } from './lib/async-handler';
@@ -181,6 +182,7 @@ async function ensureSchemaGuards(): Promise<void> {
     await ensureSourceQualityColumn();
     await ensureDeviceTables();
     await ensureMacroRegimeSnapshotsTable();
+    await ensureMacroRegimeAuditLogTable();
     await ensureLateCyclePillarHistoryTable();
     await ensureIndicatorPersistenceTable();
     await ensureIndicatorHistoryTable();

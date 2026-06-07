@@ -532,4 +532,28 @@ CREATE TABLE IF NOT EXISTS underlying_status_log (
     changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS macro_regime_audit_log (
+    id BIGSERIAL PRIMARY KEY,
+    as_of DATE NOT NULL,
+    credit_regime_state TEXT NOT NULL,
+    leading_flags JSONB NOT NULL DEFAULT '[]'::jsonb,
+    overall_severity TEXT NOT NULL,
+    base_overall_severity TEXT,
+    credit_sub_scores JSONB NOT NULL,
+    forward_horizon_days INTEGER NOT NULL DEFAULT 21,
+    forward_proxy TEXT NOT NULL DEFAULT 'QQQ',
+    forward_max_drawdown_pct NUMERIC,
+    forward_realized_vol_pct NUMERIC,
+    forward_stress_detected BOOLEAN,
+    forward_evaluation TEXT NOT NULL DEFAULT 'PENDING',
+    evaluated_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_macro_regime_audit_log_as_of
+    ON macro_regime_audit_log (as_of DESC, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_macro_regime_audit_log_evaluation
+    ON macro_regime_audit_log (forward_evaluation, as_of DESC);
+
 COMMIT;

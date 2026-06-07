@@ -11,6 +11,7 @@ import {
 import { seedUnderlyingsInline } from '../scripts/seed-underlyings';
 import { runGateDistributionCheck } from '../scripts/check-gate-distribution';
 import { runGradeDistributionCheck } from '../scripts/check-grade-distribution';
+import { runMacroCreditModelHealthCheck } from '../scripts/check-macro-credit-model-health';
 
 export const adminRouter = Router();
 
@@ -71,6 +72,11 @@ adminRouter.post('/grade-distribution/check', asyncHandler(async (_req, res) => 
 
 adminRouter.post('/gate-distribution/check', asyncHandler(async (_req, res) => {
     const result = await runGateDistributionCheck();
+    res.json(result);
+}));
+
+adminRouter.post('/macro-credit-model-health/check', asyncHandler(async (_req, res) => {
+    const result = await runMacroCreditModelHealthCheck();
     res.json(result);
 }));
 

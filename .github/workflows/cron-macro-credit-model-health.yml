@@ -1,0 +1,39 @@
+name: Macro Credit Model Health
+
+on:
+  schedule:
+    # UTC 00:10 = HKT 08:10, after the daily macro-regime snapshot.
+    - cron: '10 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  trigger-macro-credit-model-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Trigger macro credit model health check
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          SETUP_TOKEN: ${{ secrets.SETUP_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "Triggering macro credit model health check at $(date -u)..."
+
+          HTTP_CODE=""
+          BODY=""
+          for i in 1 2 3; do
+            RESPONSE=$(curl -sS -w "\n%{http_code}" \
+              -X POST "${BACKEND_URL}/admin/macro-credit-model-health/check" \
+              -H "x-setup-token: ${SETUP_TOKEN}" \
+              --max-time 30) || true
+
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | sed '$d')
+            echo "Attempt $i HTTP $HTTP_CODE"
+            echo "$BODY"
+
+            [ "$HTTP_CODE" = "200" ] && break
+            [ "$i" -lt 3 ] && sleep 30
+          done
+
+          [ "$HTTP_CODE" = "200" ] || exit 1

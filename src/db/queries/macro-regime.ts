@@ -6,7 +6,7 @@
  */
 
 import { pool } from '../client';
-import type { MacroRegimeSnapshot, RegimeSeverity } from '../../services/macro-regime/types';
+import type { CreditRegimeState, MacroRegimeSnapshot, RegimeSeverity } from '../../services/macro-regime/types';
 
 export async function ensureMacroRegimeSnapshotsTable(): Promise<void> {
     await pool.query(`
@@ -19,6 +19,36 @@ export async function ensureMacroRegimeSnapshotsTable(): Promise<void> {
     await pool.query(`
         CREATE INDEX IF NOT EXISTS idx_macro_regime_snapshots_created_at
         ON macro_regime_snapshots (created_at DESC)
+    `);
+}
+
+export async function ensureMacroRegimeAuditLogTable(): Promise<void> {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS macro_regime_audit_log (
+            id BIGSERIAL PRIMARY KEY,
+            as_of DATE NOT NULL,
+            credit_regime_state TEXT NOT NULL,
+            leading_flags JSONB NOT NULL DEFAULT '[]'::jsonb,
+            overall_severity TEXT NOT NULL,
+            base_overall_severity TEXT,
+            credit_sub_scores JSONB NOT NULL,
+            forward_horizon_days INTEGER NOT NULL DEFAULT 21,
+            forward_proxy TEXT NOT NULL DEFAULT 'QQQ',
+            forward_max_drawdown_pct NUMERIC,
+            forward_realized_vol_pct NUMERIC,
+            forward_stress_detected BOOLEAN,
+            forward_evaluation TEXT NOT NULL DEFAULT 'PENDING',
+            evaluated_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    `);
+    await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_macro_regime_audit_log_as_of
+        ON macro_regime_audit_log (as_of DESC, created_at DESC)
+    `);
+    await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_macro_regime_audit_log_evaluation
+        ON macro_regime_audit_log (forward_evaluation, as_of DESC)
     `);
 }
 
@@ -142,6 +172,7 @@ export async function upsertIndicatorHistory(input: {
 }
 
 export async function upsertMacroRegimeSnapshot(snapshot: MacroRegimeSnapshot): Promise<void> {
+    await ensureMacroRegimeAuditLogTable();
     await pool.query(
         `
         INSERT INTO macro_regime_snapshots (
@@ -156,6 +187,151 @@ export async function upsertMacroRegimeSnapshot(snapshot: MacroRegimeSnapshot): 
         `,
         [snapshot.as_of, JSON.stringify(snapshot)]
     );
+    await appendMacroRegimeAuditRecord(snapshot);
+}
+
+export interface MacroRegimeAuditLogRow {
+    id: number;
+    as_of: string;
+    credit_regime_state: CreditRegimeState;
+    leading_flags: string[];
+    overall_severity: RegimeSeverity;
+    base_overall_severity: RegimeSeverity | null;
+    credit_sub_scores: Record<string, unknown>;
+    forward_horizon_days: number;
+    forward_proxy: string;
+    forward_max_drawdown_pct: number | null;
+    forward_realized_vol_pct: number | null;
+    forward_stress_detected: boolean | null;
+    forward_evaluation: 'PENDING' | 'TP' | 'FP' | 'TN' | 'FN' | 'INSUFFICIENT_DATA';
+    evaluated_at: string | null;
+    created_at: string;
+}
+
+export function extractCreditSubScores(snapshot: MacroRegimeSnapshot): Record<string, unknown> {
+    const credit = snapshot.credit_funding_stress;
+    return {
+        overall_score: credit.overall_score,
+        overall_status: credit.overall_status,
+        kbe: credit.kbe_signal.score,
+        hy_acceleration: credit.hy_acceleration_signal.score,
+        funding_proxy: credit.funding_proxy_signal.score,
+        ccc_leads_hy: credit.ccc_leads_hy_signal?.score ?? null,
+        credit_equity_divergence: credit.credit_equity_divergence_signal?.score ?? null
+    };
+}
+
+export async function appendMacroRegimeAuditRecord(snapshot: MacroRegimeSnapshot): Promise<void> {
+    const creditRegimeState = snapshot.credit_funding_stress.credit_regime_state ?? 'NOISE';
+    const leadingFlags = Array.isArray(snapshot.leading_flags) ? snapshot.leading_flags : [];
+    await pool.query(
+        `
+        INSERT INTO macro_regime_audit_log (
+            as_of,
+            credit_regime_state,
+            leading_flags,
+            overall_severity,
+            base_overall_severity,
+            credit_sub_scores
+        )
+        VALUES ($1::date, $2, $3::jsonb, $4, $5, $6::jsonb)
+        `,
+        [
+            snapshot.as_of,
+            creditRegimeState,
+            JSON.stringify(leadingFlags),
+            snapshot.overall,
+            snapshot.base_overall,
+            JSON.stringify(extractCreditSubScores(snapshot))
+        ]
+    );
+}
+
+export async function fetchPendingMacroRegimeAuditRows(limit = 100): Promise<MacroRegimeAuditLogRow[]> {
+    await ensureMacroRegimeAuditLogTable();
+    const result = await pool.query<MacroRegimeAuditLogRow>(
+        `
+        SELECT
+            id,
+            TO_CHAR(as_of, 'YYYY-MM-DD') AS as_of,
+            credit_regime_state,
+            leading_flags,
+            overall_severity,
+            base_overall_severity,
+            credit_sub_scores,
+            forward_horizon_days,
+            forward_proxy,
+            forward_max_drawdown_pct,
+            forward_realized_vol_pct,
+            forward_stress_detected,
+            forward_evaluation,
+            evaluated_at,
+            created_at
+        FROM macro_regime_audit_log
+        WHERE forward_evaluation = 'PENDING'
+        ORDER BY as_of ASC, id ASC
+        LIMIT $1
+        `,
+        [limit]
+    );
+    return result.rows;
+}
+
+export async function updateMacroRegimeAuditForwardResult(input: {
+    id: number;
+    forward_max_drawdown_pct: number | null;
+    forward_realized_vol_pct: number | null;
+    forward_stress_detected: boolean | null;
+    forward_evaluation: MacroRegimeAuditLogRow['forward_evaluation'];
+}): Promise<void> {
+    await pool.query(
+        `
+        UPDATE macro_regime_audit_log
+        SET
+            forward_max_drawdown_pct = $2,
+            forward_realized_vol_pct = $3,
+            forward_stress_detected = $4,
+            forward_evaluation = $5,
+            evaluated_at = NOW()
+        WHERE id = $1
+        `,
+        [
+            input.id,
+            input.forward_max_drawdown_pct,
+            input.forward_realized_vol_pct,
+            input.forward_stress_detected,
+            input.forward_evaluation
+        ]
+    );
+}
+
+export async function fetchRecentMacroRegimeAuditRows(daysBack = 60): Promise<MacroRegimeAuditLogRow[]> {
+    await ensureMacroRegimeAuditLogTable();
+    const result = await pool.query<MacroRegimeAuditLogRow>(
+        `
+        SELECT
+            id,
+            TO_CHAR(as_of, 'YYYY-MM-DD') AS as_of,
+            credit_regime_state,
+            leading_flags,
+            overall_severity,
+            base_overall_severity,
+            credit_sub_scores,
+            forward_horizon_days,
+            forward_proxy,
+            forward_max_drawdown_pct,
+            forward_realized_vol_pct,
+            forward_stress_detected,
+            forward_evaluation,
+            evaluated_at,
+            created_at
+        FROM macro_regime_audit_log
+        WHERE as_of >= CURRENT_DATE - ($1::int * INTERVAL '1 day')
+        ORDER BY as_of DESC, id DESC
+        `,
+        [daysBack]
+    );
+    return result.rows;
 }
 
 export async function getLatestMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot | null> {
