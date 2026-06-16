@@ -379,8 +379,7 @@ function buildMechanismViews(
             evidence: [
                 { label: '实际利率8周', value: formatBp(realRateBrake.delta_8w_bp) },
                 { label: '10Y', value: formatPct(snapshot.indicators.DGS10_ABS_LEVEL.value) },
-                { label: '30Y', value: formatPct(extras.dgs30_pct ?? null) },
-                { label: 'QQQ距高', value: priceVol.qqq_drawdown_pct !== null ? `-${priceVol.qqq_drawdown_pct.toFixed(1)}%` : '—' }
+                { label: '30Y', value: formatPct(extras.dgs30_pct ?? null) }
             ],
             next_trigger: statuses.rates === 'confirmed'
                 ? null
