@@ -22,14 +22,39 @@ export type RegimeVerdictState = 'STABLE' | 'BREAK_FORMING' | 'NOISE' | 'CONFIRM
 
 export type RegimeVerdictMechanism = 'credit' | 'rates' | 'fundamental' | null;
 
-export type RegimeVerdictBrakeStatus = 'quiet' | 'forming' | 'confirmed';
+export type RegimeVerdictBrakeStatus = 'quiet' | 'watch' | 'forming' | 'confirmed';
+
+export type RegimeVerdictContextStatus = 'normal' | 'elevated' | 'extreme';
+
+export interface RegimeVerdictEvidence {
+    label: string;
+    value: string;
+}
+
+export interface RegimeVerdictMechanismView {
+    status: RegimeVerdictBrakeStatus;
+    evidence: RegimeVerdictEvidence[];
+    next_trigger: string | null;
+}
 
 export interface RegimeVerdict {
     state: RegimeVerdictState;
     mechanism: RegimeVerdictMechanism;
     one_line: string;
     confidence: 'low' | 'medium' | 'high';
+    nearest_watch: string | null;
+    mechanisms: {
+        credit: RegimeVerdictMechanismView;
+        rates: RegimeVerdictMechanismView;
+        fundamental: RegimeVerdictMechanismView;
+    };
+    context: {
+        status: RegimeVerdictContextStatus;
+        evidence: RegimeVerdictEvidence[];
+    };
+    /** @deprecated Use nearest_watch. */
     watch: string;
+    /** @deprecated Use mechanisms/context. */
     brakes: {
         credit: RegimeVerdictBrakeStatus;
         rates: RegimeVerdictBrakeStatus;

@@ -5,6 +5,8 @@ import type {
     MacroRegimeSnapshot,
     RegimeVerdict,
     RegimeVerdictBrakeStatus,
+    RegimeVerdictContextStatus,
+    RegimeVerdictEvidence,
     RegimeVerdictMechanism
 } from './types';
 
@@ -79,12 +81,22 @@ export function computeRealRateBrake(
     }
 
     let status: RegimeVerdictBrakeStatus = 'quiet';
+    const durationPressure =
+        (equity.drawdown_pct !== null && equity.drawdown_pct >= EQUITY_DRAWDOWN_DURATION_PRESSURE_PCT) ||
+        equity.below_ma50 === true;
+
     if (delta8wBp >= REAL_RATE_CONFIRMED_DELTA_8W_BP && equityStress) {
         status = 'confirmed';
         notes.push('实际利率 8周重定价 + 权益承压,利率/久期刹车确认');
-    } else if (delta8wBp >= REAL_RATE_FORMING_DELTA_8W_BP) {
+    } else if (
+        delta8wBp >= REAL_RATE_VERDICT_FORMING_DELTA_8W_BP ||
+        (delta8wBp >= REAL_RATE_FORMING_DELTA_8W_BP && durationPressure)
+    ) {
         status = 'forming';
-        notes.push('实际利率上行进入观察区,等待权益压力确认');
+        notes.push('实际利率上行达到形成区,等待进一步确认');
+    } else if (delta8wBp >= REAL_RATE_FORMING_DELTA_8W_BP) {
+        status = 'watch';
+        notes.push('实际利率进入观察区,但 QQQ 尚未承压');
     }
 
     return {
@@ -112,7 +124,8 @@ export function computeRegimeVerdict(
     );
     const ratesStatus = realRateBrake.status;
     const verdictRatesStatus = verdictDrivingRatesStatus(realRateBrake);
-    const crowdingStatus = crowdingElevated(snapshot) ? 'elevated' : 'quiet';
+    const context = buildContext(snapshot);
+    const crowdingStatus = context.status === 'normal' ? 'quiet' : 'elevated';
 
     const brakes = {
         credit: creditStatus,
@@ -120,6 +133,12 @@ export function computeRegimeVerdict(
         fundamental: fundamentalStatus,
         crowding: crowdingStatus
     } as RegimeVerdict['brakes'];
+    const mechanisms = buildMechanismViews(snapshot, realRateBrake, priceVol, {
+        credit: creditStatus,
+        rates: ratesStatus,
+        fundamental: fundamentalStatus
+    });
+    const nearestWatch = buildNearestWatch(mechanisms);
 
     const confirmed = firstMechanism([
         ['credit', creditStatus],
@@ -132,7 +151,10 @@ export function computeRegimeVerdict(
             mechanism: confirmed,
             one_line: confirmedLine(confirmed, snapshot, realRateBrake),
             confidence: confidenceFor(brakes, 'CONFIRMED_BREAK'),
-            watch: watchLine(snapshot, realRateBrake, priceVol),
+            nearest_watch: nearestWatch,
+            mechanisms,
+            context,
+            watch: nearestWatch ?? '信用、利率、基本面暂无临近触发项。',
             brakes
         };
     }
@@ -148,7 +170,10 @@ export function computeRegimeVerdict(
             mechanism: forming,
             one_line: formingLine(forming, snapshot, realRateBrake),
             confidence: confidenceFor(brakes, 'BREAK_FORMING'),
-            watch: watchLine(snapshot, realRateBrake, priceVol),
+            nearest_watch: nearestWatch,
+            mechanisms,
+            context,
+            watch: nearestWatch ?? '信用、利率、基本面暂无临近触发项。',
             brakes
         };
     }
@@ -159,7 +184,10 @@ export function computeRegimeVerdict(
             mechanism: null,
             one_line: '价格回落 / 波动上升,但信用、实际利率、基本面均无异常;历史上多数此类回调属短期噪音,数周内收复居多。',
             confidence: priceVol.vix_elevated ? 'medium' : 'low',
-            watch: watchLine(snapshot, realRateBrake, priceVol),
+            nearest_watch: nearestWatch,
+            mechanisms,
+            context,
+            watch: nearestWatch ?? '信用、利率、基本面暂无临近触发项。',
             brakes
         };
     }
@@ -169,7 +197,10 @@ export function computeRegimeVerdict(
         mechanism: null,
         one_line: stableLine(brakes),
         confidence: confidenceFor(brakes, 'STABLE'),
-        watch: watchLine(snapshot, realRateBrake, priceVol),
+        nearest_watch: nearestWatch,
+        mechanisms,
+        context,
+        watch: nearestWatch ?? '信用、利率、基本面暂无临近触发项。',
         brakes
     };
 }
@@ -178,7 +209,9 @@ function creditBrakeStatus(
     creditRegimeState: CreditRegimeState,
     vixCross: boolean
 ): RegimeVerdictBrakeStatus {
-    if (!vixCross) return 'quiet';
+    if (!vixCross) {
+        return creditRegimeState === 'BREAK' || creditRegimeState === 'BREAK_FORMING' ? 'watch' : 'quiet';
+    }
     if (creditRegimeState === 'BREAK') return 'confirmed';
     if (creditRegimeState === 'BREAK_FORMING') return 'forming';
     return 'quiet';
@@ -195,16 +228,7 @@ function fundamentalBrakeStatus(
 
 function verdictDrivingRatesStatus(realRateBrake: RealRateBrake): RegimeVerdictBrakeStatus {
     if (realRateBrake.status === 'confirmed') return 'confirmed';
-    if (realRateBrake.status !== 'forming') return 'quiet';
-
-    const delta = realRateBrake.delta_8w_bp ?? 0;
-    const durationPressure =
-        (realRateBrake.equity_drawdown_pct !== null &&
-            realRateBrake.equity_drawdown_pct >= EQUITY_DRAWDOWN_DURATION_PRESSURE_PCT) ||
-        realRateBrake.equity_below_ma50 === true;
-
-    if (delta >= REAL_RATE_VERDICT_FORMING_DELTA_8W_BP) return 'forming';
-    if (delta >= REAL_RATE_FORMING_DELTA_8W_BP && durationPressure) return 'forming';
+    if (realRateBrake.status === 'forming') return 'forming';
     return 'quiet';
 }
 
@@ -251,17 +275,6 @@ function computeEquityState(bars: DailyPriceBar[]): {
     };
 }
 
-function crowdingElevated(snapshot: MacroRegimeSnapshot): boolean {
-    return (
-        snapshot.indicators.CONCENTRATION.status === 'Warning' ||
-        snapshot.indicators.CONCENTRATION.status === 'Critical' ||
-        snapshot.indicators.SOX_200DMA_DEVIATION.status === 'Warning' ||
-        snapshot.indicators.SOX_200DMA_DEVIATION.status === 'Critical' ||
-        snapshot.indicators.AI_BREADTH.status === 'Warning' ||
-        snapshot.indicators.AI_BREADTH.status === 'Critical'
-    );
-}
-
 function firstMechanism(
     entries: Array<[Exclude<RegimeVerdictMechanism, null>, RegimeVerdictBrakeStatus]>,
     status: RegimeVerdictBrakeStatus
@@ -272,10 +285,11 @@ function firstMechanism(
 function confidenceFor(brakes: RegimeVerdict['brakes'], state: RegimeVerdict['state']): RegimeVerdict['confidence'] {
     const confirmedCount = [brakes.credit, brakes.rates, brakes.fundamental].filter((status) => status === 'confirmed').length;
     const formingCount = [brakes.credit, brakes.rates, brakes.fundamental].filter((status) => status === 'forming').length;
+    const watchCount = [brakes.credit, brakes.rates, brakes.fundamental].filter((status) => status === 'watch').length;
     if (state === 'CONFIRMED_BREAK') return confirmedCount >= 2 || formingCount >= 1 ? 'high' : 'medium';
     if (state === 'BREAK_FORMING') return formingCount >= 2 || brakes.crowding === 'elevated' ? 'medium' : 'low';
     if (state === 'STABLE') {
-        if (formingCount === 1 && confirmedCount === 0) return 'low';
+        if (watchCount > 0 || (formingCount === 1 && confirmedCount === 0)) return 'low';
         return brakes.crowding === 'elevated' ? 'medium' : 'high';
     }
     return 'medium';
@@ -311,9 +325,9 @@ function formingLine(
 
 function stableLine(brakes: RegimeVerdict['brakes']): string {
     const stirring: string[] = [];
-    if (brakes.credit === 'forming') stirring.push('信用');
-    if (brakes.rates === 'forming') stirring.push('利率');
-    if (brakes.fundamental === 'forming') stirring.push('基本面');
+    if (brakes.credit === 'watch' || brakes.credit === 'forming') stirring.push('信用');
+    if (brakes.rates === 'watch' || brakes.rates === 'forming') stirring.push('利率');
+    if (brakes.fundamental === 'watch' || brakes.fundamental === 'forming') stirring.push('基本面');
     const crowdElevated = brakes.crowding === 'elevated';
     if (stirring.length === 0 && !crowdElevated) {
         return '市场平稳,信用、利率、基本面机制均正常。';
@@ -324,21 +338,141 @@ function stableLine(brakes: RegimeVerdict['brakes']): string {
     return `市场整体平稳;${parts.join('、')},但均未确认,暂未对股市构成系统性风险。`;
 }
 
-function watchLine(
+function buildMechanismViews(
     snapshot: MacroRegimeSnapshot,
     realRateBrake: RealRateBrake,
-    priceVol: PriceVolStress
-): string {
+    priceVol: PriceVolStress,
+    statuses: {
+        credit: RegimeVerdictBrakeStatus;
+        rates: RegimeVerdictBrakeStatus;
+        fundamental: RegimeVerdictBrakeStatus;
+    }
+): RegimeVerdict['mechanisms'] {
     const credit = snapshot.credit_funding_stress;
-    const creditState = credit.credit_regime_state ?? 'NOISE';
-    const creditZh = creditState === 'BREAK' ? '走阔确认' : creditState === 'BREAK_FORMING' ? '领先异动' : '平稳';
-    const pieces = [
-        `信用利差 ${creditZh}`,
-        `VIX ${snapshot.indicators.VIX.value ?? 'N/A'}`,
-        `实际利率8周 ${formatBp(realRateBrake.delta_8w_bp)}`,
-        `纳指距高点 ${priceVol.qqq_drawdown_pct !== null ? `-${priceVol.qqq_drawdown_pct.toFixed(1)}%` : 'N/A'}`
+    return {
+        credit: {
+            status: statuses.credit,
+            evidence: [
+                { label: 'HY利差', value: formatBpValue(snapshot.indicators.HY_OAS.value) },
+                { label: 'CCC领先', value: formatBp(credit.ccc_leads_hy_signal?.value ?? null) },
+                { label: 'VIX交叉', value: priceVol.vix_elevated ? '是' : '否' },
+                { label: '股信背离', value: (credit.credit_equity_divergence_signal?.score ?? 0) >= 2 ? '出现' : '无' }
+            ],
+            next_trigger: statuses.credit === 'confirmed'
+                ? null
+                : 'CCC 持续领先 HY 且第二信号 corroborate（VIX 交叉 / 背离）→ 形成中'
+        },
+        rates: {
+            status: statuses.rates,
+            evidence: [
+                { label: '实际利率8周', value: formatBp(realRateBrake.delta_8w_bp) },
+                { label: '10Y', value: formatPct(snapshot.indicators.DGS10_ABS_LEVEL.value) },
+                { label: 'QQQ距高', value: priceVol.qqq_drawdown_pct !== null ? `-${priceVol.qqq_drawdown_pct.toFixed(1)}%` : '—' }
+            ],
+            next_trigger: statuses.rates === 'confirmed'
+                ? null
+                : '升至 +40bp，或 +25bp 且 QQQ 回撤 ≥3% → 形成中'
+        },
+        fundamental: {
+            status: statuses.fundamental,
+            evidence: [
+                { label: 'capex指引', value: capexGuidanceValue(snapshot) },
+                { label: '营收背离', value: fundamentalStateValue(snapshot) },
+                { label: 'SOX偏离', value: formatSignedPct(snapshot.indicators.SOX_200DMA_DEVIATION.value) }
+            ],
+            next_trigger: statuses.fundamental === 'confirmed'
+                ? null
+                : 'capex 指引转 cut 或营收-capex 背离扩大 → 形成中'
+        }
+    };
+}
+
+function buildNearestWatch(mechanisms: RegimeVerdict['mechanisms']): string | null {
+    const ordered: Array<keyof RegimeVerdict['mechanisms']> = ['credit', 'rates', 'fundamental'];
+    const priority: Record<RegimeVerdictBrakeStatus, number> = {
+        quiet: 0,
+        watch: 1,
+        forming: 2,
+        confirmed: 3
+    };
+    const selected = ordered
+        .map((key) => ({ key, view: mechanisms[key] }))
+        .filter((item) => item.view.status !== 'quiet')
+        .sort((a, b) => priority[b.view.status] - priority[a.view.status])[0];
+    if (!selected) return null;
+
+    if (selected.key === 'rates') {
+        const delta = mechanisms.rates.evidence.find((item) => item.label === '实际利率8周')?.value ?? '—';
+        const qqq = mechanisms.rates.evidence.find((item) => item.label === 'QQQ距高')?.value ?? '—';
+        return `实际利率 8周 ${delta}，QQQ 距高 ${qqq};若升至 +40bp 或 QQQ 回撤 ≥3%,利率机制进入形成中。`;
+    }
+    if (selected.key === 'credit') {
+        const ccc = mechanisms.credit.evidence.find((item) => item.label === 'CCC领先')?.value ?? '—';
+        const vixCross = mechanisms.credit.evidence.find((item) => item.label === 'VIX交叉')?.value ?? '—';
+        return `信用观察:CCC 领先 ${ccc}，VIX交叉 ${vixCross};若 VIX 交叉或股信背离 corroborate,信用机制进入形成中。`;
+    }
+    return '基本面观察:若 capex 指引转 cut 或营收-capex 背离扩大,基本面机制进入形成中。';
+}
+
+function buildContext(snapshot: MacroRegimeSnapshot): RegimeVerdict['context'] {
+    const evidence: RegimeVerdictEvidence[] = [
+        { label: '集中度', value: formatPct(snapshot.indicators.CONCENTRATION.value) },
+        { label: 'SOX偏离', value: formatSignedPct(snapshot.indicators.SOX_200DMA_DEVIATION.value) },
+        { label: '宽度', value: formatPct(snapshot.indicators.BROAD_BREADTH.value) },
+        { label: 'F&G', value: fearGreedValue(snapshot) }
     ];
-    return pieces.join(' · ');
+    const statuses = [
+        snapshot.indicators.CONCENTRATION.status,
+        snapshot.indicators.SOX_200DMA_DEVIATION.status,
+        snapshot.indicators.BROAD_BREADTH.status,
+        fearGreedContextSeverity(snapshot)
+    ];
+    const status: RegimeVerdictContextStatus = statuses.includes('Critical')
+        ? 'extreme'
+        : statuses.includes('Warning')
+            ? 'elevated'
+            : 'normal';
+    return { status, evidence };
+}
+
+function formatBpValue(value: number | null): string {
+    return value === null ? '—' : `${value.toFixed(0)}bp`;
+}
+
+function formatPct(value: number | null): string {
+    return value === null ? '—' : `${value.toFixed(1)}%`;
+}
+
+function formatSignedPct(value: number | null): string {
+    return value === null ? '—' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
+}
+
+function capexGuidanceValue(snapshot: MacroRegimeSnapshot): string {
+    const summary = snapshot.fundamental_modifier.evidence_summary.join(' ');
+    const match = summary.match(/(\d+)\s*\/\s*(\d+)/);
+    if (match) return `${match[1]}/${match[2]}上调或维持`;
+    return snapshot.fundamental_modifier.state === 'intact' ? '维持' : snapshot.fundamental_modifier.state;
+}
+
+function fundamentalStateValue(snapshot: MacroRegimeSnapshot): string {
+    if (snapshot.fundamental_modifier.state === 'intact') return '未扩大';
+    if (snapshot.fundamental_modifier.state === 'weakening') return '观察';
+    return '扩大';
+}
+
+function fearGreedValue(snapshot: MacroRegimeSnapshot): string {
+    const summary = snapshot.late_cycle_context.pillars.sentiment_manual.summary;
+    const match = summary.match(/F&G\s+(\d+(?:\.\d+)?)(?:\s*·\s*(.+))?/);
+    if (!match) return '—';
+    const label = match[2]?.trim();
+    return label ? `${match[1]} ${label}` : match[1];
+}
+
+function fearGreedContextSeverity(snapshot: MacroRegimeSnapshot): 'Healthy' | 'Neutral' | 'Warning' | 'Critical' {
+    const pillar = snapshot.late_cycle_context.pillars.sentiment_manual;
+    if (pillar.state === 'extreme') return 'Critical';
+    if (pillar.state === 'elevated') return 'Warning';
+    return 'Neutral';
 }
 
 function latestFredPoint(points: FredPoint[]): FredPoint | null {

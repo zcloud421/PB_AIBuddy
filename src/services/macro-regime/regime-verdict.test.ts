@@ -209,7 +209,7 @@ function run(): void {
     assert.strictEqual(noVixCross.state, 'STABLE', 'credit break without VIX cross remains conservative');
 
     const marginalRatesWatch = {
-        status: 'forming' as const,
+        status: 'watch' as const,
         latest_real_rate_pct: 1.8,
         delta_8w_bp: 27,
         equity_drawdown_pct: 0.3,
@@ -223,11 +223,15 @@ function run(): void {
         'STABLE',
         'marginal real-rate repricing with QQQ near highs should stay STABLE'
     );
-    assert.strictEqual(marginalRatesVerdict.brakes.rates, 'forming');
+    assert.strictEqual(marginalRatesVerdict.brakes.rates, 'watch');
+    assert.strictEqual(marginalRatesVerdict.mechanisms.rates.status, 'watch');
+    assert.match(marginalRatesVerdict.nearest_watch ?? '', /实际利率 8周 \+27bp/);
+    assert.match(marginalRatesVerdict.mechanisms.rates.next_trigger ?? '', /\+40bp/);
     assert.strictEqual(marginalRatesVerdict.confidence, 'low');
 
     const fastRatesWatch = {
         ...marginalRatesWatch,
+        status: 'forming' as const,
         delta_8w_bp: 42
     };
     const fastRatesVerdict = computeRegimeVerdict(snapshot(), fastRatesWatch, risingBars);
@@ -240,6 +244,7 @@ function run(): void {
 
     const pressureRatesWatch = {
         ...marginalRatesWatch,
+        status: 'forming' as const,
         equity_drawdown_pct: 3.2,
         equity_below_ma50: false
     };
@@ -249,6 +254,31 @@ function run(): void {
         'BREAK_FORMING',
         'real-rate repricing >=25bp plus QQQ duration pressure should drive rates forming verdict'
     );
+
+    const fullyQuiet = computeRegimeVerdict(snapshot(), quietRates(), risingBars);
+    assert.strictEqual(fullyQuiet.nearest_watch, null, 'all quiet mechanisms should not render nearest_watch');
+    assert.strictEqual(fullyQuiet.context.status, 'normal');
+
+    const elevatedContext = computeRegimeVerdict(
+        snapshot(),
+        quietRates(),
+        risingBars
+    );
+    assert.ok(elevatedContext.context.evidence.some((item) => item.label === 'F&G'));
+
+    const extremeContext = computeRegimeVerdict(
+        {
+            ...snapshot(),
+            indicators: indicators({
+                SOX_200DMA_DEVIATION: reading('Critical', 71),
+                CONCENTRATION: reading('Warning', 39),
+                BROAD_BREADTH: reading('Neutral', 57)
+            })
+        },
+        quietRates(),
+        risingBars
+    );
+    assert.strictEqual(extremeContext.context.status, 'extreme');
 
     const realRateBrake = computeRealRateBrake(
         fred([...Array(30).fill(1.2), ...Array(40).fill(1.8)]),
