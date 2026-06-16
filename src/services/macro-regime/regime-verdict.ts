@@ -27,6 +27,15 @@ interface PriceVolStress {
     vix_elevated: boolean;
 }
 
+// Faithful-to-spec rates/credit context that lives outside snapshot.indicators:
+// 30Y nominal (long-end / term-premium) and HYG/IEF (credit vs duration).
+export interface VerdictExtras {
+    dgs30_pct?: number | null;
+    dgs30_delta_8w_bp?: number | null;
+    hyg_ief_ratio?: number | null;
+    hyg_ief_delta_4w_pct?: number | null;
+}
+
 const REAL_RATE_FORMING_DELTA_8W_BP = 25;
 const REAL_RATE_VERDICT_FORMING_DELTA_8W_BP = 40;
 const REAL_RATE_CONFIRMED_DELTA_8W_BP = 50;
@@ -113,7 +122,8 @@ export function computeRealRateBrake(
 export function computeRegimeVerdict(
     snapshot: MacroRegimeSnapshot,
     realRateBrake: RealRateBrake,
-    equityBars: DailyPriceBar[] = []
+    equityBars: DailyPriceBar[] = [],
+    extras: VerdictExtras = {}
 ): RegimeVerdict {
     const priceVol = computePriceVolStress(snapshot, equityBars);
     const vixCross = priceVol.vix_elevated;
@@ -137,7 +147,7 @@ export function computeRegimeVerdict(
         credit: creditStatus,
         rates: ratesStatus,
         fundamental: fundamentalStatus
-    });
+    }, extras);
     const nearestWatch = buildNearestWatch(mechanisms);
 
     const confirmed = firstMechanism([
@@ -346,7 +356,8 @@ function buildMechanismViews(
         credit: RegimeVerdictBrakeStatus;
         rates: RegimeVerdictBrakeStatus;
         fundamental: RegimeVerdictBrakeStatus;
-    }
+    },
+    extras: VerdictExtras = {}
 ): RegimeVerdict['mechanisms'] {
     const credit = snapshot.credit_funding_stress;
     return {
@@ -354,19 +365,21 @@ function buildMechanismViews(
             status: statuses.credit,
             evidence: [
                 { label: 'HY利差', value: formatBpValue(snapshot.indicators.HY_OAS.value) },
+                { label: 'HYG/IEF', value: formatHygIef(extras.hyg_ief_delta_4w_pct) },
                 { label: 'CCC领先', value: formatBp(credit.ccc_leads_hy_signal?.value ?? null) },
                 { label: 'VIX交叉', value: priceVol.vix_elevated ? '是' : '否' },
                 { label: '股信背离', value: (credit.credit_equity_divergence_signal?.score ?? 0) >= 2 ? '出现' : '无' }
             ],
             next_trigger: statuses.credit === 'confirmed'
                 ? null
-                : 'CCC 持续领先 HY 且第二信号 corroborate（VIX 交叉 / 背离）→ 形成中'
+                : 'CCC 持续领先 HY 且第二信号 corroborate（VIX 交叉 / 背离 / HYG/IEF 走弱）→ 形成中'
         },
         rates: {
             status: statuses.rates,
             evidence: [
                 { label: '实际利率8周', value: formatBp(realRateBrake.delta_8w_bp) },
                 { label: '10Y', value: formatPct(snapshot.indicators.DGS10_ABS_LEVEL.value) },
+                { label: '30Y', value: formatPct(extras.dgs30_pct ?? null) },
                 { label: 'QQQ距高', value: priceVol.qqq_drawdown_pct !== null ? `-${priceVol.qqq_drawdown_pct.toFixed(1)}%` : '—' }
             ],
             next_trigger: statuses.rates === 'confirmed'
@@ -445,6 +458,13 @@ function formatPct(value: number | null): string {
 
 function formatSignedPct(value: number | null): string {
     return value === null ? '—' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
+}
+
+// HYG/IEF: the 4w ratio trend is the signal — falling = high-yield underperforming
+// duration = credit stress. Show the signed 4w change.
+function formatHygIef(delta4wPct: number | null | undefined): string {
+    if (delta4wPct === null || delta4wPct === undefined || !Number.isFinite(delta4wPct)) return '—';
+    return `4周 ${delta4wPct >= 0 ? '+' : ''}${delta4wPct.toFixed(1)}%`;
 }
 
 function capexGuidanceValue(snapshot: MacroRegimeSnapshot): string {

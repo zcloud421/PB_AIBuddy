@@ -10,7 +10,9 @@
  */
 
 import { MassiveDataFetcher } from '../../data/massive-fetcher';
+import type { DailyPriceBar } from '../../data/massive-fetcher';
 import { fetchFredSeries } from '../../data/fred-series-fetcher';
+import type { FredPoint } from '../../data/fred-series-fetcher';
 import { fetchSoxIndexHistoryWithSource } from '../../data/sox-index-fetcher';
 import { fetchSpyHoldings } from '../../data/spy-holdings-fetcher';
 import {
@@ -36,6 +38,7 @@ import { loadFundamentalModifier } from './fundamental-modifier';
 import { buildLateCycleContext } from './late-cycle-context';
 import { persistenceFor, syncAllPersistence, syncIndicatorPersistence } from './persistence';
 import { computeRealRateBrake, computeRegimeVerdict } from './regime-verdict';
+import type { VerdictExtras } from './regime-verdict';
 import { attachSubBandMetadata, persistSubBandHistory } from './sub-band-metadata';
 import type {
     AiCloudStressStatus,
@@ -77,14 +80,17 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
 
     // Side monitor pre-requisites (HY OAS series in bp + Δ4w) reused for
     // indicator and Credit/Funding stress acceleration sub-signal.
-    const [hyOasSeries, cccOasSeries, dfii10Series, hyOasDelta4w, spyHoldings, soxHistory, qqqVerdictBars] = await Promise.all([
+    const [hyOasSeries, cccOasSeries, dfii10Series, hyOasDelta4w, spyHoldings, soxHistory, qqqVerdictBars, dgs30Series, hygBars, iefBars] = await Promise.all([
         fetchHyOasSeriesBp(),
         fetchCccOasSeriesBp(),
         fetchFredSeries('DFII10', 120),
         computeHyOasDelta4wBp(),
         fetchSpyHoldings(),
         fetchSoxIndexHistoryWithSource(),
-        fetcher.fetchPriceHistory('QQQ', 330).catch(() => [])
+        fetcher.fetchPriceHistory('QQQ', 330).catch(() => []),
+        fetchFredSeries('DGS30', 120).catch(() => []),
+        fetcher.fetchPriceHistory('HYG', 90).catch(() => []),
+        fetcher.fetchPriceHistory('IEF', 90).catch(() => [])
     ]);
 
     const hyOas = await computeHyOas();
@@ -192,13 +198,67 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         },
         leading_flags: buildLeadingFlags(creditFundingStress)
     };
-    snapshot.regime_verdict = computeRegimeVerdict(snapshot, realRateBrake, qqqVerdictBars);
+    snapshot.regime_verdict = computeRegimeVerdict(
+        snapshot,
+        realRateBrake,
+        qqqVerdictBars,
+        computeVerdictExtras(dgs30Series ?? [], hygBars ?? [], iefBars ?? [])
+    );
 
     console.log(
         `[macro-regime] snapshot built in ${Date.now() - startedAt}ms ` +
             `(overall=${overall}, base=${baseOverall})`
     );
     return snapshot;
+}
+
+// Faithful-to-spec extras for the verdict: 30Y nominal (long-end / term premium)
+// and HYG/IEF (credit vs duration). Computed here from raw series; formatted in
+// regime-verdict.
+function computeVerdictExtras(
+    dgs30Series: FredPoint[],
+    hygBars: DailyPriceBar[],
+    iefBars: DailyPriceBar[]
+): VerdictExtras {
+    const round1 = (v: number) => Math.round(v * 10) / 10;
+    const round2 = (v: number) => Math.round(v * 100) / 100;
+
+    // DGS30: latest level + 8w (56 calendar day) change in bp.
+    const sorted30 = [...dgs30Series]
+        .filter((p) => Number.isFinite(p.value))
+        .sort((a, b) => a.date.localeCompare(b.date));
+    const latest30 = sorted30[sorted30.length - 1] ?? null;
+    let dgs30Delta8wBp: number | null = null;
+    if (latest30) {
+        const cutoff = new Date(new Date(latest30.date).getTime() - 56 * 86400000)
+            .toISOString()
+            .slice(0, 10);
+        const back = [...sorted30].reverse().find((p) => p.date <= cutoff) ?? null;
+        if (back) dgs30Delta8wBp = (latest30.value - back.value) * 100;
+    }
+
+    // HYG/IEF ratio + 4w (20 trading-bar) trend. Falling ratio = credit stress.
+    const align = (bars: DailyPriceBar[]) =>
+        new Map([...bars].filter((b) => Number.isFinite(b.close) && b.close > 0).map((b) => [b.date, b.close]));
+    const hyg = align(hygBars);
+    const ief = align(iefBars);
+    const ratioSeries = [...hyg.keys()]
+        .filter((d) => ief.has(d))
+        .sort()
+        .map((d) => ({ date: d, ratio: (hyg.get(d) as number) / (ief.get(d) as number) }));
+    const latestR = ratioSeries[ratioSeries.length - 1] ?? null;
+    let hygIefDelta4wPct: number | null = null;
+    if (latestR && ratioSeries.length > 20) {
+        const back = ratioSeries[ratioSeries.length - 1 - 20];
+        if (back && back.ratio > 0) hygIefDelta4wPct = (latestR.ratio / back.ratio - 1) * 100;
+    }
+
+    return {
+        dgs30_pct: latest30 ? round2(latest30.value) : null,
+        dgs30_delta_8w_bp: dgs30Delta8wBp !== null ? round1(dgs30Delta8wBp) : null,
+        hyg_ief_ratio: latestR ? round2(latestR.ratio) : null,
+        hyg_ief_delta_4w_pct: hygIefDelta4wPct !== null ? round1(hygIefDelta4wPct) : null
+    };
 }
 
 function buildLeadingFlags(creditFundingStress: MacroRegimeSnapshot['credit_funding_stress']): string[] {
