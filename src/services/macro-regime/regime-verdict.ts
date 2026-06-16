@@ -157,7 +157,7 @@ export function computeRegimeVerdict(
         return {
             state: 'NOISE',
             mechanism: null,
-            one_line: '价格/波动出现压力,但信用、实际利率与基本面机制均未确认;历史上多数此类回调属于噪音。',
+            one_line: '价格回落 / 波动上升,但信用、实际利率、基本面均无异常;历史上多数此类回调属短期噪音,数周内收复居多。',
             confidence: priceVol.vix_elevated ? 'medium' : 'low',
             watch: watchLine(snapshot, realRateBrake, priceVol),
             brakes
@@ -167,7 +167,7 @@ export function computeRegimeVerdict(
     return {
         state: 'STABLE',
         mechanism: null,
-        one_line: '价格平稳且信用、实际利率、基本面机制均未确认断裂。',
+        one_line: '市场平稳,信用、实际利率、基本面三大风险机制均无异常。',
         confidence: confidenceFor(brakes, 'STABLE'),
         watch: watchLine(snapshot, realRateBrake, priceVol),
         brakes
@@ -287,12 +287,12 @@ function confirmedLine(
     realRateBrake: RealRateBrake
 ): string {
     if (mechanism === 'credit') {
-        return '信用机制确认: credit regime 已进入 BREAK 且 VIX 交叉确认,系统性信用压力成立。';
+        return '信用利差已确认走阔并加速,系统性信用压力成立(类 2008 / 2020)。';
     }
     if (mechanism === 'rates') {
-        return `利率机制确认: DFII10 8周上行 ${formatBp(realRateBrake.delta_8w_bp)} 且 QQQ 已承压,久期重定价成立。`;
+        return `实际利率近 8 周上行 ${formatBp(realRateBrake.delta_8w_bp)},科技股已承压,久期重定价确立(类 2022)。`;
     }
-    return `基本面机制确认: fundamental modifier=${snapshot.fundamental_modifier.state}, escalation=${snapshot.fundamental_modifier.escalation_level}。`;
+    return '基本面已确认恶化:AI 资本开支与营收背离扩大,高估值面临压缩(类 2000)。';
 }
 
 function formingLine(
@@ -301,12 +301,12 @@ function formingLine(
     realRateBrake: RealRateBrake
 ): string {
     if (mechanism === 'credit') {
-        return '信用机制正在形成: credit regime 进入 BREAK_FORMING 且 VIX 交叉出现,价格可能仍有领先窗口。';
+        return '信用利差出现领先异动(最差档先走阔),价格可能尚未反映;系统性压力初现、待确认。';
     }
     if (mechanism === 'rates') {
-        return `利率机制正在形成: DFII10 8周上行 ${formatBp(realRateBrake.delta_8w_bp)},等待权益压力确认。`;
+        return `实际利率近 8 周上行 ${formatBp(realRateBrake.delta_8w_bp)},尚未传导到科技股;久期风险升温、待确认。`;
     }
-    return `基本面机制正在弱化: fundamental modifier=${snapshot.fundamental_modifier.state},尚未进入 cracking。`;
+    return '基本面边际走弱:AI 资本开支与营收差距扩大,尚未确认恶化。';
 }
 
 function watchLine(
@@ -315,11 +315,13 @@ function watchLine(
     priceVol: PriceVolStress
 ): string {
     const credit = snapshot.credit_funding_stress;
+    const creditState = credit.credit_regime_state ?? 'NOISE';
+    const creditZh = creditState === 'BREAK' ? '走阔确认' : creditState === 'BREAK_FORMING' ? '领先异动' : '平稳';
     const pieces = [
-        `信用:${credit.credit_regime_state ?? 'NOISE'}`,
-        `VIX:${snapshot.indicators.VIX.value ?? 'N/A'}`,
-        `DFII10 8w:${formatBp(realRateBrake.delta_8w_bp)}`,
-        `QQQ回撤:${priceVol.qqq_drawdown_pct !== null ? `${priceVol.qqq_drawdown_pct.toFixed(1)}%` : 'N/A'}`
+        `信用利差 ${creditZh}`,
+        `VIX ${snapshot.indicators.VIX.value ?? 'N/A'}`,
+        `实际利率8周 ${formatBp(realRateBrake.delta_8w_bp)}`,
+        `纳指距高点 ${priceVol.qqq_drawdown_pct !== null ? `-${priceVol.qqq_drawdown_pct.toFixed(1)}%` : 'N/A'}`
     ];
     return pieces.join(' · ');
 }
