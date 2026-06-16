@@ -10,6 +10,7 @@
  */
 
 import { MassiveDataFetcher } from '../../data/massive-fetcher';
+import { fetchFredSeries } from '../../data/fred-series-fetcher';
 import { fetchSoxIndexHistoryWithSource } from '../../data/sox-index-fetcher';
 import { fetchSpyHoldings } from '../../data/spy-holdings-fetcher';
 import {
@@ -34,6 +35,7 @@ import { annotateSoxEscalationEligibility, applyEscalationsDetailed, computeBase
 import { loadFundamentalModifier } from './fundamental-modifier';
 import { buildLateCycleContext } from './late-cycle-context';
 import { persistenceFor, syncAllPersistence, syncIndicatorPersistence } from './persistence';
+import { computeRealRateBrake, computeRegimeVerdict } from './regime-verdict';
 import { attachSubBandMetadata, persistSubBandHistory } from './sub-band-metadata';
 import type {
     AiCloudStressStatus,
@@ -75,12 +77,14 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
 
     // Side monitor pre-requisites (HY OAS series in bp + Δ4w) reused for
     // indicator and Credit/Funding stress acceleration sub-signal.
-    const [hyOasSeries, cccOasSeries, hyOasDelta4w, spyHoldings, soxHistory] = await Promise.all([
+    const [hyOasSeries, cccOasSeries, dfii10Series, hyOasDelta4w, spyHoldings, soxHistory, qqqVerdictBars] = await Promise.all([
         fetchHyOasSeriesBp(),
         fetchCccOasSeriesBp(),
+        fetchFredSeries('DFII10', 120),
         computeHyOasDelta4wBp(),
         fetchSpyHoldings(),
-        fetchSoxIndexHistoryWithSource()
+        fetchSoxIndexHistoryWithSource(),
+        fetcher.fetchPriceHistory('QQQ', 330).catch(() => [])
     ]);
 
     const hyOas = await computeHyOas();
@@ -153,6 +157,11 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         credit_funding: sideStatusToSeverity(creditFundingStress.overall_status),
         fundamental: fundamentalStateToSeverity(fundamentalModifier.state)
     });
+    const realRateBrake = computeRealRateBrake(
+        dfii10Series ?? [],
+        qqqVerdictBars,
+        creditFundingStress.credit_regime_state ?? 'NOISE'
+    );
 
     const snapshot: MacroRegimeSnapshot = {
         as_of: asOf,
@@ -183,6 +192,7 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         },
         leading_flags: buildLeadingFlags(creditFundingStress)
     };
+    snapshot.regime_verdict = computeRegimeVerdict(snapshot, realRateBrake, qqqVerdictBars);
 
     console.log(
         `[macro-regime] snapshot built in ${Date.now() - startedAt}ms ` +

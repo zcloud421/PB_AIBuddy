@@ -18,6 +18,26 @@ export type CreditRegimeState = 'NOISE' | 'BREAK_FORMING' | 'BREAK';
 
 export type PillarState = 'normal' | 'elevated' | 'extreme';
 
+export type RegimeVerdictState = 'STABLE' | 'BREAK_FORMING' | 'NOISE' | 'CONFIRMED_BREAK';
+
+export type RegimeVerdictMechanism = 'credit' | 'rates' | 'fundamental' | null;
+
+export type RegimeVerdictBrakeStatus = 'quiet' | 'forming' | 'confirmed';
+
+export interface RegimeVerdict {
+    state: RegimeVerdictState;
+    mechanism: RegimeVerdictMechanism;
+    one_line: string;
+    confidence: 'low' | 'medium' | 'high';
+    watch: string;
+    brakes: {
+        credit: RegimeVerdictBrakeStatus;
+        rates: RegimeVerdictBrakeStatus;
+        fundamental: RegimeVerdictBrakeStatus;
+        crowding: 'quiet' | 'elevated';
+    };
+}
+
 export interface IndicatorReading {
     name: string;
     value: number | null;
@@ -154,6 +174,7 @@ export interface MacroRegimeSnapshot {
     };
     escalation_summary?: EscalationSummary;
     leading_flags?: string[];
+    regime_verdict?: RegimeVerdict;
 }
 
 export interface EscalationSummary {
