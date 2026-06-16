@@ -167,7 +167,7 @@ export function computeRegimeVerdict(
     return {
         state: 'STABLE',
         mechanism: null,
-        one_line: '市场平稳,信用、实际利率、基本面三大风险机制均无异常。',
+        one_line: stableLine(brakes),
         confidence: confidenceFor(brakes, 'STABLE'),
         watch: watchLine(snapshot, realRateBrake, priceVol),
         brakes
@@ -307,6 +307,21 @@ function formingLine(
         return `实际利率近 8 周上行 ${formatBp(realRateBrake.delta_8w_bp)},尚未传导到科技股;久期风险升温、待确认。`;
     }
     return '基本面边际走弱:AI 资本开支与营收差距扩大,尚未确认恶化。';
+}
+
+function stableLine(brakes: RegimeVerdict['brakes']): string {
+    const stirring: string[] = [];
+    if (brakes.credit === 'forming') stirring.push('信用');
+    if (brakes.rates === 'forming') stirring.push('利率');
+    if (brakes.fundamental === 'forming') stirring.push('基本面');
+    const crowdElevated = brakes.crowding === 'elevated';
+    if (stirring.length === 0 && !crowdElevated) {
+        return '市场平稳,信用、利率、基本面机制均正常。';
+    }
+    const parts: string[] = [];
+    if (stirring.length > 0) parts.push(`${stirring.join('、')}出现初步异动`);
+    if (crowdElevated) parts.push('拥挤度偏高');
+    return `市场整体平稳;${parts.join('、')},但均未确认,暂未对股市构成系统性风险。`;
 }
 
 function watchLine(
