@@ -67,4 +67,16 @@ const unhMinimal = buildMinimalPitch({
 assert.equal(unhMinimal.includes('Buy, Sell, or Hold'), false);
 assert.equal(unhMinimal.includes('近期消息'), false);
 
+const financialTemplate = buildDeterministicPitch({
+    ...basePitch,
+    financials_latest_quarter: 'Q1 2026',
+    revenue_yoy_pct: 7,
+    top_segment: { name: 'Data Center and AI', yoy_pct: 22 },
+    gross_margin_yoy_pp: 3
+});
+assert.ok(financialTemplate.includes('Data Center and AI 收入同比 +22.0%'));
+assert.equal(financialTemplate.includes('事实锚'), false);
+assert.equal(financialTemplate.includes('可持有属性'), false);
+assert.equal(financialTemplate.includes('依赖基本面兑现'), false);
+
 console.log('fcn-go-pitch template tests passed');

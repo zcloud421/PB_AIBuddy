@@ -27,7 +27,7 @@ const FORBIDDEN_PHRASES = [
     '流动性风险'
 ];
 
-const GENERIC_CLAIMS = ['基本面强劲', '技术面强势', '长期向好', '市场关注度提升'];
+const GENERIC_CLAIMS = ['基本面强劲', '技术面强势', '长期向好', '市场关注度提升', '事实锚', '可持有属性', '依赖基本面兑现'];
 const GENERIC_TIMING_PHRASES = ['近期', '最近', '当前', '市场关注', '情绪改善'];
 const PRICE_DATA_SIGNAL_PATTERNS = [/距\s*52\s*周高点/, /回调/, /近\s*5\s*日/, /趋势/, /均线/];
 const TAG_CONDITIONAL_BANS: Partial<Record<HoldingTag, RegExp[]>> = {
@@ -411,6 +411,34 @@ function buildAllowedFacts(pitchInputs: PitchInputs): AllowedFact[] {
             value: pitchInputs.days_since_earnings,
             kind: 'days_post_earnings',
             contextKeywords: ['财报后', '天']
+        });
+    }
+    if (typeof pitchInputs.revenue_yoy_pct === 'number') {
+        facts.push({
+            value: Math.abs(pitchInputs.revenue_yoy_pct),
+            kind: 'revenue_yoy',
+            contextKeywords: ['收入', '营收', '同比', 'revenue']
+        });
+    }
+    if (pitchInputs.top_segment) {
+        facts.push({
+            value: Math.abs(pitchInputs.top_segment.yoy_pct),
+            kind: 'segment_yoy',
+            contextKeywords: [pitchInputs.top_segment.name, '分部', '业务', '收入', '同比']
+        });
+    }
+    if (typeof pitchInputs.gross_margin_pct === 'number') {
+        facts.push({
+            value: Math.abs(pitchInputs.gross_margin_pct),
+            kind: 'gross_margin',
+            contextKeywords: ['毛利率', 'margin']
+        });
+    }
+    if (typeof pitchInputs.gross_margin_yoy_pp === 'number') {
+        facts.push({
+            value: Math.abs(pitchInputs.gross_margin_yoy_pp),
+            kind: 'gross_margin_yoy',
+            contextKeywords: ['毛利率', '同比', 'pct', 'pp']
         });
     }
 

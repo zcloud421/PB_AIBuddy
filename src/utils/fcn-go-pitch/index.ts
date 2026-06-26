@@ -3,7 +3,14 @@ import { getLatestEarningsSurprise } from '../../data/earnings-surprise';
 import type { NarrativeInput, NarrativeOutput, NarrativeSourceQuality } from '../narrative-generator';
 import { checkRepetitionStyle, logStyleRepetitionWarning } from '../fcn-shared/style-repetition';
 import { PITCH_ENGINE_VERSION } from '../fcn-shared/pitch-engine-version';
-import { inferEarningsBeat, isHighIVString, parseCouponRange, parseTenorMonths, sanitizeEarningsSurpriseForPitch } from './input-adapter';
+import {
+    inferEarningsBeat,
+    isHighIVString,
+    loadFinancialsForPitch,
+    parseCouponRange,
+    parseTenorMonths,
+    sanitizeEarningsSurpriseForPitch
+} from './input-adapter';
 import { callDeepSeekForPitch, buildPitchPrompt, type PitchInputs } from './llm-stitcher';
 import { detectLitTags, hasMinimumTagsForPitch } from './tag-detector';
 import { buildDeterministicPitch, buildHybridPitch, buildMinimalPitch, pickBridge } from './template';
@@ -98,6 +105,7 @@ async function buildPitchInputsFromNarrativeInput(input: NarrativeInput): Promis
     const displayDescription = await getDisplayDescription(input.symbol, input.company_name);
     const rawEarningsSurprise = await getLatestEarningsSurprise(input.symbol);
     const earningsSurprise = sanitizeEarningsSurpriseForPitch(rawEarningsSurprise);
+    const financials = await loadFinancialsForPitch(input.symbol);
     const litTags = detectLitTags({
         symbol: input.symbol,
         current_price: input.current_price,
@@ -128,10 +136,7 @@ async function buildPitchInputsFromNarrativeInput(input: NarrativeInput): Promis
         coupon_high: coupon.high,
         tenor_label: parseTenorMonths(input.tenor_days),
         lit_tags: litTags,
-        recent_news_titles: (input.news_items ?? [])
-            .map((item) => item.title)
-            .filter((title) => !isClickbait(title))
-            .slice(0, 3),
+        recent_news_titles: selectSubstantiveNewsTitles((input.news_items ?? []).map((item) => item.title)),
         change_5d_pct: input.change_5d_pct,
         pct_from_52w_high: input.pct_from_52w_high,
         days_since_earnings: input.days_since_earnings,
@@ -140,8 +145,42 @@ async function buildPitchInputsFromNarrativeInput(input: NarrativeInput): Promis
                   eps_surprise_pct: earningsSurprise.eps_surprise_pct,
                   period: earningsSurprise.period
               }
-            : null
+            : null,
+        financials_latest_quarter: financials?.latest_quarter,
+        revenue_yoy_pct: financials?.revenue_yoy_pct ?? null,
+        gross_margin_pct: financials?.gross_margin_pct ?? null,
+        gross_margin_yoy_pp: financials?.gross_margin_yoy_pp ?? null,
+        top_segment: financials?.top_segment ?? undefined
     };
+}
+
+export function selectSubstantiveNewsTitles(titles: string[], limit = 3): string[] {
+    return titles
+        .filter((title) => title && !isClickbait(title))
+        .map((title, index) => ({ title, index, score: scoreNewsTitle(title) }))
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score || a.index - b.index)
+        .slice(0, limit)
+        .map((item) => item.title);
+}
+
+function scoreNewsTitle(title: string): number {
+    const t = title.toLowerCase();
+    let score = 0;
+    if (/\b(invests?|investment|stake|funding|partnership|deal|contract|order|backlog|acquisition|merger|buyout|approval|approved|launch|unveils?|introduces?|guidance|outlook|forecast|policy|tariff|export control|chip act)\b/i.test(title)) {
+        score += 4;
+    }
+    if (/投资|入股|收购|并购|合作|订单|积压|获批|批准|发布|推出|指引|展望|政策|关税|出口管制|补贴/.test(title)) {
+        score += 4;
+    }
+    if (/\b(revenue|earnings|margin|segment|datacenter|data center|ai|cloud|foundry|fab|asic|gpu|optics|power|nuclear)\b/i.test(title)) {
+        score += 2;
+    }
+    if (/营收|收入|利润率|数据中心|云|算力|晶圆|光通信|电力|核电|半导体/.test(title)) {
+        score += 2;
+    }
+    if (/\b(why|should|buy|sell|hold|prediction|secret|skyrocket)\b/i.test(t)) score -= 5;
+    return score;
 }
 
 function finalizeTemplateText(

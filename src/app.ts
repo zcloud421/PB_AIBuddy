@@ -34,6 +34,7 @@ import {
     ensureMacroRegimeAuditLogTable,
     ensureMacroRegimeSnapshotsTable
 } from './db/queries/macro-regime';
+import { ensureSymbolFinancialsCacheTable } from './data/financials-fetcher';
 import { asyncHandler } from './lib/async-handler';
 
 dotenv.config();
@@ -186,6 +187,7 @@ async function ensureSchemaGuards(): Promise<void> {
     await ensureLateCyclePillarHistoryTable();
     await ensureIndicatorPersistenceTable();
     await ensureIndicatorHistoryTable();
+    await ensureSymbolFinancialsCacheTable();
     // Must run LAST: secures every table created by the guards above, plus any
     // future table, against Supabase's public PostgREST API.
     await ensureRowLevelSecurity();

@@ -556,4 +556,13 @@ CREATE INDEX IF NOT EXISTS idx_macro_regime_audit_log_as_of
 CREATE INDEX IF NOT EXISTS idx_macro_regime_audit_log_evaluation
     ON macro_regime_audit_log (forward_evaluation, as_of DESC);
 
+CREATE TABLE IF NOT EXISTS symbol_financials_cache (
+    symbol TEXT PRIMARY KEY,
+    payload JSONB,
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_symbol_financials_cache_fetched_at
+    ON symbol_financials_cache (fetched_at DESC);
+
 COMMIT;

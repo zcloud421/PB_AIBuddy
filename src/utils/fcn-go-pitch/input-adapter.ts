@@ -1,5 +1,6 @@
 import type { NarrativeInput } from '../narrative-generator';
 import type { EarningsSurprise } from '../../data/earnings-surprise';
+import { fetchSymbolFinancials, type SymbolFinancials } from '../../data/financials-fetcher';
 
 const EPS_ESTIMATE_MIN_ABS = 0.10;
 const EPS_SURPRISE_MAX_ABS_PCT = 100;
@@ -37,4 +38,13 @@ export function sanitizeEarningsSurpriseForPitch(surprise: EarningsSurprise | nu
     if (Math.abs(surprise.eps_estimate) < EPS_ESTIMATE_MIN_ABS) return null;
     if (Math.abs(surprise.eps_surprise_pct) > EPS_SURPRISE_MAX_ABS_PCT) return null;
     return surprise;
+}
+
+export async function loadFinancialsForPitch(symbol: string): Promise<SymbolFinancials | null> {
+    try {
+        return await fetchSymbolFinancials(symbol);
+    } catch (error) {
+        console.warn('[go-pitch-financials] failed', symbol, error);
+        return null;
+    }
 }

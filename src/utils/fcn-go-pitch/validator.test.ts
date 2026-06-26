@@ -76,7 +76,7 @@ const earningsInputs: PitchInputs = {
 
 const earningsOutput: PitchLLMOutput = {
     comm_reference:
-        'NVIDIA 是全球 AI 算力 GPU 核心供应商,Q3 2026 EPS 超预期 8.3%,显示盈利兑现仍有支撑。股价距 52 周高点回调 8.5%,未来 3-6 个月持有逻辑更依赖需求延续。产品平台迭代强化 AI 基础设施核心资产定位,使其仍具备可持有属性。',
+        'NVIDIA 是全球 AI 算力 GPU 核心供应商,Q3 2026 EPS 超预期 8.3%,显示盈利兑现仍有支撑。股价距 52 周高点回调 8.5%,未来 3-6 个月持有逻辑更依赖需求延续。产品平台迭代强化 AI 基础设施核心资产定位,使其保持战略重要性。',
     used_tags: ['earnings_strong_beat', 'quality_pullback'],
     timing_signal: '股价距 52 周高点回调 8.5%',
     referenced_news_index: -1,
@@ -86,7 +86,7 @@ const earningsOutput: PitchLLMOutput = {
 assert.equal(validatePitch(earningsOutput, earningsInputs.lit_tags, earningsInputs, buildHybridPitch(earningsOutput.comm_reference, earningsInputs)).passed, true);
 assert.ok(
     validatePitch(
-        { ...earningsOutput, comm_reference: 'NVIDIA 是全球 AI 算力 GPU 核心供应商,Q3 2026 数字 8.3%,显示盈利兑现仍有支撑。股价距 52 周高点回调 8.5%,未来 3-6 个月持有逻辑更依赖需求延续。产品平台迭代强化 AI 基础设施核心资产定位,使其仍具备可持有属性。' },
+        { ...earningsOutput, comm_reference: 'NVIDIA 是全球 AI 算力 GPU 核心供应商,Q3 2026 数字 8.3%,显示盈利兑现仍有支撑。股价距 52 周高点回调 8.5%,未来 3-6 个月持有逻辑更依赖需求延续。产品平台迭代强化 AI 基础设施核心资产定位,使其保持战略重要性。' },
         earningsInputs.lit_tags,
         earningsInputs,
         buildHybridPitch(earningsOutput.comm_reference, earningsInputs)
@@ -146,6 +146,36 @@ const indexOutput: PitchLLMOutput = {
     numeric_claims: [{ value: 12.8, unit: '%', context: '距 52 周高点' }]
 };
 assert.equal(validatePitch(indexOutput, indexInputs.lit_tags, indexInputs, buildHybridPitch(indexOutput.comm_reference, indexInputs)).passed, true);
+
+const financialInputs: PitchInputs = {
+    ...pitchInputs,
+    lit_tags: {
+        holding: ['backlog'],
+        timing: ['momentum_intact']
+    },
+    financials_latest_quarter: 'Q1 2026',
+    revenue_yoy_pct: 7,
+    gross_margin_yoy_pp: 3,
+    top_segment: {
+        name: 'Data Center and AI',
+        yoy_pct: 22
+    }
+};
+const financialOutput: PitchLLMOutput = {
+    comm_reference:
+        'Intel 是全球 PC 与服务器 CPU 供应商,Q1 2026 收入同比 +7.0%、Data Center and AI 收入同比 +22.0%,显示盈利改善正在兑现。订单积压提供未来 3-6 个月收入能见度,经营修复节奏相对清晰。产品与本土半导体政策催化强化其美国 AI 半导体核心资产定位。',
+    used_tags: ['backlog', 'momentum_intact'],
+    timing_signal: '趋势仍保持在关键均线上方',
+    referenced_news_index: -1,
+    numeric_claims: [
+        { value: 7, unit: '%', context: '收入同比' },
+        { value: 22, unit: '%', context: 'Data Center and AI 收入同比' }
+    ]
+};
+assert.equal(
+    validatePitch(financialOutput, financialInputs.lit_tags, financialInputs, buildHybridPitch(financialOutput.comm_reference, financialInputs)).passed,
+    true
+);
 
 const tooLongFinal = `${buildHybridPitch(output().comm_reference, pitchInputs)}${'补充说明。'.repeat(40)}`;
 assert.ok(validatePitch(output(), pitchInputs.lit_tags, pitchInputs, tooLongFinal).reasons.some((reason) => reason.includes('80-220')));
