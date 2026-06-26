@@ -65,10 +65,14 @@ export async function fetchSymbolFinancials(symbol: string): Promise<SymbolFinan
     }
 
     try {
+        // FMP plan caps `limit` at 5 (limit>5 → 402); segmentation is annual-only
+        // on this tier (period=quarter → 402), so we fetch annual FY segments and
+        // match year-over-year. key-metrics quarterly is a premium endpoint (402)
+        // → fail-softs to []; operating margin falls back to income statement.
         const [incomeRows, segmentRows, metricRows] = await Promise.all([
-            fetchFmpJson<IncomeStatementRow[]>('/income-statement', { symbol: normalized, period: 'quarter', limit: '8' }, apiKey),
-            fetchFmpJson<unknown[]>('/revenue-product-segmentation', { symbol: normalized, period: 'quarter', limit: '8' }, apiKey),
-            fetchFmpJson<unknown[]>('/key-metrics', { symbol: normalized, period: 'quarter', limit: '8' }, apiKey)
+            fetchFmpJson<IncomeStatementRow[]>('/income-statement', { symbol: normalized, period: 'quarter', limit: '5' }, apiKey),
+            fetchFmpJson<unknown[]>('/revenue-product-segmentation', { symbol: normalized, limit: '5' }, apiKey),
+            fetchFmpJson<unknown[]>('/key-metrics', { symbol: normalized, period: 'quarter', limit: '5' }, apiKey)
         ]);
 
         const financials = buildFinancialsFromFmp(normalized, incomeRows ?? [], segmentRows ?? [], metricRows ?? []);
