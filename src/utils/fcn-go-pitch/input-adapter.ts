@@ -1,4 +1,8 @@
 import type { NarrativeInput } from '../narrative-generator';
+import type { EarningsSurprise } from '../../data/earnings-surprise';
+
+const EPS_ESTIMATE_MIN_ABS = 0.10;
+const EPS_SURPRISE_MAX_ABS_PCT = 100;
 
 export function parseCouponRange(s: string): { low: number; high: number } | null {
     const match = s.match(/(\d+(?:\.\d+)?)\s*%?\s*[-~–]\s*(\d+(?:\.\d+)?)\s*%?/);
@@ -26,4 +30,11 @@ export function inferEarningsBeat(input: NarrativeInput): boolean | null {
     if (/beat|tops|exceed|crush|超预期|大超|强劲指引|raise.*guide/i.test(joined)) return true;
     if (/miss|disappoint|cut.*guide|低于预期|下调指引/i.test(joined)) return false;
     return null;
+}
+
+export function sanitizeEarningsSurpriseForPitch(surprise: EarningsSurprise | null): EarningsSurprise | null {
+    if (!surprise) return null;
+    if (Math.abs(surprise.eps_estimate) < EPS_ESTIMATE_MIN_ABS) return null;
+    if (Math.abs(surprise.eps_surprise_pct) > EPS_SURPRISE_MAX_ABS_PCT) return null;
+    return surprise;
 }

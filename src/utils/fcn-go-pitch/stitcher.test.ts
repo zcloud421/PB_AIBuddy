@@ -22,27 +22,29 @@ const pitchInputs: PitchInputs = {
 };
 
 const llmOutput: PitchLLMOutput = {
-    why_sentence: '定制 ASIC 订单可见度较高，股价近 5 日 +3.2%，趋势仍保持稳健，承接节奏更清晰。',
+    comm_reference:
+        'Broadcom 是网络芯片与定制 ASIC 供应商,近 5 日 +3.2%,显示市场仍在确认其 AI 网络订单能见度。定制 ASIC 与网络芯片需求提供未来 3-6 个月的持有主线,基本面兑现节奏相对清晰。订单积压继续强化收入可见性,使其仍具备 AI 基础设施核心资产属性。',
     used_tags: ['backlog', 'momentum_intact'],
     timing_signal: '近 5 日 +3.2%',
     referenced_news_index: -1,
     numeric_claims: [{ value: 3.2, unit: '%', context: '近 5 日' }]
 };
 
-const finalPitch = buildHybridPitch(llmOutput.why_sentence, pitchInputs, '在这个背景下，');
+const finalPitch = buildHybridPitch(llmOutput.comm_reference, pitchInputs, '在这个背景下，');
 const validation = validatePitch(llmOutput, pitchInputs.lit_tags, pitchInputs, finalPitch);
 
 assert.equal(validation.passed, true);
-assert.ok(finalPitch.includes('在这个背景下，让您以 $160'));
-assert.ok(finalPitch.includes('若股价未跌破 $160'));
-assert.ok(finalPitch.length > llmOutput.why_sentence.length);
+assert.ok(finalPitch.startsWith('Broadcom 是网络芯片与定制 ASIC 供应商'));
+assert.ok(finalPitch.includes('未来 3-6 个月'));
+assert.equal(finalPitch.includes('让您以 $160'), false);
+assert.equal(finalPitch.includes('若股价未跌破'), false);
 
 assert.equal(parsePitchOutput('not json'), null);
 assert.equal(parsePitchOutput(''), null);
 
 const wrapped = parsePitchOutput(`prefix
 {
-  "why_sentence": "定制 ASIC 订单能见度清晰，股价近 5 日 +3.2%，趋势保持稳健。",
+  "comm_reference": "Broadcom 是网络芯片与定制 ASIC 供应商,近 5 日 +3.2%,显示市场仍在确认其 AI 网络订单能见度。定制 ASIC 与网络芯片需求提供未来 3-6 个月的持有主线,基本面兑现节奏相对清晰。订单积压继续强化收入可见性,使其仍具备 AI 基础设施核心资产属性。",
   "used_tags": ["backlog", "momentum_intact"],
   "timing_signal": "近 5 日 +3.2%",
   "referenced_news_index": -1,
@@ -53,59 +55,32 @@ suffix`);
 assert.ok(wrapped);
 assert.equal(wrapped?.used_tags.length, 2);
 
-const missingTags = parsePitchOutput('{"why_sentence":"定制 ASIC 订单能见度清晰，股价近 5 日 +3.2%，趋势保持稳健。","timing_signal":"近 5 日 +3.2%","numeric_claims":[]}');
+const legacy = parsePitchOutput('{"why_sentence":"旧字段仍可解析为过渡兼容文本。","used_tags":["backlog"],"timing_signal":"订单","numeric_claims":[]}');
+assert.equal(legacy?.comm_reference, '旧字段仍可解析为过渡兼容文本。');
+
+const missingTags = parsePitchOutput('{"comm_reference":"Broadcom 是网络芯片与定制 ASIC 供应商,近 5 日 +3.2%,显示市场仍在确认其 AI 网络订单能见度。定制 ASIC 与网络芯片需求提供未来 3-6 个月的持有主线,基本面兑现节奏相对清晰。订单积压继续强化收入可见性,使其仍具备 AI 基础设施核心资产属性。","timing_signal":"近 5 日 +3.2%","numeric_claims":[]}');
 assert.ok(missingTags);
 assert.equal(validatePitch(missingTags, pitchInputs.lit_tags, pitchInputs).passed, false);
 
 const unauthorizedNumber: PitchLLMOutput = {
     ...llmOutput,
-    why_sentence: '定制 ASIC 订单可见度较高，股价近 5 日 +3.2%，另有 999% 增长预期。',
+    comm_reference:
+        'Broadcom 是网络芯片与定制 ASIC 供应商,近 5 日 +3.2%,显示市场仍在确认其 AI 网络订单能见度。定制 ASIC 与网络芯片需求提供未来 3-6 个月的持有主线,但另有 999% 增长预期。订单积压继续强化收入可见性,使其仍具备 AI 基础设施核心资产属性。',
     numeric_claims: [{ value: 999, unit: '%', context: '增长预期' }]
 };
 assert.ok(validatePitch(unauthorizedNumber, pitchInputs.lit_tags, pitchInputs).reasons.some((reason) => reason.includes('未授权数字')));
 
-const outOfRangeNews: PitchLLMOutput = {
+const termsLeak: PitchLLMOutput = {
     ...llmOutput,
-    referenced_news_index: 7
+    comm_reference:
+        'Broadcom 是网络芯片与定制 ASIC 供应商,近 5 日 +3.2%,显示市场仍在确认其 AI 网络订单能见度。定制 ASIC 与网络芯片需求提供未来 3-6 个月的持有主线。若跌破执行价仍有安全垫,票息条款强化承接价值。'
 };
-assert.ok(validatePitch(outOfRangeNews, pitchInputs.lit_tags, pitchInputs).reasons.some((reason) => reason.includes('referenced_news_index')));
-
-const earningsPitchInputs: PitchInputs = {
-    ...pitchInputs,
-    lit_tags: {
-        holding: ['earnings_strong_beat'],
-        timing: ['quality_pullback']
-    },
-    earnings_surprise: {
-        period: 'Q3 2026',
-        eps_surprise_pct: 8.3
-    },
-    pct_from_52w_high: -8.5
-};
-const earningsLlm: PitchLLMOutput = {
-    why_sentence: 'Q3 2026 EPS 超预期 8.3%，股价距 52 周高点回调 8.5%，承接水平更有纪律。',
-    used_tags: ['earnings_strong_beat', 'quality_pullback'],
-    timing_signal: '股价距 52 周高点回调 8.5%',
-    referenced_news_index: -1,
-    numeric_claims: [{ value: 8.3, unit: '%', context: 'EPS 超预期' }]
-};
-assert.equal(
-    validatePitch(earningsLlm, earningsPitchInputs.lit_tags, earningsPitchInputs, buildHybridPitch(earningsLlm.why_sentence, earningsPitchInputs)).passed,
-    true
-);
-assert.ok(
-    validatePitch(
-        { ...llmOutput, why_sentence: `${llmOutput.why_sentence} 财报超预期。` },
-        pitchInputs.lit_tags,
-        pitchInputs,
-        buildHybridPitch(`${llmOutput.why_sentence} 财报超预期。`, pitchInputs)
-    ).reasons.some((reason) => reason.includes('财报 beat tag'))
-);
+assert.ok(validatePitch(termsLeak, pitchInputs.lit_tags, pitchInputs).reasons.some((reason) => reason.includes('含禁词')));
 
 const tooLong: PitchLLMOutput = {
     ...llmOutput,
-    why_sentence: '定制 ASIC 订单可见度较高，股价近 5 日 +3.2%，趋势保持稳健，客户承接节奏更清晰，同时市场对数据中心网络芯片的关注度仍在提升，管理层执行力也持续获得认可，渠道反馈和供应链节奏也体现出较强延续性。'
+    comm_reference: `${llmOutput.comm_reference}${'补充说明。'.repeat(30)}`
 };
-assert.ok(validatePitch(tooLong, pitchInputs.lit_tags, pitchInputs).reasons.some((reason) => reason.includes('why_sentence 字数')));
+assert.ok(validatePitch(tooLong, pitchInputs.lit_tags, pitchInputs).reasons.some((reason) => reason.includes('comm_reference 字数')));
 
 console.log('fcn-go-pitch stitcher tests passed');

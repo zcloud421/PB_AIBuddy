@@ -3,7 +3,7 @@ import { getLatestEarningsSurprise } from '../../data/earnings-surprise';
 import type { NarrativeInput, NarrativeOutput, NarrativeSourceQuality } from '../narrative-generator';
 import { checkRepetitionStyle, logStyleRepetitionWarning } from '../fcn-shared/style-repetition';
 import { PITCH_ENGINE_VERSION } from '../fcn-shared/pitch-engine-version';
-import { inferEarningsBeat, isHighIVString, parseCouponRange, parseTenorMonths } from './input-adapter';
+import { inferEarningsBeat, isHighIVString, parseCouponRange, parseTenorMonths, sanitizeEarningsSurpriseForPitch } from './input-adapter';
 import { callDeepSeekForPitch, buildPitchPrompt, type PitchInputs } from './llm-stitcher';
 import { detectLitTags, hasMinimumTagsForPitch } from './tag-detector';
 import { buildDeterministicPitch, buildHybridPitch, buildMinimalPitch, pickBridge } from './template';
@@ -37,7 +37,7 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
             const llmOutput = await callDeepSeekForPitch(buildPitchPrompt(pitchInputs));
             if (llmOutput) {
                 const bridge = pickBridge(input.symbol);
-                const finalPitch = buildHybridPitch(llmOutput.why_sentence, pitchInputs, bridge);
+                const finalPitch = buildHybridPitch(llmOutput.comm_reference, pitchInputs, bridge);
                 const validation = validatePitch(llmOutput, pitchInputs.lit_tags, pitchInputs, finalPitch);
                 if (validation.passed) {
                     logStyleRepetitionWarning(input.symbol, finalPitch, checkRepetitionStyle(finalPitch));
@@ -57,8 +57,8 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
                         tag: 'go_pitch_validation_debug',
                         symbol: input.symbol,
                         reasons: validation.reasons,
-                        llm_text_length: llmOutput.why_sentence.length,
-                        llm_text_preview: llmOutput.why_sentence.slice(0, 80),
+                        llm_text_length: llmOutput.comm_reference.length,
+                        llm_text_preview: llmOutput.comm_reference.slice(0, 80),
                         used_tags: llmOutput.used_tags,
                         timing_signal: llmOutput.timing_signal,
                         lit_holding: pitchInputs.lit_tags.holding,
@@ -96,7 +96,8 @@ async function buildPitchInputsFromNarrativeInput(input: NarrativeInput): Promis
     const discount = Math.round(100 - (input.recommended_strike / input.current_price) * 100);
     const desc = await getCompanyDescription(input.symbol);
     const displayDescription = await getDisplayDescription(input.symbol, input.company_name);
-    const earningsSurprise = await getLatestEarningsSurprise(input.symbol);
+    const rawEarningsSurprise = await getLatestEarningsSurprise(input.symbol);
+    const earningsSurprise = sanitizeEarningsSurpriseForPitch(rawEarningsSurprise);
     const litTags = detectLitTags({
         symbol: input.symbol,
         current_price: input.current_price,

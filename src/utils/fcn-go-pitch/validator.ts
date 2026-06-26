@@ -12,6 +12,12 @@ const FORBIDDEN_PHRASES = [
     '接货',
     '安全垫',
     '摊薄',
+    '执行价',
+    '票息',
+    '期限',
+    '若跌破',
+    'sell put',
+    'FCN',
     'assignment',
     '正是好时机',
     '不过是',
@@ -21,6 +27,7 @@ const FORBIDDEN_PHRASES = [
     '流动性风险'
 ];
 
+const GENERIC_CLAIMS = ['基本面强劲', '技术面强势', '长期向好', '市场关注度提升'];
 const GENERIC_TIMING_PHRASES = ['近期', '最近', '当前', '市场关注', '情绪改善'];
 const PRICE_DATA_SIGNAL_PATTERNS = [/距\s*52\s*周高点/, /回调/, /近\s*5\s*日/, /趋势/, /均线/];
 const TAG_CONDITIONAL_BANS: Partial<Record<HoldingTag, RegExp[]>> = {
@@ -57,9 +64,9 @@ export function validatePitch(
     finalParagraph?: string
 ): PitchValidationResult {
     const reasons: string[] = [];
-    const whySentence = output.why_sentence ?? '';
-    const whyLength = whySentence.replace(/\s+/g, '').length;
-    if (whyLength < 35 || whyLength > 90) reasons.push(`why_sentence 字数 ${whyLength} 不在 35-90 范围`);
+    const commReference = output.comm_reference ?? '';
+    const commLength = commReference.replace(/\s+/g, '').length;
+    if (commLength < 80 || commLength > 180) reasons.push(`comm_reference 字数 ${commLength} 不在 80-180 范围`);
 
     const allLitTags = [...litTags.holding, ...litTags.timing];
     for (const tag of output.used_tags) {
@@ -70,19 +77,16 @@ export function validatePitch(
     }
     const hasEarningsBeatTag = litTags.holding.includes('earnings_strong_beat') || litTags.holding.includes('earnings_modest_beat');
     const hasGuidanceTag = litTags.holding.includes('guide_raise') || litTags.holding.includes('guidance_reaffirmed_or_raised');
-    if (!hasEarningsBeatTag && /超预期|beat/i.test(whySentence)) {
+    if (!hasEarningsBeatTag && /超预期|beat/i.test(commReference)) {
         reasons.push('未点亮财报 beat tag,不得使用财报宣传词');
     }
-    if (!hasEarningsBeatTag && !hasGuidanceTag && /上调|强劲/i.test(whySentence)) {
+    if (!hasEarningsBeatTag && !hasGuidanceTag && /上调|强劲/i.test(commReference)) {
         reasons.push('未点亮财报/指引 tag,不得使用财报宣传词');
     }
-    if (pitchInputs.earnings_surprise && hasEarningsBeatTag) {
-        const expected = pitchInputs.earnings_surprise.eps_surprise_pct.toFixed(1);
-        if (!whySentence.includes(pitchInputs.earnings_surprise.period) || !whySentence.includes(expected)) {
-            reasons.push(`缺少 earnings surprise 引用:${pitchInputs.earnings_surprise.period} ${expected}%`);
-        }
+    if (!pitchInputs.earnings_surprise && /EPS\s*超预期|EPS beat|eps beat/i.test(commReference)) {
+        reasons.push('未提供有效 earnings_surprise,不得引用 EPS surprise');
     }
-    if (/本周|上周/.test(whySentence)) {
+    if (/本周|上周/.test(commReference)) {
         reasons.push('不得使用相对时间词:本周/上周');
     }
 
@@ -96,18 +100,21 @@ export function validatePitch(
         reasons.push(`referenced_news_index 越界: ${output.referenced_news_index}`);
     }
 
-    const textForForbiddenScan = `${whySentence}\n${finalParagraph ?? ''}`;
+    const textForForbiddenScan = `${commReference}\n${finalParagraph ?? ''}`;
     for (const phrase of FORBIDDEN_PHRASES) {
         if (textForForbiddenScan.includes(phrase)) reasons.push(`含禁词: ${phrase}`);
+    }
+    for (const phrase of GENERIC_CLAIMS) {
+        if (commReference.includes(phrase)) reasons.push(`空话表达: ${phrase}`);
     }
     reasons.push(...validateSemanticTagConsistency(textForForbiddenScan, output.used_tags));
 
     if (finalParagraph !== undefined) {
         const finalLength = finalParagraph.replace(/\s+/g, '').length;
-        if (finalLength < 100 || finalLength > 220) reasons.push(`最终段落字数 ${finalLength} 不在 100-220 范围`);
+        if (finalLength < 80 || finalLength > 220) reasons.push(`最终段落字数 ${finalLength} 不在 80-220 范围`);
     }
 
-    const numberText = `${whySentence}\n${finalParagraph ?? ''}\n${output.numeric_claims
+    const numberText = `${commReference}\n${finalParagraph ?? ''}\n${output.numeric_claims
         .map((claim) => `${claim.context ?? ''} ${claim.value}${claim.unit}`)
         .join('\n')}`;
     for (const num of extractNumbers(numberText)) {
@@ -179,7 +186,7 @@ export function validateGeneratedPitchText(text: string, pitchInputs: PitchInput
 }
 
 function validateSpecificity(output: PitchLLMOutput, litTags: LitTags, pitchInputs: PitchInputs): string[] {
-    const text = output.why_sentence ?? '';
+    const text = output.comm_reference ?? '';
     const hasAllowedNumericFact = extractNumbers(text).some((num) => {
         if (isStructuralWindowNumber(num, text)) return false;
         return authorizeNumber(num, text, pitchInputs).passed;
@@ -188,7 +195,7 @@ function validateSpecificity(output: PitchLLMOutput, litTags: LitTags, pitchInpu
     const hasTagSpecificPhrase = hasHoldingTagPhrase(text, litTags) || hasTimingTagPhrase(text, litTags);
     return hasAllowedNumericFact || hasNewsAnchor || hasTagSpecificPhrase
         ? []
-        : ['why_sentence 缺少安全特异性来源'];
+        : ['comm_reference 缺少安全特异性来源'];
 }
 
 function validateTimingSignal(output: PitchLLMOutput, litTags: LitTags, pitchInputs: PitchInputs): string[] {
@@ -223,13 +230,13 @@ function hasNewsTimingSignal(output: PitchLLMOutput, pitchInputs: PitchInputs): 
     }
 
     const eventValidation = validateEventAnchors(
-        output.why_sentence,
+        output.comm_reference,
         (pitchInputs.recent_news_titles ?? []).map((title) => ({
             title,
             published_at: new Date().toISOString()
         }))
     );
-    return eventValidation.passed && eventValidation.unanchored.length === 0 && detectNewsClaim(output.why_sentence);
+    return eventValidation.passed && eventValidation.unanchored.length === 0 && detectNewsClaim(output.comm_reference);
 }
 
 function hasTimingTagPhrase(timingSignal: string, litTags: LitTags): boolean {
@@ -299,6 +306,7 @@ function isStructuralWindowNumber(num: ExtractedNumber, text: string): boolean {
     return (
         (num.value === 52 && /52\s*周/.test(context)) ||
         (num.value === 5 && /近\s*5\s*日/.test(context)) ||
+        ((num.value === 3 || num.value === 6) && /3\s*[-–~至到]\s*6\s*个月|3\s*到\s*6\s*个月/.test(context)) ||
         isCalendarYear ||
         (num.value >= 1 && num.value <= 4 && new RegExp(`Q\\s*${num.raw}|${num.raw}\\s*季`, 'i').test(context))
     );

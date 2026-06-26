@@ -45,7 +45,9 @@ const tsmPitch = buildDeterministicPitch({
 
 assert.notEqual(litePitch, tsmPitch);
 assert.ok(litePitch.includes('近 5 日 +6.5%'));
-assert.ok(litePitch.includes('承接 LITE'));
+assert.ok(litePitch.includes('未来 3-6 个月'));
+assert.equal(litePitch.includes('让您以'), false);
+assert.equal(litePitch.includes('若股价未跌破'), false);
 assert.ok(tsmPitch.includes('近 5 日 -2.3%'));
 assert.ok(buildMinimalPitch({ ...basePitch, change_5d_pct: 1.2, pct_from_52w_high: -7 }).includes('近 5 日 +1.2%'));
 

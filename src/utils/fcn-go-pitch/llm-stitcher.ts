@@ -43,7 +43,7 @@ export interface PitchNumericClaim {
 }
 
 export interface PitchLLMOutput {
-    why_sentence: string;
+    comm_reference: string;
     used_tags: string[];
     timing_signal: string;
     referenced_news_index?: number;
@@ -59,7 +59,7 @@ export function buildPitchPrompt(p: PitchInputs): string {
         ? p.recent_news_titles.map((title, index) => `${index}. ${title}`).join('\n')
         : '(本期无新闻)';
 
-    return `你是私行 FCN 产品 RM 写作助手。你只负责写 why-sentence,不要写 FCN 条款。
+    return `你是私行 RM 的客户沟通参考写作助手。你只负责写标的 thesis,不要写 FCN 条款、买卖建议或交易时点。
 
 公司:${p.company_short_desc}
 客户展示公司定位:${p.display_description}
@@ -75,39 +75,33 @@ ${newsList}
 
 可用数字事实(严禁修改任何数字,严禁编造新数字):
 - 当前价 $${p.current_price.toFixed(2)}
-- 执行价 $${p.recommended_strike}
-- 较现价低 ${p.discount_pct}%
-- 年化票息 ${p.coupon_low}%-${p.coupon_high}%
-- 期限 ${p.tenor_label}
 ${typeof p.change_5d_pct === 'number' ? `- 近 5 日 ${p.change_5d_pct.toFixed(1)}%` : ''}
 ${typeof p.pct_from_52w_high === 'number' ? `- 距 52 周高点 ${Math.abs(p.pct_from_52w_high).toFixed(1)}%` : ''}
-${p.earnings_surprise ? `- ${p.earnings_surprise.period} EPS 超预期 ${p.earnings_surprise.eps_surprise_pct.toFixed(1)}%` : ''}
+${p.earnings_surprise ? `- ${p.earnings_surprise.period} EPS 超预期 ${p.earnings_surprise.eps_surprise_pct.toFixed(1)}%(仅当没有更硬的收入/催化事实时才可低优先级引用)` : ''}
 
 写作要求:
-1. why_sentence 只写 35-90 字中文,解释为什么现在 sell put 这只股票
-2. why_sentence 必须包含 holding reason + timing reason,但不要写 strike / coupon / tenor / 若跌破 等 FCN 条款
-3. 不要重复公司业务定位,系统会在前一句展示"${p.display_description}";你只写 why-now + holding signal
-4. why_sentence 必须包含 1 个 primary specificity,优先级:EPS surprise > price-data > news event > 已点亮 tag 的具体表述
-${p.earnings_surprise ? `5. 已提供 earnings_surprise,必须引用 "${p.earnings_surprise.period} EPS 超预期 ${p.earnings_surprise.eps_surprise_pct.toFixed(1)}%"` : '5. 未提供 earnings_surprise 时,严禁使用"超预期 / beat / 上调 / 强劲"等财报宣传词'}
-6. used_tags 必须只包含已点亮 tags,且至少 1 个 holding tag
-7. timing_signal 必填,不能只是"近期"/"最近"/"当前"/"市场关注"/"情绪改善"
-8. 数字必须来自可用数字事实;禁止补充背景知识里的数字
-9. 禁止相对时间词:"本周" / "上周";用 period 或 "财报后 N 天"
-10. 避免泛化表达:"订单可见度较高" / "支撑未来收入" / "技术形态健康" / "均线多头排列" / "动量未破" / "AI 需求支撑"
-11. 严禁:"正是好时机" / "不过是" / "您本就看好" / "敲入" / "接货" / "安全垫" / "摊薄" / 风险描述
+1. 输出 comm_reference,约 3 句、100-130 个中文字,RM 可整段复制。
+2. 三段骨架:① 定位 + 已兑现硬数据/标签事实 → 解读;② 前瞻驱动 + 未来 3-6 个月窗口 → 稳健性判断;③ 具体催化/护城河 → 战略含义。
+3. 每个事实必须配 so-what,句式类似「[数据/事件],显示/带来/强化 [含义]」。
+4. 服务于「敢持有」:客户若最终持有该股票,应理解为什么它是可持有的核心资产,不是中性行情快照。
+5. 具体可验证 > 泛泛形容。优先级:收入/分部增速(若输入有) > 具体新闻催化 > 价格位置 > EPS surprise。禁用空话:「基本面强劲」「技术面强势」「长期向好」「市场关注度提升」。
+6. 不碰条款、不碰买卖时点:禁止 strike / coupon / tenor / 执行价 / 票息 / 期限 / 若跌破 / sell put / FCN / 敲入 / 接货 / 安全垫 / 摊薄。
+7. 数字必须来自可用数字事实;禁止补充背景知识里的数字。未提供 earnings_surprise 时严禁使用「超预期 / beat / 上调 / 强劲」等财报宣传词。
+8. used_tags 必须只包含已点亮 tags,且至少 1 个 holding tag;timing_signal 必填,不能只是「近期/最近/当前/市场关注/情绪改善」。
+9. 禁止相对时间词:「本周 / 上周」;用 period 或「财报后 N 天」。
 
 正例:
 {
-  "why_sentence": "订单可见度较高,同时股价距 52 周高点回调 12.8%,当前承接水平更有纪律。",
-  "used_tags": ["backlog", "quality_pullback"],
-  "timing_signal": "股价距 52 周高点回调 12.8%",
+  "comm_reference": "Intel 是全球领先的 PC 与服务器 CPU 供应商,最近一季收入恢复增长,显示盈利修复正在兑现。新管理层改革与先进制程量产带来估值修复机会,未来 3-6 个月基本面相对稳健。同时英伟达战略投资与美国本土半导体政策支持,进一步强化其美国 AI 半导体核心资产定位。",
+  "used_tags": ["guide_raise", "quality_pullback"],
+  "timing_signal": "未来 3-6 个月改革和制程量产窗口",
   "referenced_news_index": -1,
-  "numeric_claims": [{"value": 12.8, "unit": "%", "context": "距 52 周高点"}]
+  "numeric_claims": [{"value": 3, "unit": "个月", "context": "未来 3-6 个月窗口"}]
 }
 
-反例(会被拒绝:把 timing tag 塞进 holding 或不写 timing_signal):
+反例(会被拒绝:空话、条款、没有 so-what):
 {
-  "why_sentence": "订单可见度较高,公司基本面稳健。",
+  "comm_reference": "公司基本面强劲,技术面强势,适合在 3 个月期限内 sell put,若跌破也有安全垫。",
   "used_tags": ["backlog", "quality_pullback"],
   "timing_signal": "",
   "referenced_news_index": -1,
@@ -116,7 +110,7 @@ ${p.earnings_surprise ? `5. 已提供 earnings_surprise,必须引用 "${p.earnin
 
 输出 JSON:
 {
-  "why_sentence": "...",
+  "comm_reference": "...",
   "used_tags": [...],
   "timing_signal": "...",
   "referenced_news_index": 0,
@@ -160,10 +154,16 @@ export async function callDeepSeekForPitch(prompt: string): Promise<PitchLLMOutp
 
 export function parsePitchOutput(content: string): PitchLLMOutput | null {
     const parsed = parseJsonObject(content);
-    if (!parsed || typeof parsed.why_sentence !== 'string') return null;
+    if (!parsed) return null;
+    const commReference = typeof parsed.comm_reference === 'string'
+        ? parsed.comm_reference
+        : typeof parsed.why_sentence === 'string'
+          ? parsed.why_sentence
+          : null;
+    if (!commReference) return null;
 
     return {
-        why_sentence: parsed.why_sentence,
+        comm_reference: commReference,
         used_tags: Array.isArray(parsed.used_tags) ? parsed.used_tags.map(String) : [],
         timing_signal: typeof parsed.timing_signal === 'string' ? parsed.timing_signal : '',
         referenced_news_index: typeof parsed.referenced_news_index === 'number' ? parsed.referenced_news_index : undefined,
