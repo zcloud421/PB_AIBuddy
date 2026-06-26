@@ -27,16 +27,15 @@ export function pickBridge(symbol: string): string {
 // 也不引用英文新闻标题(只用中文 tag 催化)。
 function buildTemplateWhySentence(p: PitchInputs, includeTags: boolean): string {
     const facts = buildSpecificSignals(p).slice(0, 2);
-    const holding = includeTags ? buildTagSupplements(p).slice(0, 1)[0] : undefined;
-    const catalyst = buildCatalystSignal(p);
+    // 段③ 催化与 holding 补充取材自重叠的 tag 集,只取其一,避免「近期指引维持」+「管理层指引维持」这类重复。
+    const closing = buildCatalystSignal(p) || (includeTags ? buildTagSupplements(p).slice(0, 1)[0] : undefined);
 
-    // 段① 定位 + 硬数据 / 段② 前瞻窗口(对齐 FCN 期限,用户认可的措辞)/ 段③ 催化。
+    // 段① 定位 + 硬数据 / 段② 前瞻窗口(对齐 FCN 期限,用户认可的措辞)/ 段③ 催化或护城河。
     // 不堆「显示经营兑现有具体支撑 / 主要看收入和订单节奏能否延续」这类换皮 so-what。
     const segments: string[] = [p.company_short_desc.replace(/[。.]$/, '')];
     if (facts.length > 0) segments.push(facts.join('、'));
-    if (holding) segments.push(holding);
     segments.push('未来 3-6 个月基本面相对稳健');
-    if (catalyst) segments.push(catalyst);
+    if (closing) segments.push(closing);
     return `${segments.join('，')}。`;
 }
 
