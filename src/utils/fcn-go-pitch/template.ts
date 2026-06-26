@@ -22,20 +22,22 @@ export function pickBridge(symbol: string): string {
     return BRIDGES[hash % BRIDGES.length];
 }
 
+// Deterministic fallback (LLM 不可用时). 原则:有真数据就干净陈述事实,
+// 没数据就短;不堆"显示经营兑现有具体支撑/有助于强化产业链位置"这类换皮废话,
+// 也不引用英文新闻标题(只用中文 tag 催化)。
 function buildTemplateWhySentence(p: PitchInputs, includeTags: boolean): string {
-    const hardData = buildSpecificSignals(p).slice(0, 1)[0];
+    const facts = buildSpecificSignals(p).slice(0, 2);
     const holding = includeTags ? buildTagSupplements(p).slice(0, 1)[0] : undefined;
-    const thesis = holding ?? '业务定位清晰';
     const catalyst = buildCatalystSignal(p);
-    if (!hardData && !catalyst) {
-        return `${p.company_short_desc}。${thesis}，未来 3-6 个月仍以公开财报和订单兑现节奏为主要观察点。`;
-    }
 
-    return [
-        `${p.company_short_desc}${hardData ? `，${hardData}，显示经营兑现有具体支撑。` : '。'}`,
-        `${thesis}，未来 3-6 个月主要看收入和订单节奏能否延续。`,
-        catalyst ? `${catalyst}，有助于强化产业链位置。` : ''
-    ].join('');
+    // 段① 定位 + 硬数据 / 段② 前瞻窗口(对齐 FCN 期限,用户认可的措辞)/ 段③ 催化。
+    // 不堆「显示经营兑现有具体支撑 / 主要看收入和订单节奏能否延续」这类换皮 so-what。
+    const segments: string[] = [p.company_short_desc.replace(/[。.]$/, '')];
+    if (facts.length > 0) segments.push(facts.join('、'));
+    if (holding) segments.push(holding);
+    segments.push('未来 3-6 个月基本面相对稳健');
+    if (catalyst) segments.push(catalyst);
+    return `${segments.join('，')}。`;
 }
 
 function buildSpecificSignals(p: PitchInputs): string[] {
@@ -78,18 +80,13 @@ function buildSpecificSignals(p: PitchInputs): string[] {
     return signals;
 }
 
+// 兜底只用中文 tag 催化;英文新闻标题留给 LLM 路径用流畅中文转述,不在确定性兜底里直引。
 function buildCatalystSignal(p: PitchInputs): string {
-    const headline = p.recent_news_titles?.find((title) => !isUnsafeTemplateHeadline(title));
-    if (headline) return `催化来自「${headline}」`;
-    if (p.lit_tags.holding.includes('index_inclusion')) return '近期指数纳入提升机构可见度';
+    if (p.lit_tags.holding.includes('index_inclusion')) return '近期纳入重要指数,机构可见度提升';
     if (p.lit_tags.holding.includes('guidance_reaffirmed_or_raised')) return '管理层指引维持或上调';
-    if (p.lit_tags.holding.includes('infrastructure_capacity_cycle')) return '数据中心基础设施扩容周期延续';
+    if (p.lit_tags.holding.includes('infrastructure_capacity_cycle')) return '数据中心扩容周期延续';
     if (p.lit_tags.holding.includes('backlog')) return '订单积压提供收入能见度';
     return '';
-}
-
-function isUnsafeTemplateHeadline(title: string): boolean {
-    return /\d+(?:\.\d+)?\s*%/.test(title) || /\b(buy|sell|hold)\b/i.test(title);
 }
 
 function buildTagSupplements(p: PitchInputs): string[] {
