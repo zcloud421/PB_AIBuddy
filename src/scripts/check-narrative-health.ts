@@ -29,6 +29,9 @@ interface NarrativeMetrics {
     persistent_template_tickers: Array<{
         symbol: string;
         days_in_template: number;
+        source_qualities: string;
+        grades: string;
+        missing_strike: boolean;
     }>;
     issues: string[];
 }
@@ -41,6 +44,9 @@ interface DistributionRow {
 interface PersistentTemplateRow {
     symbol: string;
     days_in_template: string;
+    source_qualities: string | null;
+    grades: string | null;
+    missing_strike: boolean | null;
 }
 
 function parseInteger(value: string | number | null | undefined): number {
@@ -62,6 +68,9 @@ function roundPct(value: number): number {
 async function computeNarrativeMetrics(): Promise<NarrativeMetrics> {
     await ensureSourceQualityColumn();
 
+    // 计数口径:只要引擎跑过(source_quality 非空)就算一条 narrative,包含
+    // 'blocked'(why_now 为空但确实生成了结果)。早先按 why_now<>'' 过滤会把 blocked
+    // 整类隐藏,导致 fallback rate 显示 0% 却同时 flag ticker —— 自相矛盾。
     const distRes = await pool.query<DistributionRow>(`
         SELECT
             COALESCE(ic.source_quality, 'unknown') AS sq,
@@ -70,15 +79,17 @@ async function computeNarrativeMetrics(): Promise<NarrativeMetrics> {
         JOIN idea_runs r ON r.run_id = ic.run_id
         WHERE ic.created_at >= NOW() - INTERVAL '7 days'
           AND r.triggered_by = 'scheduled'::trigger_source
-          AND ic.why_now IS NOT NULL
-          AND ic.why_now <> ''
+          AND ic.source_quality IS NOT NULL
         GROUP BY 1
     `);
 
     const persistentRes = await pool.query<PersistentTemplateRow>(`
         SELECT
             ic.symbol,
-            COUNT(DISTINCT DATE(ic.created_at))::text AS days_in_template
+            COUNT(DISTINCT DATE(ic.created_at))::text AS days_in_template,
+            string_agg(DISTINCT ic.source_quality, '/' ORDER BY ic.source_quality) AS source_qualities,
+            string_agg(DISTINCT COALESCE(ic.overall_grade::text, '?'), '/' ORDER BY COALESCE(ic.overall_grade::text, '?')) AS grades,
+            bool_or(ic.recommended_strike IS NULL OR ic.recommended_strike <= 0) AS missing_strike
         FROM idea_candidates ic
         JOIN idea_runs r ON r.run_id = ic.run_id
         WHERE ic.created_at >= NOW() - INTERVAL '7 days'
@@ -119,11 +130,16 @@ async function computeNarrativeMetrics(): Promise<NarrativeMetrics> {
     const total = Object.values(dist).reduce((sum, value) => sum + value, 0);
     const retryAttempts = dist.llm_retry_validated + dist.llm_failed_validation;
     const retrySuccessRate = retryAttempts > 0 ? (dist.llm_retry_validated / retryAttempts) * 100 : 0;
-    const fallbackTotal = dist.template_fallback + dist.llm_failed_validation + dist.blocked;
+    // fallback rate 只衡量引擎失败(template_fallback + llm_failed);blocked 是"无可卖
+    // 结构"的合理拒绝,单独列示,不计入失败率,避免 AVOID 多的日子误触 >20% 告警。
+    const fallbackTotal = dist.template_fallback + dist.llm_failed_validation;
     const fallbackRate = total > 0 ? (fallbackTotal / total) * 100 : 0;
     const persistentTemplateTickers = persistentRes.rows.map((row) => ({
         symbol: row.symbol,
-        days_in_template: parseInteger(row.days_in_template)
+        days_in_template: parseInteger(row.days_in_template),
+        source_qualities: row.source_qualities ?? 'unknown',
+        grades: row.grades ?? '?',
+        missing_strike: Boolean(row.missing_strike)
     }));
 
     const issues: string[] = [];
@@ -136,8 +152,13 @@ async function computeNarrativeMetrics(): Promise<NarrativeMetrics> {
     if (retryAttempts > 5 && retrySuccessRate < 50) {
         issues.push(`retry_success_rate=${retrySuccessRate.toFixed(1)}% < 50% — LLM 不可教`);
     }
-    if (persistentTemplateTickers.length > 0) {
-        issues.push(`${persistentTemplateTickers.length} ticker 持续走 template ≥3 天`);
+    // 只有 template_fallback / llm_failed 才升级为 issue(触发告警);blocked-only
+    // 多为 AVOID / 财报窗口无 strike 的预期行为,记录在正文但不刷告警。
+    const engineFailPersistent = persistentTemplateTickers.filter((t) =>
+        /template_fallback|llm_failed_validation/.test(t.source_qualities)
+    );
+    if (engineFailPersistent.length > 0) {
+        issues.push(`${engineFailPersistent.length} ticker 引擎失败持续走 template ≥3 天`);
     }
     if (total > 0 && dist.unknown / total > 0.5) {
         issues.push(`unknown_source_quality=${pct(dist.unknown, total)} — 等待 1-2 个 cron cycle 补齐持久化`);
@@ -156,7 +177,7 @@ async function computeNarrativeMetrics(): Promise<NarrativeMetrics> {
 function formatReport(metrics: NarrativeMetrics, forceReport: boolean): string | null {
     const dist = metrics.source_quality_distribution;
     const retryAttempts = dist.llm_retry_validated + dist.llm_failed_validation;
-    const fallbackTotal = dist.template_fallback + dist.llm_failed_validation + dist.blocked;
+    const fallbackTotal = dist.template_fallback + dist.llm_failed_validation;
 
     if (metrics.issues.length === 0 && !forceReport) {
         return null;
@@ -177,14 +198,29 @@ function formatReport(metrics: NarrativeMetrics, forceReport: boolean): string |
 
     const persistentLines = metrics.persistent_template_tickers.length === 0
         ? ['• None']
-        : metrics.persistent_template_tickers.map((item) => `• ${item.symbol}: ${item.days_in_template} days`);
+        : metrics.persistent_template_tickers.map((item) => {
+            const tags = [item.grades, item.source_qualities];
+            if (item.missing_strike) tags.push('无strike');
+            return `• ${item.symbol}: ${item.days_in_template} days (${tags.join(', ')})`;
+        });
 
-    const actionTickers = metrics.persistent_template_tickers
-        .slice(0, 5)
-        .map((item) => item.symbol)
-        .join(' / ');
-    const action = actionTickers
-        ? `Action: review LLM prompt or news pipeline for ${actionTickers}`
+    // 区分两类 root cause:blocked + 无strike 多为 AVOID/财报窗口的预期行为(无可卖 put);
+    // template_fallback / llm_failed 才是引擎或新闻管道真出问题,需要查 prompt/news。
+    const engineFailTickers = metrics.persistent_template_tickers
+        .filter((item) => /template_fallback|llm_failed_validation/.test(item.source_qualities))
+        .map((item) => item.symbol);
+    const blockedOnly = metrics.persistent_template_tickers
+        .filter((item) => item.source_qualities === 'blocked')
+        .map((item) => item.symbol);
+    const actionParts: string[] = [];
+    if (engineFailTickers.length > 0) {
+        actionParts.push(`查 prompt/news 管道:${engineFailTickers.slice(0, 5).join(' / ')}`);
+    }
+    if (blockedOnly.length > 0) {
+        actionParts.push(`${blockedOnly.slice(0, 5).join(' / ')} 为 blocked(无 strike/价格,多见于 AVOID 或财报窗口),通常为预期`);
+    }
+    const action = actionParts.length > 0
+        ? `Action: ${actionParts.join(';')}`
         : 'Action: review narrative validator logs and source_quality persistence.';
 
     return [
