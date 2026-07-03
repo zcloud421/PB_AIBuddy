@@ -26,7 +26,8 @@ export function pickBridge(symbol: string): string {
 // 没数据就短;不堆"显示经营兑现有具体支撑/有助于强化产业链位置"这类换皮废话,
 // 也不引用英文新闻标题(只用中文 tag 催化)。
 function buildTemplateWhySentence(p: PitchInputs, includeTags: boolean): string {
-    const facts = buildSpecificSignals(p).slice(0, 2);
+    // 3 个事实位:财务数据(收入/分部,unshift 到最前)优先占位,价格位置殿后。
+    const facts = buildSpecificSignals(p).slice(0, 3);
     // 段③ 催化与 holding 补充取材自重叠的 tag 集,只取其一,避免「近期指引维持」+「管理层指引维持」这类重复。
     const closing = buildCatalystSignal(p) || (includeTags ? buildTagSupplements(p).slice(0, 1)[0] : undefined);
 

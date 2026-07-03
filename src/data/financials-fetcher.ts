@@ -51,9 +51,14 @@ export async function fetchSymbolFinancials(symbol: string): Promise<SymbolFinan
     const mem = memoryCache.get(normalized);
     if (mem && mem.expires > Date.now()) return mem.data;
 
+    // null payload = 上次抓取失败(限流/空响应),只按 1h 短 TTL 生效,避免把失败
+    // 毒化成 7 天没有财务数据的 pitch。
     const cached = await readCachedFinancials(normalized);
-    if (cached && isCacheFresh(cached.fetched_at)) {
-        memoryCache.set(normalized, { data: cached.payload, expires: Date.now() + CACHE_TTL_MS });
+    if (cached && isCacheFresh(cached.fetched_at, new Date(), cached.payload ? CACHE_TTL_MS : FAILED_CACHE_TTL_MS)) {
+        memoryCache.set(normalized, {
+            data: cached.payload,
+            expires: Date.now() + (cached.payload ? CACHE_TTL_MS : FAILED_CACHE_TTL_MS)
+        });
         return cached.payload;
     }
 
@@ -76,8 +81,15 @@ export async function fetchSymbolFinancials(symbol: string): Promise<SymbolFinan
         ]);
 
         const financials = buildFinancialsFromFmp(normalized, incomeRows ?? [], segmentRows ?? [], metricRows ?? []);
-        await writeCachedFinancials(normalized, financials);
-        memoryCache.set(normalized, { data: financials, expires: Date.now() + CACHE_TTL_MS });
+        // 只把成功结果写进 7 天 DB 缓存;builder 返回 null(限流返回非数组等)按失败处理,
+        // 1h 后重试,不让 null 占住 7 天。
+        if (financials) {
+            await writeCachedFinancials(normalized, financials);
+            memoryCache.set(normalized, { data: financials, expires: Date.now() + CACHE_TTL_MS });
+        } else {
+            await writeCachedFinancials(normalized, null);
+            memoryCache.set(normalized, { data: null, expires: Date.now() + FAILED_CACHE_TTL_MS });
+        }
         return financials;
     } catch (error) {
         warnOnce(normalized, error instanceof Error ? error.message : String(error));

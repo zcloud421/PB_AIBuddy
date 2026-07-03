@@ -32,7 +32,24 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
         return wrapResult(text, 'go_pitch_minimal');
     }
 
-    if (!hasMinimumTagsForPitch(pitchInputs.lit_tags)) {
+    // GO 名单是要直接发给 UHNW 客户的:只要有 ≥1 个 holding tag,且 timing tag 或真实
+    // 财务数据(收入/分部)二者有其一,就走 LLM 写完整 3 段 thesis。timing tag 短期熄灭
+    // (如单周回调)不应把 GO pitch 降级成一句话。holding tag 全无才降级(validator
+    // 要求 used_tags 至少 1 个 holding tag,没有则 LLM 必失败)。
+    const hasSubstantiveFinancials =
+        typeof pitchInputs.revenue_yoy_pct === 'number' || pitchInputs.top_segment != null;
+    const canAttemptLLM =
+        hasMinimumTagsForPitch(pitchInputs.lit_tags) ||
+        (pitchInputs.lit_tags.holding.length >= 1 && hasSubstantiveFinancials);
+    if (!canAttemptLLM) {
+        console.log(JSON.stringify({
+            tag: 'go_pitch_minimal_no_tags',
+            symbol: input.symbol,
+            lit_holding: pitchInputs.lit_tags.holding,
+            lit_timing: pitchInputs.lit_tags.timing,
+            has_financials: hasSubstantiveFinancials,
+            ts: new Date().toISOString()
+        }));
         const text = finalizeTemplateText(input.symbol, buildMinimalPitch(pitchInputs), pitchInputs, 'go_pitch_minimal');
         logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
         return wrapResult(text, 'go_pitch_minimal');

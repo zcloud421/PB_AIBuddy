@@ -213,7 +213,12 @@ function validateTimingSignal(output: PitchLLMOutput, litTags: LitTags, pitchInp
     const hasPriceDataSignal = PRICE_DATA_SIGNAL_PATTERNS.some((pattern) => pattern.test(timingSignal));
     const hasNewsSignal = hasNewsTimingSignal(output, pitchInputs);
     const hasLitTimingPhrase = hasTimingTagPhrase(timingSignal, litTags);
-    if (!hasPriceDataSignal && !hasNewsSignal && !hasLitTimingPhrase) {
+    // timing tag 未点亮但有真实财务数据时,财报/收入锚定的窗口(如「财报后收入兑现窗口」)
+    // 也是有效 timing 来源 —— 否则无 timing tag 的 GO 名字永远过不了校验,只能落一句话兜底。
+    const hasFinancialsSignal =
+        (typeof pitchInputs.revenue_yoy_pct === 'number' || pitchInputs.top_segment != null) &&
+        /财报|收入|财季|季度|窗口/.test(timingSignal);
+    if (!hasPriceDataSignal && !hasNewsSignal && !hasLitTimingPhrase && !hasFinancialsSignal) {
         reasons.push(`timing_signal 未匹配有效来源: ${timingSignal}`);
     }
 
