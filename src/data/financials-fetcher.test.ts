@@ -88,4 +88,16 @@ assert.equal(isCacheFresh(new Date('2026-06-18T00:00:00Z'), new Date('2026-06-26
 
 assert.equal(buildFinancialsFromFmp('BAD', [{ date: '2026-03-31', period: 'Q1', calendarYear: 2026 }], []), null);
 
+// 元数据键(fiscalYear 等)不得被当成分部;真实分部照常胜出。
+const metadataSegment = extractTopSegmentGrowth([
+    { date: '2026-12-31', period: 'FY', fiscalYear: 2026, 'Data Center': 122, Client: 80 },
+    { date: '2025-12-31', period: 'FY', fiscalYear: 2025, 'Data Center': 100, Client: 90 }
+]);
+assert.deepEqual(metadataSegment, { name: 'Data Center', yoy_pct: 22 });
+const onlyMetadata = extractTopSegmentGrowth([
+    { date: '2026-12-31', period: 'FY', fiscalYear: 2026 },
+    { date: '2025-12-31', period: 'FY', fiscalYear: 2025 }
+]);
+assert.equal(onlyMetadata, undefined);
+
 console.log('financials-fetcher tests passed');

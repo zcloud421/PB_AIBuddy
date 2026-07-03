@@ -42,6 +42,12 @@ export async function ensureSymbolFinancialsCacheTable(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_symbol_financials_cache_fetched_at
         ON symbol_financials_cache (fetched_at DESC)
     `);
+    // 自愈:清掉 segment 解析 bug 期间写入的污染缓存(元数据键被当成分部名,
+    // 如「fiscalYear 收入同比 +0.0%」),让下次读取走新 parser 重新抓取。
+    await pool.query(`
+        DELETE FROM symbol_financials_cache
+        WHERE payload->'top_segment'->>'name' ~* '^(fiscal|calendar)\\s*year$|^(date|period|symbol|cik)$'
+    `);
 }
 
 export async function fetchSymbolFinancials(symbol: string): Promise<SymbolFinancials | null> {
@@ -269,7 +275,8 @@ function normalizeSegmentRow(row: unknown): SegmentRow | null {
             : record;
     const segments: Record<string, number> = {};
     for (const [key, value] of Object.entries(source)) {
-        if (['date', 'symbol', 'period', 'calendarYear', 'reportedCurrency', 'cik', 'fillingDate', 'acceptedDate'].includes(key)) {
+        // 元数据键一律排除(fiscalYear=2025 曾被当成分部,算出「fiscalYear 收入同比 +0.0%」)。
+        if (/^(date|symbol|period|calendarYear|fiscalYear|reportedCurrency|cik|fil?lingDate|acceptedDate|link|finalLink)$/i.test(key)) {
             continue;
         }
         const n = toNumber(value);

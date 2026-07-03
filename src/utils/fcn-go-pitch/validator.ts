@@ -398,7 +398,8 @@ function buildAllowedFacts(pitchInputs: PitchInputs): AllowedFact[] {
         facts.push({
             value: Math.abs(pitchInputs.change_5d_pct),
             kind: 'change_5d',
-            contextKeywords: ['近', '5', '日', '5日']
+            // LLM 常把「近 5 日 -9.4%」转述成「短期回调 9.4%」,回调/跌/涨也是合法上下文。
+            contextKeywords: ['近', '5', '日', '5日', '回调', '跌', '涨', '短期']
         });
     }
     if (pitchInputs.earnings_surprise) {

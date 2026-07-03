@@ -1,6 +1,6 @@
 import type { NarrativeSourceQuality } from '../narrative-generator';
 
-export const PITCH_ENGINE_VERSION = '2026-07-03-whyfcn-v4';
+export const PITCH_ENGINE_VERSION = '2026-07-03-whyfcn-v5';
 
 const CURRENT_PITCH_SOURCE_QUALITIES = new Set<NarrativeSourceQuality>([
     'go_pitch_hybrid_validated',
