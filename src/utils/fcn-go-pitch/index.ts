@@ -167,7 +167,8 @@ async function buildPitchInputsFromNarrativeInput(input: NarrativeInput): Promis
         revenue_yoy_pct: financials?.revenue_yoy_pct ?? null,
         gross_margin_pct: financials?.gross_margin_pct ?? null,
         gross_margin_yoy_pp: financials?.gross_margin_yoy_pp ?? null,
-        top_segment: financials?.top_segment ?? undefined
+        top_segment: financials?.top_segment ?? undefined,
+        high_iv: isHighIVString(input.iv_level)
     };
 }
 

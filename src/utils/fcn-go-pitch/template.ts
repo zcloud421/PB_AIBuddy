@@ -22,22 +22,39 @@ export function pickBridge(symbol: string): string {
     return BRIDGES[hash % BRIDGES.length];
 }
 
-// Deterministic fallback (LLM 不可用时). 原则:有真数据就干净陈述事实,
-// 没数据就短;不堆"显示经营兑现有具体支撑/有助于强化产业链位置"这类换皮废话,
-// 也不引用英文新闻标题(只用中文 tag 催化)。
+// Deterministic fallback (LLM 不可用时). 与 LLM 同一框架:三句 = Who / Why now / Why FCN。
+// 原则:有真数据就干净陈述事实,没数据就短;不堆换皮废话,不引英文新闻标题(只用中文 tag 催化)。
 function buildTemplateWhySentence(p: PitchInputs, includeTags: boolean): string {
-    // 3 个事实位:财务数据(收入/分部,unshift 到最前)优先占位,价格位置殿后。
-    const facts = buildSpecificSignals(p).slice(0, 3);
-    // 段③ 催化与 holding 补充取材自重叠的 tag 集,只取其一,避免「近期指引维持」+「管理层指引维持」这类重复。
-    const closing = buildCatalystSignal(p) || (includeTags ? buildTagSupplements(p).slice(0, 1)[0] : undefined);
+    // 第1句 Who are they?
+    const identity = `${p.company_short_desc.replace(/[。.]$/, '')}。`;
 
-    // 段① 定位 + 硬数据 / 段② 前瞻窗口(对齐 FCN 期限,用户认可的措辞)/ 段③ 催化或护城河。
-    // 不堆「显示经营兑现有具体支撑 / 主要看收入和订单节奏能否延续」这类换皮 so-what。
-    const segments: string[] = [p.company_short_desc.replace(/[。.]$/, '')];
-    if (facts.length > 0) segments.push(facts.join('、'));
-    segments.push('未来 3-6 个月基本面相对稳健');
-    if (closing) segments.push(closing);
-    return `${segments.join('，')}。`;
+    // 第2句 Why now? 最强 1-2 个事实(财务数据 unshift 在最前)+ setup(催化或 tag 补充,二取一去重)。
+    const facts = buildSpecificSignals(p).slice(0, 2);
+    const setup = buildCatalystSignal(p) || (includeTags ? buildTagSupplements(p).slice(0, 1)[0] : undefined);
+    const whyNowParts = [...(facts.length > 0 ? [facts.join('、')] : []), ...(setup ? [setup] : [])];
+    const whyNow = whyNowParts.length > 0
+        ? `${whyNowParts.join('，')}，未来 3-6 个月基本面相对稳健。`
+        : '未来 3-6 个月基本面相对稳健。';
+
+    // 第3句 Why FCN? 定性,按当前状态择一,不出现任何条款数字。
+    const whyFcn = `${buildWhyFcnSignal(p)}。`;
+
+    return `${identity}${whyNow}${whyFcn}`;
+}
+
+function buildWhyFcnSignal(p: PitchInputs): string {
+    const pulledBack = typeof p.pct_from_52w_high === 'number' && p.pct_from_52w_high <= -8;
+    const hasFinancials = typeof p.revenue_yoy_pct === 'number' || p.top_segment != null;
+    if (p.high_iv && hasFinancials) {
+        return `基本面兑现叠加短期波动提升票息水平，使 ${p.symbol} 成为当前较具吸引力的 FCN 挂钩标的`;
+    }
+    if (p.high_iv) {
+        return `短期波动提升票息水平，${p.symbol} 适合作为当前的 FCN 挂钩标的`;
+    }
+    if (pulledBack) {
+        return `回调后承接价位更优，使 ${p.symbol} 成为当前较具吸引力的 FCN 挂钩标的`;
+    }
+    return `基本面稳健、敲入风险相对可控，${p.symbol} 适合作为 FCN 挂钩标的`;
 }
 
 function buildSpecificSignals(p: PitchInputs): string[] {

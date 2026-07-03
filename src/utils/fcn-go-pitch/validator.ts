@@ -7,17 +7,16 @@ export interface PitchValidationResult {
     reasons: string[];
 }
 
+// 第3句 Why-FCN 允许定性语汇(票息/敲入风险低/FCN 挂钩标的),但仍然禁止:
+// 条款复述(执行价/期限/若跌破/接货)、销售施压话术、风险提示语。
 const FORBIDDEN_PHRASES = [
-    '敲入',
     '接货',
     '安全垫',
     '摊薄',
     '执行价',
-    '票息',
     '期限',
     '若跌破',
     'sell put',
-    'FCN',
     'assignment',
     '正是好时机',
     '不过是',
@@ -25,6 +24,15 @@ const FORBIDDEN_PHRASES = [
     '非保本',
     '信用风险',
     '流动性风险'
+];
+
+// 定性提 FCN 可以,但条款数字(票息 %、承接价 $、敲入价)绝不能出现 —— 卡片已列条款。
+const TERM_NUMBER_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+    { pattern: /票息[^。！？]{0,10}\d/, label: '票息+数字' },
+    { pattern: /\d+(?:\.\d+)?\s*%[^。！？]{0,6}票息/, label: '数字+票息' },
+    { pattern: /以\s*\$?\s*\d+(?:\.\d+)?[^。！？]{0,10}(?:承接|买入|持有)/, label: '承接价数字' },
+    { pattern: /敲入价/, label: '敲入价' },
+    { pattern: /敲入[^。！？]{0,8}\$?\d/, label: '敲入+数字' }
 ];
 
 const GENERIC_CLAIMS = ['基本面强劲', '技术面强势', '长期向好', '市场关注度提升', '事实锚', '可持有属性', '依赖基本面兑现'];
@@ -104,6 +112,9 @@ export function validatePitch(
     for (const phrase of FORBIDDEN_PHRASES) {
         if (textForForbiddenScan.includes(phrase)) reasons.push(`含禁词: ${phrase}`);
     }
+    for (const { pattern, label } of TERM_NUMBER_PATTERNS) {
+        if (pattern.test(textForForbiddenScan)) reasons.push(`含条款数字: ${label}`);
+    }
     for (const phrase of GENERIC_CLAIMS) {
         if (commReference.includes(phrase)) reasons.push(`空话表达: ${phrase}`);
     }
@@ -162,6 +173,9 @@ export function validateGeneratedPitchText(text: string, pitchInputs: PitchInput
 
     for (const phrase of FORBIDDEN_PHRASES) {
         if (text.includes(phrase)) reasons.push(`含禁词: ${phrase}`);
+    }
+    for (const { pattern, label } of TERM_NUMBER_PATTERNS) {
+        if (pattern.test(text)) reasons.push(`含条款数字: ${label}`);
     }
 
     for (const num of extractNumbers(text)) {
@@ -290,6 +304,11 @@ function extractNumbers(text: string): ExtractedNumber[] {
         const prev = match.index > 0 ? text[match.index - 1] : '';
         const next = text[match.index + match[0].length] ?? '';
         if (match[0].length <= 2 && (/[A-Za-z]/.test(prev) || /[A-Za-z]/.test(next))) continue;
+        // 英文产品/指数名里的数字(Office 365 / H100 / S&P 500 / Windows 11):紧跟英文
+        // 单词(可隔一个空格)的数字不是财务声明,跳过。授权事实全部用中文标注,不受影响。
+        // 带 % / $ 的仍然是财务声明(如 Azure 30%),不豁免。
+        const beforeSpace = prev === ' ' ? text[match.index - 2] ?? '' : '';
+        if ((/[A-Za-z&]/.test(prev) || /[A-Za-z&]/.test(beforeSpace)) && next !== '%' && prev !== '$') continue;
         numbers.push({
             value: Number(match[0]),
             raw: match[0],
@@ -357,36 +376,13 @@ function matchesFactContext(fact: AllowedFact, context: string): boolean {
 }
 
 function buildAllowedFacts(pitchInputs: PitchInputs): AllowedFact[] {
+    // 条款数字(strike/coupon/tenor/discount)不再是授权事实 —— comm_reference 是纯
+    // 标的 thesis + 定性 FCN 适配,条款由卡片展示;LLM 引用条款数字会直接校验失败。
     const facts: AllowedFact[] = [
         {
             value: pitchInputs.current_price,
             kind: 'price',
-            contextKeywords: ['$', '现价', '当前价', '承接', '执行']
-        },
-        {
-            value: pitchInputs.recommended_strike,
-            kind: 'price',
-            contextKeywords: ['$', '执行', '现价', '承接']
-        },
-        {
-            value: pitchInputs.discount_pct,
-            kind: 'discount',
-            contextKeywords: ['低', '折让', '较']
-        },
-        {
-            value: pitchInputs.coupon_low,
-            kind: 'coupon',
-            contextKeywords: ['票息', '年化']
-        },
-        {
-            value: pitchInputs.coupon_high,
-            kind: 'coupon',
-            contextKeywords: ['票息', '年化']
-        },
-        {
-            value: Number(pitchInputs.tenor_label.match(/\d+/)?.[0] ?? '3'),
-            kind: 'tenor',
-            contextKeywords: ['个月', '期限']
+            contextKeywords: ['$', '现价', '当前价']
         }
     ];
 

@@ -48,7 +48,11 @@ assert.equal(validate({ timing_signal: '趋势稳健', used_tags: ['super_cycle'
 assert.ok(validate({ timing_signal: '近期' }).reasons.some((reason) => reason.includes('空泛')));
 assert.ok(validate({ comm_reference: '太短', timing_signal: '回调' }).reasons.some((reason) => reason.includes('comm_reference 字数')));
 assert.ok(validate({ comm_reference: `${output().comm_reference}${'补充说明'.repeat(30)}` }).reasons.some((reason) => reason.includes('comm_reference 字数')));
-assert.ok(validate({ comm_reference: `${output().comm_reference} 敲入。` }).reasons.some((reason) => reason.includes('禁词')));
+// 新政策:定性 Why-FCN 语汇(敲入风险低/票息水平/FCN 挂钩标的)放行;条款复述与条款数字仍禁。
+assert.equal(validate({ comm_reference: `${output().comm_reference}基本面稳健、敲入风险相对可控,适合作为 FCN 挂钩标的。` }).passed, true);
+assert.ok(validate({ comm_reference: `${output().comm_reference} 若跌破执行价。` }).reasons.some((reason) => reason.includes('禁词')));
+assert.ok(validate({ comm_reference: `${output().comm_reference} 敲入价 $85。` }).reasons.some((reason) => reason.includes('条款数字')));
+assert.ok(validate({ comm_reference: `${output().comm_reference} 年化票息 14%。` }).reasons.some((reason) => reason.includes('条款数字')));
 assert.ok(validate({ comm_reference: `${output().comm_reference} 目标价 800。` }).reasons.some((reason) => reason.includes('未授权数字')));
 assert.ok(validate({ comm_reference: `${output().comm_reference} 基本面强劲。` }).reasons.some((reason) => reason.includes('空话表达')));
 assert.equal(
