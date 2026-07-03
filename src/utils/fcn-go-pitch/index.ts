@@ -58,8 +58,15 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
     const useLLM = process.env.ENABLE_GO_LLM_PITCH !== 'false';
     if (useLLM) {
         try {
-            const llmOutput = await callDeepSeekForPitch(buildPitchPrompt(pitchInputs));
-            if (llmOutput) {
+            const basePrompt = buildPitchPrompt(pitchInputs);
+            let retryHint: string | null = null;
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                const prompt = retryHint
+                    ? `${basePrompt}\n\n上一次输出被校验拒绝,原因:${retryHint}。请修正后重写(尤其:数字必须逐字来自可用数字事实,不得自行推算)。`
+                    : basePrompt;
+                const llmOutput = await callDeepSeekForPitch(prompt);
+                if (!llmOutput) break;
+
                 const bridge = pickBridge(input.symbol);
                 const finalPitch = buildHybridPitch(llmOutput.comm_reference, pitchInputs, bridge);
                 const validation = validatePitch(llmOutput, pitchInputs.lit_tags, pitchInputs, finalPitch);
@@ -72,6 +79,7 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
                     JSON.stringify({
                         tag: 'go_pitch_validation_failed',
                         symbol: input.symbol,
+                        attempt,
                         reasons: validation.reasons,
                         ts: new Date().toISOString()
                     })
@@ -80,6 +88,7 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
                     JSON.stringify({
                         tag: 'go_pitch_validation_debug',
                         symbol: input.symbol,
+                        attempt,
                         reasons: validation.reasons,
                         llm_text_length: llmOutput.comm_reference.length,
                         llm_text_preview: llmOutput.comm_reference.slice(0, 80),
@@ -90,6 +99,7 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
                         ts: new Date().toISOString()
                     })
                 );
+                retryHint = validation.reasons.join('; ');
             }
         } catch (error) {
             console.warn('[go_pitch] llm error', error);
