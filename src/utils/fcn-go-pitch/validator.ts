@@ -370,7 +370,13 @@ function matchesFactContext(fact: AllowedFact, context: string): boolean {
         case 'eps_surprise':
             return /(EPS|财报|业绩)/i.test(context) && /超预期|beat/i.test(context);
         case 'change_5d':
-            return context.includes('5日') || (context.includes('5') && (context.includes('近') || context.includes('日')));
+            // LLM 常把「近 5 日 -9.4%」转述成「短期回调 9.4%」;值已按 ±0.6 匹配过,
+            // 回调/涨跌类措辞同样是合法上下文。
+            return (
+                context.includes('5日') ||
+                (context.includes('5') && (context.includes('近') || context.includes('日'))) ||
+                /回调|下跌|上涨|跌|涨|短期/.test(context)
+            );
         default:
             return fact.contextKeywords.some((keyword) => context.includes(keyword));
     }
