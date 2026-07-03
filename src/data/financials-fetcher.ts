@@ -74,10 +74,17 @@ export async function fetchSymbolFinancials(symbol: string): Promise<SymbolFinan
         // on this tier (period=quarter → 402), so we fetch annual FY segments and
         // match year-over-year. key-metrics quarterly is a premium endpoint (402)
         // → fail-softs to []; operating margin falls back to income statement.
+        // 每个 endpoint 各自 fail-soft:segmentation / key-metrics 在部分 plan 上 402,
+        // 不能因为一个 402 把 income-statement 的好数据也丢掉(Promise.all 会整体 reject)。
+        const failSoft = <T,>(promise: Promise<T | null>, label: string): Promise<T | null> =>
+            promise.catch((error) => {
+                warnOnce(`${normalized}:${label}`, error instanceof Error ? error.message : String(error));
+                return null;
+            });
         const [incomeRows, segmentRows, metricRows] = await Promise.all([
-            fetchFmpJson<IncomeStatementRow[]>('/income-statement', { symbol: normalized, period: 'quarter', limit: '5' }, apiKey),
-            fetchFmpJson<unknown[]>('/revenue-product-segmentation', { symbol: normalized, limit: '5' }, apiKey),
-            fetchFmpJson<unknown[]>('/key-metrics', { symbol: normalized, period: 'quarter', limit: '5' }, apiKey)
+            failSoft(fetchFmpJson<IncomeStatementRow[]>('/income-statement', { symbol: normalized, period: 'quarter', limit: '5' }, apiKey), 'income'),
+            failSoft(fetchFmpJson<unknown[]>('/revenue-product-segmentation', { symbol: normalized, limit: '5' }, apiKey), 'segmentation'),
+            failSoft(fetchFmpJson<unknown[]>('/key-metrics', { symbol: normalized, period: 'quarter', limit: '5' }, apiKey), 'key-metrics')
         ]);
 
         const financials = buildFinancialsFromFmp(normalized, incomeRows ?? [], segmentRows ?? [], metricRows ?? []);

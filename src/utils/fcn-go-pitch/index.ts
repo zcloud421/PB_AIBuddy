@@ -38,9 +38,9 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
     // 要求 used_tags 至少 1 个 holding tag,没有则 LLM 必失败)。
     const hasSubstantiveFinancials =
         typeof pitchInputs.revenue_yoy_pct === 'number' || pitchInputs.top_segment != null;
-    const canAttemptLLM =
-        hasMinimumTagsForPitch(pitchInputs.lit_tags) ||
-        (pitchInputs.lit_tags.holding.length >= 1 && hasSubstantiveFinancials);
+    // 有真实收入/分部数据时,即使 holding tag 全灭也放行 LLM(validator 对 holding tag
+    // 的要求同步做了条件化);tags 和财务数据都没有才落一句话兜底。
+    const canAttemptLLM = hasMinimumTagsForPitch(pitchInputs.lit_tags) || hasSubstantiveFinancials;
     if (!canAttemptLLM) {
         console.log(JSON.stringify({
             tag: 'go_pitch_minimal_no_tags',

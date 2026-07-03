@@ -104,7 +104,7 @@ ${financialFacts.length > 0 ? financialFacts.map((fact) => `- ${fact}`).join('\n
 6. 第3句只做定性,严禁一切条款数字与条款复述:禁止 执行价 / 具体票息% / 期限N个月 / 若跌破 / sell put / 接货 / 安全垫 / 摊薄 / 敲入价;「票息」「敲入风险」「FCN 挂钩标的」这类定性词只允许出现在第3句。
 7. 数字必须来自可用数字事实;禁止补充背景知识里的数字。未提供 earnings_surprise 时严禁使用「超预期 / beat / 上调 / 强劲」等财报宣传词。
 8. 催化只能引用上方新闻标题中的事件,优先选择投资/并购/政策/产品/指引等实质催化;没有就不写。新闻标题多为英文,必须用流畅中文转述事件(如「NVIDIA invests in Intel foundry partnership」→「英伟达战略投资其代工业务」);严禁直引英文标题、严禁中英夹杂、严禁出现「催化来自「…」」这类原文照搬句式。
-9. used_tags 必须只包含已点亮 tags,且至少 1 个 holding tag;timing_signal 必填,不能只是「近期/最近/当前/市场关注/情绪改善」。
+9. used_tags 必须只包含已点亮 tags;holding tags 非空时 used_tags 至少含 1 个 holding tag,holding tags 为「(无)」时 used_tags 可为空数组、以财务数据为主线。timing_signal 必填,不能只是「近期/最近/当前/市场关注/情绪改善」。
 10. 禁止相对时间词:「本周 / 上周」;用 period 或「财报后 N 天」。
 
 正例(三句 = Who / Why now / Why FCN):

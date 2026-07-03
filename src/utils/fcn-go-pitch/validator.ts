@@ -80,7 +80,8 @@ export function validatePitch(
     for (const tag of output.used_tags) {
         if (!allLitTags.includes(tag as HoldingTag)) reasons.push(`未点亮 tag: ${tag}`);
     }
-    if (!output.used_tags.some((tag) => litTags.holding.includes(tag as HoldingTag))) {
+    // holding tag 一个都没点亮时(如财务数据驱动的 pitch),不强求 used_tags 含 holding tag。
+    if (litTags.holding.length > 0 && !output.used_tags.some((tag) => litTags.holding.includes(tag as HoldingTag))) {
         reasons.push('未使用任何 holding tag');
     }
     const hasEarningsBeatTag = litTags.holding.includes('earnings_strong_beat') || litTags.holding.includes('earnings_modest_beat');
