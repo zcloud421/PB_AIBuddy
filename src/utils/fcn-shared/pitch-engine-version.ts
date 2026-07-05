@@ -63,5 +63,11 @@ export function getPitchNarrativeStaleReason(input: {
     if (!hasCompanyIntroPrepend(input.why_now)) {
         return `missing_company_intro:${PITCH_ENGINE_VERSION}`;
     }
+    // GO 的降级产物(minimal/template)多因生成时财务/价格数据临时缺失(如 FMP 配额、
+    // 限流)。视为 stale,下次读取/screener 时重试,直到升级成 hybrid_validated,
+    // 避免空壳 pitch 被缓存后永久停留。
+    if (input.source_quality === 'go_pitch_minimal' || input.source_quality === 'go_pitch_template') {
+        return `degraded_pitch_retry:${input.source_quality}`;
+    }
     return null;
 }
