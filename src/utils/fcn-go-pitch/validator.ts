@@ -305,6 +305,10 @@ function extractNumbers(text: string): ExtractedNumber[] {
         const prev = match.index > 0 ? text[match.index - 1] : '';
         const next = text[match.index + match[0].length] ?? '';
         if (match[0].length <= 2 && (/[A-Za-z]/.test(prev) || /[A-Za-z]/.test(next))) continue;
+        // 连字符粘连的产品/靶点名(GLP-1 / MI-300 / A-100):数字前是「字母+连字符」
+        // 时属于标识符,不是财务声明。
+        const prevPrev = match.index > 1 ? text[match.index - 2] : '';
+        if ((prev === '-' || prev === '–') && /[A-Za-z]/.test(prevPrev)) continue;
         // 英文产品/指数名里的数字(Office 365 / H100 / S&P 500 / Windows 11):紧跟英文
         // 单词(可隔一个空格)的数字不是财务声明,跳过。授权事实全部用中文标注,不受影响。
         // 带 % / $ 的仍然是财务声明(如 Azure 30%),不豁免。

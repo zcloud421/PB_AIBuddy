@@ -184,4 +184,17 @@ assert.equal(
 const tooLongFinal = `${buildHybridPitch(output().comm_reference, pitchInputs)}${'补充说明。'.repeat(40)}`;
 assert.ok(validatePitch(output(), pitchInputs.lit_tags, pitchInputs, tooLongFinal).reasons.some((reason) => reason.includes('80-220')));
 
+// 连字符标识符里的数字(GLP-1)不是财务声明,不得触发「未授权数字」(LLY 曾被公司
+// 描述里的 GLP-1 反复误杀,连兜底模板都被降级成空壳)。
+const glpOutput: PitchLLMOutput = {
+    ...financialOutput,
+    comm_reference:
+        'Eli Lilly 是全球 GLP-1 与创新药龙头,Q1 2026 收入同比 +7.0%、Data Center and AI 收入同比 +22.0%,显示盈利兑现节奏清晰。订单积压提供未来 3-6 个月收入能见度,经营节奏相对稳健。产品管线催化强化其创新药核心资产定位。'
+};
+const glpResult = validatePitch(glpOutput, financialInputs.lit_tags, financialInputs, buildHybridPitch(glpOutput.comm_reference, financialInputs));
+assert.ok(
+    !glpResult.reasons.some((reason) => reason.includes('未授权数字')),
+    `GLP-1 误判: ${glpResult.reasons.join(';')}`
+);
+
 console.log('fcn-go-pitch validator tests passed');
