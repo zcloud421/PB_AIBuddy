@@ -233,7 +233,10 @@ function validateTimingSignal(output: PitchLLMOutput, litTags: LitTags, pitchInp
     const hasFinancialsSignal =
         (typeof pitchInputs.revenue_yoy_pct === 'number' || pitchInputs.top_segment != null) &&
         /财报|收入|财季|季度|窗口/.test(timingSignal);
-    if (!hasPriceDataSignal && !hasNewsSignal && !hasLitTimingPhrase && !hasFinancialsSignal) {
+    // earnings_surprise 真实存在时,「财报后 EPS 超预期」也是合法时点锚(LLY 场景)。
+    const hasEarningsSignal =
+        Boolean(pitchInputs.earnings_surprise) && /财报|EPS|超预期/i.test(timingSignal);
+    if (!hasPriceDataSignal && !hasNewsSignal && !hasLitTimingPhrase && !hasFinancialsSignal && !hasEarningsSignal) {
         reasons.push(`timing_signal 未匹配有效来源: ${timingSignal}`);
     }
 
@@ -264,7 +267,7 @@ function hasTimingTagPhrase(timingSignal: string, litTags: LitTags): boolean {
         if (/回调|承接水平|距高|距\s*52\s*周高点/.test(timingSignal)) return true;
     }
     if (litTags.timing.includes('momentum_intact')) {
-        if (/趋势|动量|均线|高位稳住/.test(timingSignal)) return true;
+        if (/趋势|动量|均线|高位/.test(timingSignal)) return true;
     }
     return false;
 }
