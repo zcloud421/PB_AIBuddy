@@ -384,7 +384,9 @@ function buildMechanismViews(
             ],
             next_trigger: statuses.credit === 'confirmed'
                 ? null
-                : 'CCC 持续领先 HY 且第二信号相互印证（VIX 交叉 / 背离 / HYG/IEF 走弱）→ 升级为风险累积'
+                : statuses.credit === 'forming'
+                    ? 'HY 利差走阔加速且多信号共振 → 升级为确认'
+                    : 'CCC 持续领先 HY 且第二信号相互印证（VIX 交叉 / 背离 / HYG/IEF 走弱）→ 升级为风险累积'
         },
         rates: {
             status: statuses.rates,
@@ -403,7 +405,9 @@ function buildMechanismViews(
             ],
             next_trigger: statuses.rates === 'confirmed'
                 ? null
-                : '升至 +40bp，或 +25bp 且 QQQ 回撤 ≥3% → 升级为风险累积'
+                : statuses.rates === 'forming'
+                    ? '8周 ≥ +50bp 且权益承压（QQQ 回撤 ≥5% 或跌破 MA50）→ 升级为确认'
+                    : '升至 +40bp，或 +25bp 且 QQQ 回撤 ≥3% → 升级为风险累积'
         },
         fundamental: {
             status: statuses.fundamental,
@@ -414,7 +418,9 @@ function buildMechanismViews(
             ],
             next_trigger: statuses.fundamental === 'confirmed'
                 ? null
-                : 'capex 指引下调或营收-capex 背离扩大 → 升级为风险累积'
+                : statuses.fundamental === 'forming'
+                    ? '背离持续扩大且 capex 指引确认下调 → 升级为确认'
+                    : 'capex 指引下调或营收-capex 背离扩大 → 升级为风险累积'
         }
     };
 }
@@ -436,12 +442,18 @@ function buildNearestWatch(mechanisms: RegimeVerdict['mechanisms']): string | nu
     if (selected.key === 'rates') {
         const delta = mechanisms.rates.evidence.find((item) => item.label === '实际利率8周')?.value ?? '—';
         const qqq = mechanisms.rates.evidence.find((item) => item.label === 'QQQ距高')?.value ?? '—';
-        return `实际利率 8周 ${delta}，QQQ 距高 ${qqq};若升至 +40bp 或 QQQ 回撤 ≥3%,利率机制升级为风险累积。`;
+        const ratesEscalation = mechanisms.rates.status === 'forming'
+            ? '若 8周 ≥ +50bp 且权益进一步承压,利率机制升级为确认'
+            : '若升至 +40bp 或 QQQ 回撤 ≥3%,利率机制升级为风险累积';
+        return `实际利率 8周 ${delta}，QQQ 距高 ${qqq};${ratesEscalation}。`;
     }
     if (selected.key === 'credit') {
         const ccc = mechanisms.credit.evidence.find((item) => item.label === 'CCC领先')?.value ?? '—';
         const vixCross = mechanisms.credit.evidence.find((item) => item.label === 'VIX交叉')?.value ?? '—';
-        return `信用观察:CCC 领先 ${ccc}，VIX交叉 ${vixCross};若 VIX 交叉或股信背离相互印证,信用机制升级为风险累积。`;
+        const creditEscalation = mechanisms.credit.status === 'forming'
+            ? '若利差走阔加速且多信号共振,信用机制升级为确认'
+            : '若 VIX 交叉或股信背离相互印证,信用机制升级为风险累积';
+        return `信用观察:CCC 领先 ${ccc}，VIX交叉 ${vixCross};${creditEscalation}。`;
     }
     return '基本面观察:若 capex 指引下调或营收-capex 背离扩大,基本面机制升级为风险累积。';
 }
