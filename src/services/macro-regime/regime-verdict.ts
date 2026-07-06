@@ -102,7 +102,7 @@ export function computeRealRateBrake(
         (delta8wBp >= REAL_RATE_FORMING_DELTA_8W_BP && durationPressure)
     ) {
         status = 'forming';
-        notes.push('实际利率上行达到形成区,等待进一步确认');
+        notes.push('实际利率上行进入风险累积区,等待进一步确认');
     } else if (delta8wBp >= REAL_RATE_FORMING_DELTA_8W_BP) {
         status = 'watch';
         notes.push('实际利率进入观察区,但 QQQ 尚未承压');
@@ -192,7 +192,7 @@ export function computeRegimeVerdict(
         return {
             state: 'NOISE',
             mechanism: null,
-            one_line: '价格回落 / 波动上升,但信用、实际利率、基本面均无异常;历史上多数此类回调属短期噪音,数周内收复居多。',
+            one_line: '价格回落 / 波动上升,但信用、实际利率、基本面均无异常;历史上此类技术性回调多在数周内收复。',
             confidence: priceVol.vix_elevated ? 'medium' : 'low',
             nearest_watch: nearestWatch,
             mechanisms,
@@ -372,7 +372,7 @@ function buildMechanismViews(
             ],
             next_trigger: statuses.credit === 'confirmed'
                 ? null
-                : 'CCC 持续领先 HY 且第二信号 corroborate（VIX 交叉 / 背离 / HYG/IEF 走弱）→ 形成中'
+                : 'CCC 持续领先 HY 且第二信号相互印证（VIX 交叉 / 背离 / HYG/IEF 走弱）→ 升级为风险累积'
         },
         rates: {
             status: statuses.rates,
@@ -383,7 +383,7 @@ function buildMechanismViews(
             ],
             next_trigger: statuses.rates === 'confirmed'
                 ? null
-                : '升至 +40bp，或 +25bp 且 QQQ 回撤 ≥3% → 形成中'
+                : '升至 +40bp，或 +25bp 且 QQQ 回撤 ≥3% → 升级为风险累积'
         },
         fundamental: {
             status: statuses.fundamental,
@@ -394,7 +394,7 @@ function buildMechanismViews(
             ],
             next_trigger: statuses.fundamental === 'confirmed'
                 ? null
-                : 'capex 指引转 cut 或营收-capex 背离扩大 → 形成中'
+                : 'capex 指引下调或营收-capex 背离扩大 → 升级为风险累积'
         }
     };
 }
@@ -416,14 +416,14 @@ function buildNearestWatch(mechanisms: RegimeVerdict['mechanisms']): string | nu
     if (selected.key === 'rates') {
         const delta = mechanisms.rates.evidence.find((item) => item.label === '实际利率8周')?.value ?? '—';
         const qqq = mechanisms.rates.evidence.find((item) => item.label === 'QQQ距高')?.value ?? '—';
-        return `实际利率 8周 ${delta}，QQQ 距高 ${qqq};若升至 +40bp 或 QQQ 回撤 ≥3%,利率机制进入形成中。`;
+        return `实际利率 8周 ${delta}，QQQ 距高 ${qqq};若升至 +40bp 或 QQQ 回撤 ≥3%,利率机制升级为风险累积。`;
     }
     if (selected.key === 'credit') {
         const ccc = mechanisms.credit.evidence.find((item) => item.label === 'CCC领先')?.value ?? '—';
         const vixCross = mechanisms.credit.evidence.find((item) => item.label === 'VIX交叉')?.value ?? '—';
-        return `信用观察:CCC 领先 ${ccc}，VIX交叉 ${vixCross};若 VIX 交叉或股信背离 corroborate,信用机制进入形成中。`;
+        return `信用观察:CCC 领先 ${ccc}，VIX交叉 ${vixCross};若 VIX 交叉或股信背离相互印证,信用机制升级为风险累积。`;
     }
-    return '基本面观察:若 capex 指引转 cut 或营收-capex 背离扩大,基本面机制进入形成中。';
+    return '基本面观察:若 capex 指引下调或营收-capex 背离扩大,基本面机制升级为风险累积。';
 }
 
 function buildContext(snapshot: MacroRegimeSnapshot): RegimeVerdict['context'] {
