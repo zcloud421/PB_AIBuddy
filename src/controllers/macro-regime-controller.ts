@@ -87,7 +87,9 @@ export function computeVerdictDirection(history: VerdictHistoryRow[]): 'worse' |
     if (!latest?.brakes || !prev?.brakes) return null;
     let anyUp = false;
     let anyDown = false;
-    for (const key of Object.keys(latest.brakes)) {
+    // 只比较三个确认机制;拥挤(crowding)是置信度调节项,不上屏,若参与比较会出现
+    // 「显示恶化但页面上三行机制全没变」的不可解释状态。
+    for (const key of ['credit', 'rates', 'fundamental']) {
         const now = BRAKE_RANK[latest.brakes[key] ?? ''] ?? null;
         const before = BRAKE_RANK[prev.brakes[key] ?? ''] ?? null;
         if (now === null || before === null) continue;
