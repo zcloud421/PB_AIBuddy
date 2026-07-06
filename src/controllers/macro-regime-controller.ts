@@ -7,8 +7,10 @@ import {
     ensureLateCyclePillarHistoryTable,
     ensureMacroRegimeSnapshotsTable,
     getLatestMacroRegimeSnapshot,
+    getRecentVerdictHistory,
     insertLateCyclePillarHistory,
-    upsertMacroRegimeSnapshot
+    upsertMacroRegimeSnapshot,
+    type VerdictHistoryRow
 } from '../db/queries/macro-regime';
 
 function requireSetupToken(req: Request, res: Response): boolean {
@@ -54,8 +56,47 @@ export async function getLatestMacroRegimeController(_req: Request, res: Respons
         });
         return;
     }
+    const history = await getRecentVerdictHistory(14);
     res.setHeader('Cache-Control', 'private, max-age=300');
-    res.status(200).json(snapshot);
+    res.status(200).json({
+        ...snapshot,
+        verdict_history: history.map((row) => ({ date: row.run_date, state: row.state })),
+        verdict_days_in_state: computeDaysInState(history),
+        verdict_direction: computeVerdictDirection(history)
+    });
+}
+
+// 刹车档位排序:任一机制升档 → 恶化;无升档且任一降档 → 缓和;否则持平。
+// crowding 只有 quiet/elevated 两档,同样参与比较。
+const BRAKE_RANK: Record<string, number> = { quiet: 0, elevated: 1, watch: 1, forming: 2, confirmed: 3 };
+
+export function computeDaysInState(history: VerdictHistoryRow[]): number | null {
+    const latest = history[history.length - 1];
+    if (!latest?.state) return null;
+    let days = 0;
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+        if (history[i].state !== latest.state) break;
+        days += 1;
+    }
+    return days;
+}
+
+export function computeVerdictDirection(history: VerdictHistoryRow[]): 'worse' | 'same' | 'better' | null {
+    const latest = history[history.length - 1];
+    const prev = history[history.length - 2];
+    if (!latest?.brakes || !prev?.brakes) return null;
+    let anyUp = false;
+    let anyDown = false;
+    for (const key of Object.keys(latest.brakes)) {
+        const now = BRAKE_RANK[latest.brakes[key] ?? ''] ?? null;
+        const before = BRAKE_RANK[prev.brakes[key] ?? ''] ?? null;
+        if (now === null || before === null) continue;
+        if (now > before) anyUp = true;
+        if (now < before) anyDown = true;
+    }
+    if (anyUp) return 'worse';
+    if (anyDown) return 'better';
+    return 'same';
 }
 
 /**

@@ -346,6 +346,30 @@ export async function getLatestMacroRegimeSnapshot(): Promise<MacroRegimeSnapsho
     return result.rows[0]?.snapshot_json ?? null;
 }
 
+export interface VerdictHistoryRow {
+    run_date: string;
+    state: string | null;
+    brakes: Record<string, string> | null;
+}
+
+// 近 N 日 verdict 状态与刹车档位(升序),供前端状态带 + 方向计算。
+// 老快照(regime_verdict 上线前)state 为 null,前端渲染为占位格。
+export async function getRecentVerdictHistory(limit = 14): Promise<VerdictHistoryRow[]> {
+    const result = await pool.query<VerdictHistoryRow>(
+        `
+        SELECT
+            to_char(run_date, 'YYYY-MM-DD') AS run_date,
+            snapshot_json->'regime_verdict'->>'state' AS state,
+            snapshot_json->'regime_verdict'->'brakes' AS brakes
+        FROM macro_regime_snapshots
+        ORDER BY run_date DESC
+        LIMIT $1
+        `,
+        [limit]
+    );
+    return result.rows.reverse();
+}
+
 export async function insertLateCyclePillarHistory(input: {
     reviewed_at: string;
     pillar: string;
