@@ -249,9 +249,11 @@ function computePriceVolStress(snapshot: MacroRegimeSnapshot, equityBars: DailyP
         vix.status === 'Warning' ||
         vix.status === 'Critical' ||
         (typeof vix.value === 'number' && vix.value >= 25);
+    // NOISE 门槛与传导压力线对齐(≥3%):QQQ 已明显回撤时不应显示「市况平稳」,
+    // 即便 VIX 平静(2026-07 芯片股抛售期间 VIX 16 但 QQQ -4.5%,旧 5% 门槛漏报)。
     const stress =
         vixElevated ||
-        (equity.drawdown_pct !== null && equity.drawdown_pct >= EQUITY_DRAWDOWN_STRESS_PCT) ||
+        (equity.drawdown_pct !== null && equity.drawdown_pct >= EQUITY_DRAWDOWN_DURATION_PRESSURE_PCT) ||
         equity.below_ma50 === true;
     return {
         stress,
@@ -328,6 +330,16 @@ function formingLine(
         return '信用利差出现领先异动(最差档先走阔),价格可能尚未反映;系统性压力初现、待确认。';
     }
     if (mechanism === 'rates') {
+        const transmitted =
+            (realRateBrake.equity_drawdown_pct !== null &&
+                realRateBrake.equity_drawdown_pct >= EQUITY_DRAWDOWN_DURATION_PRESSURE_PCT) ||
+            realRateBrake.equity_below_ma50 === true;
+        if (transmitted) {
+            const dd = realRateBrake.equity_drawdown_pct !== null
+                ? `,QQQ 已自高点回撤 ${realRateBrake.equity_drawdown_pct.toFixed(1)}%`
+                : '';
+            return `实际利率近 8 周上行 ${formatBp(realRateBrake.delta_8w_bp)}${dd},利率压力开始向科技股传导;久期重定价风险累积、待确认。`;
+        }
         return `实际利率近 8 周上行 ${formatBp(realRateBrake.delta_8w_bp)},尚未传导到科技股;久期风险升温、待确认。`;
     }
     return '基本面边际走弱:AI 资本开支与营收差距扩大,尚未确认恶化。';
@@ -378,6 +390,14 @@ function buildMechanismViews(
             status: statuses.rates,
             evidence: [
                 { label: '实际利率8周', value: formatBp(realRateBrake.delta_8w_bp) },
+                // QQQ 距高是利率机制的「传导」证据(+25bp 且回撤 ≥3% 走这条臂升级),
+                // 必须在场 —— buildNearestWatch 也按此标签取值。
+                {
+                    label: 'QQQ距高',
+                    value: realRateBrake.equity_drawdown_pct !== null
+                        ? `-${realRateBrake.equity_drawdown_pct.toFixed(1)}%`
+                        : '—'
+                },
                 { label: '10Y', value: formatPct(snapshot.indicators.DGS10_ABS_LEVEL.value) },
                 { label: '30Y', value: formatPct(extras.dgs30_pct ?? null) }
             ],
