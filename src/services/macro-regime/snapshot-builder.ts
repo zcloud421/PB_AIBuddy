@@ -11,6 +11,10 @@
 
 import { MassiveDataFetcher } from '../../data/massive-fetcher';
 import type { DailyPriceBar } from '../../data/massive-fetcher';
+import {
+    buildExposureTimingSnapshot,
+    EXPOSURE_TIMING_ASSETS
+} from '../exposure-timing/engine';
 import { fetchFredSeries } from '../../data/fred-series-fetcher';
 import type { FredPoint } from '../../data/fred-series-fetcher';
 import { fetchSoxIndexHistoryWithSource } from '../../data/sox-index-fetcher';
@@ -80,18 +84,31 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
 
     // Side monitor pre-requisites (HY OAS series in bp + Δ4w) reused for
     // indicator and Credit/Funding stress acceleration sub-signal.
-    const [hyOasSeries, cccOasSeries, dfii10Series, hyOasDelta4w, spyHoldings, soxHistory, qqqVerdictBars, dgs30Series, hygBars, iefBars] = await Promise.all([
+    const [hyOasSeries, cccOasSeries, dfii10Series, hyOasDelta4w, spyHoldings, soxHistory, exposureHistoryEntries, dgs30Series, hygBars, iefBars] = await Promise.all([
         fetchHyOasSeriesBp(),
         fetchCccOasSeriesBp(),
         fetchFredSeries('DFII10', 120),
         computeHyOasDelta4wBp(),
         fetchSpyHoldings(),
         fetchSoxIndexHistoryWithSource(),
-        fetcher.fetchPriceHistory('QQQ', 330).catch(() => []),
+        Promise.all(EXPOSURE_TIMING_ASSETS.map(async ({ symbol }) => ({
+            symbol,
+            bars: await fetcher.fetchPriceHistory(symbol, 365).catch((error) => {
+                console.warn(
+                    `[exposure-timing] ${symbol} history unavailable:`,
+                    error instanceof Error ? error.message : error
+                );
+                return [] as DailyPriceBar[];
+            })
+        }))),
         fetchFredSeries('DGS30', 120).catch(() => []),
         fetcher.fetchPriceHistory('HYG', 90).catch(() => []),
         fetcher.fetchPriceHistory('IEF', 90).catch(() => [])
     ]);
+    const exposureHistories = Object.fromEntries(
+        exposureHistoryEntries.map(({ symbol, bars }) => [symbol, bars])
+    ) as Record<string, DailyPriceBar[]>;
+    const qqqVerdictBars = exposureHistories.QQQ ?? [];
 
     const hyOas = await computeHyOas();
 
@@ -203,6 +220,11 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         realRateBrake,
         qqqVerdictBars,
         computeVerdictExtras(dgs30Series ?? [], hygBars ?? [], iefBars ?? [])
+    );
+    snapshot.exposure_timing = buildExposureTimingSnapshot(
+        asOf,
+        snapshot.regime_verdict?.state ?? null,
+        exposureHistories
     );
 
     console.log(

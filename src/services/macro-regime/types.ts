@@ -6,6 +6,8 @@
  * consumed by the Markets tab in the mobile app.
  */
 
+import type { ExposureTimingSnapshot } from '../exposure-timing/engine';
+
 export type RegimeSeverity = 'Healthy' | 'Neutral' | 'Warning' | 'Critical';
 
 export type FundamentalState = 'intact' | 'weakening' | 'cracking';
@@ -200,6 +202,8 @@ export interface MacroRegimeSnapshot {
     escalation_summary?: EscalationSummary;
     leading_flags?: string[];
     regime_verdict?: RegimeVerdict;
+    /** Long-only entry-condition monitor for the approved theme proxies. */
+    exposure_timing?: ExposureTimingSnapshot;
 }
 
 export interface EscalationSummary {
