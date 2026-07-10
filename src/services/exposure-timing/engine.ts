@@ -1,13 +1,14 @@
 import type { DailyPriceBar } from '../../data/massive-fetcher';
 import type { RegimeVerdictState } from '../macro-regime/types';
 
+// label 用 RM 的产品语言(客户持有的基金类别),symbol 是观测代理 ETF。
 export const EXPOSURE_TIMING_ASSETS = [
-    { symbol: 'SPY', label: '美国大盘' },
-    { symbol: 'QQQ', label: '美国成长' },
-    { symbol: 'SOXX', label: '半导体' },
-    { symbol: 'DRAM', label: '存储芯片' },
-    { symbol: 'KWEB', label: '中国互联网' },
-    { symbol: 'GLD', label: '黄金' }
+    { symbol: 'SPY', label: '大盘基金' },
+    { symbol: 'QQQ', label: '科技基金' },
+    { symbol: 'SOXX', label: '半导体基金' },
+    { symbol: 'DRAM', label: '存储芯片主题' },
+    { symbol: 'KWEB', label: '中国相关基金' },
+    { symbol: 'GLD', label: '黄金类' }
 ] as const;
 
 export type ExposureTimingStatus = 'WAIT' | 'WATCH_SUPPORT' | 'BUILD_WINDOW' | 'EXTENDED';
