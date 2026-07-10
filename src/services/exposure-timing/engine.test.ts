@@ -49,10 +49,12 @@ assert.match(fallingKnife.summary, /下行|下跌/);
 
 const macroBlocked = computeExposureTiming('GLD', '黄金', bars({ dailyChange: 0.05 }), 'CONFIRMED_BREAK');
 assert.equal(macroBlocked.status, 'WAIT');
-assert.match(macroBlocked.summary, /宏观断裂/);
+assert.match(macroBlocked.summary, /系统性调整/);
 
+// 软闸门:FORMING 期间技术确认仍给 BUILD_WINDOW,但文案带置信度降档。
 const formingMacro = computeExposureTiming('SOXX', '半导体', bars({ dailyChange: 0.05 }), 'BREAK_FORMING');
-assert.equal(formingMacro.status, 'WATCH_SUPPORT');
+assert.equal(formingMacro.status, 'BUILD_WINDOW');
+assert.match(formingMacro.summary, /置信度降档/);
 
 const limited = computeExposureTiming('DRAM', '存储芯片', bars({ count: 40 }), 'STABLE');
 assert.equal(limited.status, 'WAIT');

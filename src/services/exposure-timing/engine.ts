@@ -69,7 +69,7 @@ interface ComputedState {
 
 const STATUS_META: Record<ExposureTimingStatus, { label: string; rank: number }> = {
     WAIT: { label: '下行风险仍高', rank: 0 },
-    WATCH_SUPPORT: { label: '下行风险待确认', rank: 1 },
+    WATCH_SUPPORT: { label: '支撑确认中', rank: 1 },
     BUILD_WINDOW: { label: '下行压力缓和', rank: 3 },
     // EXTENDED 与 WATCH_SUPPORT 语义相反(涨太远 vs 未确认),不能共用文案。
     EXTENDED: { label: '价格偏离过高', rank: 2 }
@@ -140,9 +140,9 @@ export function computeExposureTiming(
 
     if (macroState === 'CONFIRMED_BREAK') {
         return completeResult(symbol, label, 'WAIT', state, support, evidence, dataAsOf, {
-            summary: '宏观断裂机制已确认，当前技术支撑的可靠性下降。',
+            summary: '宏观系统性调整已确认，当前技术支撑的可靠性下降。',
             next_trigger: '等待宏观判定退出系统性调整，再重新评估价格结构。',
-            invalidation: '在宏观断裂确认期间，任何单日反弹都不构成状态升级。'
+            invalidation: '在系统性调整确认期间，任何单日反弹都不构成状态升级。'
         });
     }
 
@@ -168,12 +168,15 @@ export function computeExposureTiming(
         });
     }
 
+    // 软闸门:宏观 BREAK_FORMING 不再吞掉技术判定 —— 技术条件全数确认时仍给
+    // BUILD_WINDOW,只在文案上做置信度降档;宏观状态页面顶部已有,不逐行重复。
     const canFormWindow = nearSupport ? supportConfirmed : orderlyTrendWindow;
-    if (canFormWindow && macroState !== 'BREAK_FORMING') {
+    if (canFormWindow) {
+        const formingCaveat = macroState === 'BREAK_FORMING' ? '宏观风险仍在形成，本判定置信度降档。' : '';
         return completeResult(symbol, label, 'BUILD_WINDOW', state, support, evidence, dataAsOf, {
-            summary: nearSupport
+            summary: (nearSupport
                 ? `${support?.label ?? '中期均线'}附近出现连续守稳，短期跌势未继续扩散。`
-                : '中期趋势向上且价格未明显偏离均线，下行压力有所缓和。',
+                : '中期趋势向上且价格未明显偏离均线，下行压力有所缓和。') + formingCaveat,
             next_trigger: nearSupport
                 ? `若继续守住 ${support?.label} 并重回近期短线高点，确认度进一步提高。`
                 : `若 MA20 与 MA50 继续上行且价格保持在 MA20 上方，条件维持。`,
@@ -183,23 +186,17 @@ export function computeExposureTiming(
         });
     }
 
-    if (macroState === 'BREAK_FORMING') {
-        return completeResult(symbol, label, 'WATCH_SUPPORT', state, support, evidence, dataAsOf, {
-            summary: '价格结构可能改善，但宏观风险仍在形成，暂只保留观察。',
-            next_trigger: '等待宏观风险退出形成状态，并由价格结构再次确认。',
-            invalidation: support
-                ? `若跌破 ${support.label} $${formatPrice(support.level)}，技术观察同步失效。`
-                : `若跌破 MA50 $${formatPrice(state.ma50)}，技术观察失效。`
-        });
-    }
-
     return completeResult(symbol, label, 'WATCH_SUPPORT', state, support, evidence, dataAsOf, {
         summary: nearSupport
             ? `${support?.label ?? '中期均线'}附近具备观察价值，但尚缺连续守稳与短期反转确认。`
-            : '尚未进入理想支撑区，趋势与位置条件仍需进一步确认。',
+            : support
+                ? `价格位于 ${support.label} $${formatPrice(support.level)} ${support.distance_pct >= 0 ? '上方' : '下方'} ${Math.abs(support.distance_pct).toFixed(1)}%，回踩测试尚未发生。`
+                : '尚未进入理想支撑区，趋势与位置条件仍需进一步确认。',
         next_trigger: nearSupport
             ? `至少 2/3 个收盘守住 ${support?.label}，且 5 日跌幅收窄至 1.5%以内。`
-            : `等待价格靠近上行 MA50/MA200，或重新形成均线多头结构。`,
+            : support
+                ? `盯住 ${support.label} $${formatPrice(support.level)}：回踩至 3% 以内并连续守稳，条件即改善。`
+                : `等待价格靠近上行 MA50/MA200，或重新形成均线多头结构。`,
         invalidation: support
             ? `若跌破 ${support.label} $${formatPrice(support.level)} 且均线转弱，观察失效。`
             : `若价格跌破 MA200 且 MA50 向下，下行风险转高。`
