@@ -30,6 +30,7 @@ export type FlagType =
     | 'MATERIAL_NEWS_OVERHANG'
     | 'BEARISH_STRUCTURE'
     | 'LOWER_HIGH_RISK'
+    | 'LIMITED_LISTING_HISTORY'
     | 'LOW_COUPON'
     | 'BUFFER_QUALITY'
     | 'LOW_LIQUIDITY'
@@ -185,6 +186,7 @@ export function buildPostEarningsShockFlag(input: {
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const PREFERRED_TENORS = [90, 180];
+export const MIN_GO_LISTING_HISTORY_BARS = 120;
 const PREFERRED_TENOR_TOLERANCE_DAYS = 25;
 const MAX_APPROVED_TENORS = 2;
 const MAX_APPROVED_STRIKES = 3;
@@ -1564,6 +1566,33 @@ export function scoreAndGrade(candidate: {
             old_grade: oldGrade,
             new_grade: overallGrade
         });
+    }
+
+    const listingHistoryBars = symbolData.price_history.length;
+    if (listingHistoryBars < MIN_GO_LISTING_HISTORY_BARS) {
+        flags.push({
+            type: 'LIMITED_LISTING_HISTORY',
+            severity: 'WARN',
+            message: `Only ${listingHistoryBars} trading bars are available; a newly listed underlying cannot be validated across a full FCN path window`
+        });
+        if (overallGrade === 'GO') {
+            const oldGrade = overallGrade;
+            compositeScore = Math.min(compositeScore, 0.62);
+            overallGrade = 'CAUTION';
+            decisions.push({
+                type: 'GRADE_CAP_LISTING_HISTORY',
+                failType: 'SUITABILITY_FAIL',
+                passed: false,
+                severity: 'WARN',
+                message: 'Limited public trading history capped GO at CAUTION',
+                details: {
+                    available_trading_bars: listingHistoryBars,
+                    minimum_go_trading_bars: MIN_GO_LISTING_HISTORY_BARS
+                },
+                old_grade: oldGrade,
+                new_grade: overallGrade
+            });
+        }
     }
 
     const qualityDipCandidate =

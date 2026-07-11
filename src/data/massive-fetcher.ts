@@ -1,6 +1,7 @@
 import type { ChainData, DataFetcherInterface, StrikeData, SymbolData } from '../scoring-engine';
 import { MassiveClient } from './massive-client';
 import { getRecentEarningsBySymbol, getUpcomingEarningsBySymbol, getUpcomingEarningsForSymbolWithinDays } from '../db/queries/ideas';
+import { truncateLikelyTickerReuse } from '../utils/price-history-integrity';
 
 const SNAPSHOT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_SNAPSHOT_PAGES = 4;
@@ -169,10 +170,22 @@ export class MassiveDataFetcher implements DataFetcherInterface {
             }
         );
 
-        return (historyResponse.results ?? [])
+        const history = (historyResponse.results ?? [])
             .map((row) => mapPriceRow(row))
             .filter((row): row is DailyPriceBar => row !== null)
             .sort((a, b) => a.date.localeCompare(b.date));
+
+        const sanitized = truncateLikelyTickerReuse(history);
+        if (sanitized.length !== history.length) {
+            console.warn(JSON.stringify({
+                tag: 'ticker_history_identity_break',
+                symbol,
+                discarded_bars: history.length - sanitized.length,
+                retained_from: sanitized[0]?.date ?? null,
+                ts: new Date().toISOString()
+            }));
+        }
+        return sanitized;
     }
 
     private async fetchEligibleContracts(

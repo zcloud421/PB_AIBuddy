@@ -1,6 +1,11 @@
 import { getCompanyDescription, getDisplayDescription } from '../../data/company-description';
 import { getLatestEarningsSurprise } from '../../data/earnings-surprise';
-import type { NarrativeInput, NarrativeOutput, NarrativeSourceQuality } from '../narrative-generator';
+import type {
+    NarrativeGenerationDiagnostics,
+    NarrativeInput,
+    NarrativeOutput,
+    NarrativeSourceQuality
+} from '../narrative-generator';
 import { checkRepetitionStyle, logStyleRepetitionWarning } from '../fcn-shared/style-repetition';
 import { PITCH_ENGINE_VERSION } from '../fcn-shared/pitch-engine-version';
 import {
@@ -12,7 +17,8 @@ import {
     sanitizeEarningsSurpriseForPitch
 } from './input-adapter';
 import { callDeepSeekForPitch, buildPitchPrompt, type PitchInputs } from './llm-stitcher';
-import { detectLitTags, hasMinimumTagsForPitch } from './tag-detector';
+import { detectLitTags } from './tag-detector';
+import { hasSafePitchSpecificity } from './eligibility';
 import { buildDeterministicPitch, buildHybridPitch, buildMinimalPitch, pickBridge } from './template';
 import { isClickbait } from './headline-filter';
 import { validateGeneratedPitchText, validatePitch } from './validator';
@@ -29,18 +35,21 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
     ) {
         const text = finalizeTemplateText(input.symbol, buildMinimalPitch(pitchInputs), pitchInputs, 'go_pitch_minimal');
         logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
-        return wrapResult(text, 'go_pitch_minimal');
+        return wrapResult(text, 'go_pitch_minimal', buildDiagnostics(pitchInputs, {
+            reason: 'INVALID_TERMS_PREFLIGHT',
+            retriable: false,
+            attempts: 0
+        }));
     }
 
-    // GO 名单是要直接发给 UHNW 客户的:只要有 ≥1 个 holding tag,且 timing tag 或真实
-    // 财务数据(收入/分部)二者有其一,就走 LLM 写完整 3 段 thesis。timing tag 短期熄灭
-    // (如单周回调)不应把 GO pitch 降级成一句话。holding tag 全无才降级(validator
-    // 要求 used_tags 至少 1 个 holding tag,没有则 LLM 必失败)。
+    // GO 名单是要直接发给 UHNW 客户的:任一已验证 tag 或真实财务数据都足以支撑
+    // 完整三句 thesis。holding/timing 其中一侧暂时缺失(例如深回调、财务 API 覆盖
+    // 不全)不应把文案降级成通用 minimal；validator 仍逐项约束 used_tags、数字和语义。
     const hasSubstantiveFinancials =
         typeof pitchInputs.revenue_yoy_pct === 'number' || pitchInputs.top_segment != null;
-    // 有真实收入/分部数据时,即使 holding tag 全灭也放行 LLM(validator 对 holding tag
-    // 的要求同步做了条件化);tags 和财务数据都没有才落一句话兜底。
-    const canAttemptLLM = hasMinimumTagsForPitch(pitchInputs.lit_tags) || hasSubstantiveFinancials;
+    // 任一经过 validator 可回查的事实来源都可支撑完整框架。价格位置和实质新闻
+    // 与 tag/财务数据同样是安全来源，不应因 tag taxonomy 覆盖不足而降级。
+    const canAttemptLLM = hasSafePitchSpecificity(pitchInputs);
     if (!canAttemptLLM) {
         console.log(JSON.stringify({
             tag: 'go_pitch_minimal_no_tags',
@@ -52,28 +61,46 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
         }));
         const text = finalizeTemplateText(input.symbol, buildMinimalPitch(pitchInputs), pitchInputs, 'go_pitch_minimal');
         logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
-        return wrapResult(text, 'go_pitch_minimal');
+        return wrapResult(text, 'go_pitch_minimal', buildDiagnostics(pitchInputs, {
+            reason: 'INSUFFICIENT_SAFE_EVIDENCE',
+            retriable: false,
+            attempts: 0
+        }));
     }
 
     const useLLM = process.env.ENABLE_GO_LLM_PITCH !== 'false';
+    let attempts = 0;
+    let failureReason: NarrativeGenerationDiagnostics['reason'] = useLLM ? 'LLM_UNAVAILABLE' : 'LLM_DISABLED';
+    let validationReasons: string[] = [];
     if (useLLM) {
         try {
             const basePrompt = buildPitchPrompt(pitchInputs);
             let retryHint: string | null = null;
             for (let attempt = 0; attempt < 2; attempt += 1) {
+                attempts = attempt + 1;
                 const prompt = retryHint
                     ? `${basePrompt}\n\n上一次输出被校验拒绝,原因:${retryHint}。请修正后重写(尤其:数字必须逐字来自可用数字事实,不得自行推算)。`
                     : basePrompt;
                 const llmOutput = await callDeepSeekForPitch(prompt);
-                if (!llmOutput) break;
+                if (!llmOutput) {
+                    failureReason = 'LLM_UNAVAILABLE';
+                    break;
+                }
 
                 const bridge = pickBridge(input.symbol);
                 const finalPitch = buildHybridPitch(llmOutput.comm_reference, pitchInputs, bridge);
                 const validation = validatePitch(llmOutput, pitchInputs.lit_tags, pitchInputs, finalPitch);
                 if (validation.passed) {
                     logStyleRepetitionWarning(input.symbol, finalPitch, checkRepetitionStyle(finalPitch));
-                    return wrapResult(finalPitch, 'go_pitch_hybrid_validated');
+                    return wrapResult(finalPitch, 'go_pitch_hybrid_validated', buildDiagnostics(pitchInputs, {
+                        reason: 'HYBRID_VALIDATED',
+                        retriable: false,
+                        attempts
+                    }));
                 }
+
+                failureReason = 'LLM_VALIDATION_FAILED';
+                validationReasons = validation.reasons;
 
                 console.log(
                     JSON.stringify({
@@ -102,13 +129,19 @@ export async function generateGoPitch(input: NarrativeInput): Promise<NarrativeO
                 retryHint = validation.reasons.join('; ');
             }
         } catch (error) {
+            failureReason = 'LLM_ERROR';
             console.warn('[go_pitch] llm error', error);
         }
     }
 
     const text = finalizeTemplateText(input.symbol, buildDeterministicPitch(pitchInputs), pitchInputs, 'go_pitch_template');
     logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
-    return wrapResult(text, 'go_pitch_template');
+    return wrapResult(text, 'go_pitch_template', buildDiagnostics(pitchInputs, {
+        reason: failureReason,
+        retriable: failureReason !== 'LLM_DISABLED',
+        attempts,
+        validation_reasons: validationReasons
+    }));
 }
 
 export async function buildGoPitchFailClosed(input: NarrativeInput): Promise<NarrativeOutput | null> {
@@ -116,7 +149,11 @@ export async function buildGoPitchFailClosed(input: NarrativeInput): Promise<Nar
     if (!pitchInputs) return null;
     const text = finalizeTemplateText(input.symbol, buildMinimalPitch(pitchInputs), pitchInputs, 'go_pitch_minimal');
     logStyleRepetitionWarning(input.symbol, text, checkRepetitionStyle(text));
-    return wrapResult(text, 'go_pitch_minimal');
+    return wrapResult(text, 'go_pitch_minimal', buildDiagnostics(pitchInputs, {
+        reason: 'ENGINE_NULL_FALLBACK',
+        retriable: true,
+        attempts: 0
+    }));
 }
 
 async function buildPitchInputsFromNarrativeInput(input: NarrativeInput): Promise<PitchInputs | null> {
@@ -242,13 +279,31 @@ function finalizeTemplateText(
     return buildMinimalPitch(safeInputs);
 }
 
-function wrapResult(whyNow: string, sourceQuality: NarrativeSourceQuality): NarrativeOutput {
+function buildDiagnostics(
+    pitchInputs: PitchInputs,
+    diagnostics: NarrativeGenerationDiagnostics
+): NarrativeGenerationDiagnostics {
+    return {
+        ...diagnostics,
+        has_financials:
+            typeof pitchInputs.revenue_yoy_pct === 'number' || pitchInputs.top_segment != null,
+        holding_tags: [...pitchInputs.lit_tags.holding],
+        timing_tags: [...pitchInputs.lit_tags.timing]
+    };
+}
+
+function wrapResult(
+    whyNow: string,
+    sourceQuality: NarrativeSourceQuality,
+    generationDiagnostics?: NarrativeGenerationDiagnostics
+): NarrativeOutput {
     return {
         why_now: whyNow,
         risk_note: '',
         sentiment_score: 0.6,
         key_events: [],
         source_quality: sourceQuality,
-        engine_version: PITCH_ENGINE_VERSION
+        engine_version: PITCH_ENGINE_VERSION,
+        generation_diagnostics: generationDiagnostics
     };
 }

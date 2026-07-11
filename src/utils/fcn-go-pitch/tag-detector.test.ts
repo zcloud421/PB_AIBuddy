@@ -63,5 +63,4 @@ assert.ok(
 assert.ok(detectLitTags(base).timing.includes('momentum_intact'));
 assert.equal(hasMinimumTagsForPitch({ holding: ['super_cycle'], timing: [] }), false);
 assert.equal(hasMinimumTagsForPitch({ holding: ['super_cycle'], timing: ['momentum_intact'] }), true);
-
 console.log('fcn-go-pitch tag-detector tests passed');

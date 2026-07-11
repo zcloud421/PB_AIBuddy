@@ -3,12 +3,16 @@ import type { RegimeVerdictState } from '../macro-regime/types';
 
 // label 用 RM 的产品语言(客户持有的基金类别),symbol 是观测代理 ETF。
 export const EXPOSURE_TIMING_ASSETS = [
-    { symbol: 'SPY', label: '大盘基金' },
-    { symbol: 'QQQ', label: '科技基金' },
-    { symbol: 'SOXX', label: '半导体基金' },
-    { symbol: 'DRAM', label: '存储芯片主题' },
-    { symbol: 'KWEB', label: '中国相关基金' },
-    { symbol: 'GLD', label: '黄金类' }
+    { symbol: 'SPY', label: '美股大盘' },
+    { symbol: 'QQQ', label: '科技成长' },
+    { symbol: 'SOXX', label: '半导体' },
+    { symbol: 'DRAM', label: '存储芯片' },
+    { symbol: 'XLV', label: '医疗健康' },
+    { symbol: 'XLF', label: '金融' },
+    { symbol: 'XLE', label: '能源资源' },
+    { symbol: 'MCHI', label: '中国股票' },
+    { symbol: 'GLD', label: '黄金' },
+    { symbol: 'GDX', label: '黄金矿业' }
 ] as const;
 
 export type ExposureTimingStatus = 'WAIT' | 'WATCH_SUPPORT' | 'BUILD_WINDOW' | 'EXTENDED';
@@ -19,11 +23,14 @@ export interface ExposureTimingEvidence {
 }
 
 export interface ExposureTimingSupport {
-    label: 'MA50' | 'MA200';
+    kind: 'moving_average' | 'swing_low';
+    label: 'MA50' | 'MA200' | '前低';
     level: number;
     distance_pct: number;
+    distance_atr: number | null;
     slope_20d_pct: number | null;
     closes_held_3d: number;
+    prior_touch_count: number;
 }
 
 export interface ExposureTimingAsset {
@@ -40,6 +47,10 @@ export interface ExposureTimingAsset {
     ma20: number | null;
     ma50: number | null;
     ma200: number | null;
+    atr_20: number | null;
+    atr_pct: number | null;
+    volume_ratio_20d: number | null;
+    price_structure: 'HIGHER_LOW' | 'LOWER_LOW' | 'FLAT' | 'INSUFFICIENT';
     support: ExposureTimingSupport | null;
     evidence: ExposureTimingEvidence[];
     next_trigger: string;
@@ -64,7 +75,15 @@ interface ComputedState {
     change5dPct: number | null;
     drawdown52wPct: number;
     rsi14: number | null;
+    atr20: number;
+    atrPct: number;
     volumeRatio20d: number | null;
+    priceStructure: 'HIGHER_LOW' | 'LOWER_LOW' | 'FLAT' | 'INSUFFICIENT';
+}
+
+interface PivotLow {
+    index: number;
+    level: number;
 }
 
 const STATUS_META: Record<ExposureTimingStatus, { label: string; rank: number }> = {
@@ -95,6 +114,10 @@ export function computeExposureTiming(
             ma20: null,
             ma50: null,
             ma200: null,
+            atr_20: null,
+            atr_pct: null,
+            volume_ratio_20d: null,
+            price_structure: 'INSUFFICIENT',
             support: null,
             evidence: [{ label: '有效历史', value: `${bars.length} 日` }],
             next_trigger: '至少积累 55 个有效交易日后再评估。',
@@ -109,23 +132,37 @@ export function computeExposureTiming(
         state.current < state.ma200 &&
         state.ma50 < state.ma200 &&
         (state.ma50Slope20Pct ?? 0) < 0;
+    const fiveDayBreakdownThresholdPct = Math.max(3, state.atrPct * 1.5);
+    const fiveDayStabilizationThresholdPct = Math.max(1.5, state.atrPct * 0.75);
     const fastBreakdown =
         state.current < state.ma50 &&
         (state.ma50Slope20Pct ?? 0) < -1 &&
-        (state.change5dPct ?? 0) < -3;
-    const fallingKnife = belowFallingMa200 || fastBreakdown;
+        (state.change5dPct ?? 0) < -fiveDayBreakdownThresholdPct;
+    const highVolumeSupportBreak =
+        state.volumeRatio20d !== null &&
+        state.volumeRatio20d >= 1.3 &&
+        state.current < state.previous &&
+        (((state.ma50Slope20Pct ?? -1) >= 0 && state.current < state.ma50 - (state.atr20 * 0.5)) ||
+            hasBrokenSwingSupport(state, bars));
+    const fallingKnife = belowFallingMa200 || fastBreakdown || highVolumeSupportBreak;
     const distanceFromMa50Pct = pctChange(state.current, state.ma50);
+    const distanceFromMa50Atr = state.atr20 > 0 ? (state.current - state.ma50) / state.atr20 : 0;
     const extended =
-        distanceFromMa50Pct > 8 ||
+        distanceFromMa50Atr > 3 ||
         ((state.rsi14 ?? 0) >= 72 &&
             state.drawdown52wPct < 4 &&
             (state.change5dPct ?? 0) > 3);
-    const nearSupport = support !== null && Math.abs(support.distance_pct) <= (support.label === 'MA50' ? 3 : 4);
+    const nearSupport = support !== null && support.distance_atr !== null && Math.abs(support.distance_atr) <= 1;
+    const volumeConfirmsBounce = state.volumeRatio20d === null || state.volumeRatio20d >= 0.8;
+    const supportTrendValid = support?.kind === 'swing_low' || (support?.slope_20d_pct ?? -1) >= 0;
     const supportConfirmed =
         support !== null &&
+        supportTrendValid &&
         support.closes_held_3d >= 2 &&
-        (state.change5dPct ?? -99) > -1.5 &&
-        state.current >= state.previous;
+        (state.change5dPct ?? -99) > -fiveDayStabilizationThresholdPct &&
+        state.current >= state.previous &&
+        volumeConfirmsBounce &&
+        state.priceStructure !== 'LOWER_LOW';
     const trendConfirmed =
         state.current > state.ma20 &&
         state.ma20 > state.ma50 &&
@@ -133,8 +170,8 @@ export function computeExposureTiming(
         (state.ma50Slope20Pct ?? 0) >= 0;
     const orderlyTrendWindow =
         trendConfirmed &&
-        distanceFromMa50Pct >= -1 &&
-        distanceFromMa50Pct <= 5 &&
+        distanceFromMa50Atr >= -0.5 &&
+        distanceFromMa50Atr <= 2.5 &&
         (state.rsi14 ?? 50) <= 68;
     const evidence = buildEvidence(state, support);
 
@@ -150,7 +187,9 @@ export function computeExposureTiming(
         return completeResult(symbol, label, 'WAIT', state, support, evidence, dataAsOf, {
             summary: belowFallingMa200
                 ? '价格位于下行长期结构之下，尚未出现可验证的止跌条件。'
-                : '短期跌速与均线方向共振向下，当前仍属下跌过程。',
+                : highVolumeSupportBreak
+                    ? '放量跌破上行中期均线，原支撑已暂时失效。'
+                    : '短期跌速与均线方向共振向下，当前仍属下跌过程。',
             next_trigger: state.ma200 !== null
                 ? `先观察能否重回 MA50 $${formatPrice(state.ma50)}，并令 50 日均线停止下行。`
                 : `先观察能否重回 MA50 $${formatPrice(state.ma50)}，并连续守住。`,
@@ -163,7 +202,7 @@ export function computeExposureTiming(
     if (extended) {
         return completeResult(symbol, label, 'EXTENDED', state, support, evidence, dataAsOf, {
             summary: '趋势保持完整，但价格距中期支撑较远，潜在回撤空间偏大。',
-            next_trigger: `等待价格回到 MA50 上方 5% 以内，或通过横盘令均线追上。`,
+            next_trigger: `等待价格回到 MA50 上方 2.5 ATR 以内，或通过横盘令均线追上。`,
             invalidation: `若回落并跌破 MA50 $${formatPrice(state.ma50)}，下行风险进一步升高。`
         });
     }
@@ -188,14 +227,18 @@ export function computeExposureTiming(
 
     return completeResult(symbol, label, 'WATCH_SUPPORT', state, support, evidence, dataAsOf, {
         summary: nearSupport
-            ? `${support?.label ?? '中期均线'}附近具备观察价值，但尚缺连续守稳与短期反转确认。`
+            ? state.volumeRatio20d !== null && state.volumeRatio20d < 0.8
+                ? `${support?.label ?? '支撑'}附近价格暂稳，但反弹量能偏弱，尚不构成有效确认。`
+                : state.priceStructure === 'LOWER_LOW'
+                    ? `${support?.label ?? '支撑'}附近仍在形成更低低点，止跌结构尚未完成。`
+                    : `${support?.label ?? '支撑'}附近具备观察价值，但尚缺连续守稳与短期反转确认。`
             : support
                 ? `价格位于 ${support.label} $${formatPrice(support.level)} ${support.distance_pct >= 0 ? '上方' : '下方'} ${Math.abs(support.distance_pct).toFixed(1)}%，回踩测试尚未发生。`
                 : '尚未进入理想支撑区，趋势与位置条件仍需进一步确认。',
         next_trigger: nearSupport
-            ? `至少 2/3 个收盘守住 ${support?.label}，且 5 日跌幅收窄至 1.5%以内。`
+            ? `至少 2/3 个收盘守住 ${support?.label}，且 5 日跌幅收窄至 ${fiveDayStabilizationThresholdPct.toFixed(1)}%以内。`
             : support
-                ? `盯住 ${support.label} $${formatPrice(support.level)}：回踩至 3% 以内并连续守稳，条件即改善。`
+                ? `盯住 ${support.label} $${formatPrice(support.level)}：回踩至 1 ATR 以内并连续守稳，条件即改善。`
                 : `等待价格靠近上行 MA50/MA200，或重新形成均线多头结构。`,
         invalidation: support
             ? `若跌破 ${support.label} $${formatPrice(support.level)} 且均线转弱，观察失效。`
@@ -228,6 +271,8 @@ function computeState(bars: DailyPriceBar[]): ComputedState | null {
     const high52w = Math.max(...bars.slice(-252).map((bar) => bar.high));
     const volumes = bars.slice(-20).map((bar) => bar.volume).filter((value) => value > 0);
     const averageVolume = volumes.length > 0 ? average(volumes) : null;
+    const atr20 = computeAtr(bars, 20);
+    const pivots = findPivotLows(bars, 2, 120);
 
     return {
         current,
@@ -240,48 +285,110 @@ function computeState(bars: DailyPriceBar[]): ComputedState | null {
         change5dPct: closes.length >= 6 ? pctChange(current, closes[closes.length - 6]) : null,
         drawdown52wPct: Math.max(0, ((high52w - current) / high52w) * 100),
         rsi14: computeRsi(closes, 14),
+        atr20,
+        atrPct: pctChange(current + atr20, current),
         volumeRatio20d: averageVolume && averageVolume > 0
             ? bars[bars.length - 1].volume / averageVolume
-            : null
+            : null,
+        priceStructure: classifyPivotStructure(pivots, atr20)
     };
 }
 
 function selectSupport(state: ComputedState, bars: DailyPriceBar[]): ExposureTimingSupport | null {
-    const candidates = [
-        {
-            label: 'MA50' as const,
-            level: state.ma50,
-            slope: state.ma50Slope20Pct,
-            maxDistance: 8
-        },
+    const movingAverageCandidates: ExposureTimingSupport[] = [
+        { label: 'MA50' as const, level: state.ma50, slope: state.ma50Slope20Pct },
         ...(state.ma200 === null
             ? []
-            : [{
-                label: 'MA200' as const,
-                level: state.ma200,
-                slope: state.ma200Slope20Pct,
-                maxDistance: 12
-            }])
+            : [{ label: 'MA200' as const, level: state.ma200, slope: state.ma200Slope20Pct }])
     ]
+        // A falling or unmeasurable moving average is a resistance/reference, not support.
+        .filter((candidate) => candidate.slope !== null && candidate.slope >= 0)
+        .map((candidate) => buildSupport({
+            kind: 'moving_average',
+            label: candidate.label,
+            level: candidate.level,
+            slope: candidate.slope,
+            priorTouches: 0
+        }, state, bars))
+        .filter((candidate) => candidate.distance_atr !== null && candidate.distance_atr >= -0.5 && candidate.distance_atr <= 3);
+
+    const swingSupport = buildSwingLowSupport(state, bars);
+    const candidates = [...movingAverageCandidates, ...(swingSupport ? [swingSupport] : [])]
+        .sort((a, b) => {
+            const aRepeated = a.prior_touch_count >= 2 ? 0 : 1;
+            const bRepeated = b.prior_touch_count >= 2 ? 0 : 1;
+            return aRepeated - bRepeated ||
+                Math.abs(a.distance_atr ?? 99) - Math.abs(b.distance_atr ?? 99);
+        });
+    return candidates[0] ?? null;
+}
+
+function buildSwingLowSupport(state: ComputedState, bars: DailyPriceBar[]): ExposureTimingSupport | null {
+    if (state.atr20 <= 0) return null;
+    const pivots = findPivotLows(bars, 2, 120);
+    const candidates = pivots
+        .map((pivot) => {
+            const cluster = pivots.filter((other) => Math.abs(other.level - pivot.level) <= state.atr20 * 0.5);
+            const level = average(cluster.map((item) => item.level));
+            return {
+                level,
+                priorTouches: cluster.length,
+                latestIndex: Math.max(...cluster.map((item) => item.index))
+            };
+        })
+        .filter((candidate, index, all) => all.findIndex((other) => Math.abs(other.level - candidate.level) <= state.atr20 * 0.25) === index)
         .map((candidate) => ({
             ...candidate,
-            distance: pctChange(state.current, candidate.level)
+            distanceAtr: (state.current - candidate.level) / state.atr20
         }))
-        .filter((candidate) => Math.abs(candidate.distance) <= candidate.maxDistance)
-        .sort((a, b) => {
-            const aRising = (a.slope ?? -99) >= 0 ? 0 : 1;
-            const bRising = (b.slope ?? -99) >= 0 ? 0 : 1;
-            return aRising - bRising || Math.abs(a.distance) - Math.abs(b.distance);
-        });
-    const nearest = candidates[0];
-    if (!nearest) return null;
-    const closesHeld = bars.slice(-3).filter((bar) => bar.close >= nearest.level * 0.995).length;
+        .filter((candidate) => candidate.distanceAtr >= -0.5 && candidate.distanceAtr <= 3)
+        .sort((a, b) =>
+            b.priorTouches - a.priorTouches ||
+            Math.abs(a.distanceAtr) - Math.abs(b.distanceAtr) ||
+            b.latestIndex - a.latestIndex
+        );
+    const strongest = candidates[0];
+    if (!strongest) return null;
+    return buildSupport({
+        kind: 'swing_low',
+        label: '前低',
+        level: strongest.level,
+        slope: null,
+        priorTouches: strongest.priorTouches
+    }, state, bars);
+}
+
+function hasBrokenSwingSupport(state: ComputedState, bars: DailyPriceBar[]): boolean {
+    if (state.atr20 <= 0) return false;
+    return findPivotLows(bars, 2, 120).some((pivot) => {
+        const breakDistanceAtr = (pivot.level - state.current) / state.atr20;
+        return breakDistanceAtr >= 0.5 && breakDistanceAtr <= 2;
+    });
+}
+
+function buildSupport(
+    candidate: {
+        kind: ExposureTimingSupport['kind'];
+        label: ExposureTimingSupport['label'];
+        level: number;
+        slope: number | null;
+        priorTouches: number;
+    },
+    state: ComputedState,
+    bars: DailyPriceBar[]
+): ExposureTimingSupport {
+    const distancePct = pctChange(state.current, candidate.level);
+    const distanceAtr = state.atr20 > 0 ? (state.current - candidate.level) / state.atr20 : null;
+    const closesHeld = bars.slice(-3).filter((bar) => bar.close >= candidate.level - (state.atr20 * 0.25)).length;
     return {
-        label: nearest.label,
-        level: round2(nearest.level),
-        distance_pct: round1(nearest.distance),
-        slope_20d_pct: nearest.slope === null ? null : round1(nearest.slope),
-        closes_held_3d: closesHeld
+        kind: candidate.kind,
+        label: candidate.label,
+        level: round2(candidate.level),
+        distance_pct: round1(distancePct),
+        distance_atr: distanceAtr === null ? null : round1(distanceAtr),
+        slope_20d_pct: candidate.slope === null ? null : round1(candidate.slope),
+        closes_held_3d: closesHeld,
+        prior_touch_count: candidate.priorTouches
     };
 }
 
@@ -297,9 +404,24 @@ function buildEvidence(state: ComputedState, support: ExposureTimingSupport | nu
             value: `$${formatPrice(support.level)} · ${formatSignedPct(support.distance_pct)}`
         });
         evidence.push({ label: '3日守稳', value: `${support.closes_held_3d}/3` });
+        if (support.kind === 'swing_low') {
+            evidence.push({ label: '前低测试', value: `${support.prior_touch_count} 次` });
+        }
     }
     if (state.rsi14 !== null) evidence.push({ label: 'RSI14', value: state.rsi14.toFixed(0) });
-    if (state.volumeRatio20d !== null) evidence.push({ label: '量比20日', value: `${state.volumeRatio20d.toFixed(2)}x` });
+    evidence.push({ label: 'ATR20', value: `${state.atrPct.toFixed(1)}%` });
+    if (state.volumeRatio20d !== null) {
+        const volumeLabel = state.volumeRatio20d >= 1.3 ? '放量' : state.volumeRatio20d < 0.8 ? '缩量' : '常态';
+        evidence.push({ label: '量价确认', value: `${volumeLabel} · ${state.volumeRatio20d.toFixed(2)}x` });
+    }
+    if (state.priceStructure !== 'INSUFFICIENT') {
+        const structureLabel = state.priceStructure === 'HIGHER_LOW'
+            ? '低点抬高'
+            : state.priceStructure === 'LOWER_LOW'
+                ? '低点下移'
+                : '低点持平';
+        evidence.push({ label: '价格结构', value: structureLabel });
+    }
     return evidence;
 }
 
@@ -322,6 +444,10 @@ function completeResult(
         ma20: round2(state.ma20),
         ma50: round2(state.ma50),
         ma200: state.ma200 === null ? null : round2(state.ma200),
+        atr_20: round2(state.atr20),
+        atr_pct: round1(state.atrPct),
+        volume_ratio_20d: state.volumeRatio20d === null ? null : round2(state.volumeRatio20d),
+        price_structure: state.priceStructure,
         support,
         evidence,
         data_as_of: dataAsOf
@@ -370,6 +496,53 @@ function computeRsi(closes: number[], period: number): number | null {
     if (losses === 0) return gains === 0 ? 50 : 100;
     const relativeStrength = (gains / period) / (losses / period);
     return 100 - (100 / (1 + relativeStrength));
+}
+
+export function computeAtr(bars: DailyPriceBar[], period = 20): number {
+    if (bars.length < 2) return 0;
+    const trueRanges: number[] = [];
+    for (let i = Math.max(1, bars.length - period); i < bars.length; i += 1) {
+        const bar = bars[i];
+        const previousClose = bars[i - 1].close;
+        trueRanges.push(Math.max(
+            bar.high - bar.low,
+            Math.abs(bar.high - previousClose),
+            Math.abs(bar.low - previousClose)
+        ));
+    }
+    return trueRanges.length > 0 ? average(trueRanges) : 0;
+}
+
+function findPivotLows(bars: DailyPriceBar[], radius: number, lookback: number): PivotLow[] {
+    const start = Math.max(radius, bars.length - lookback);
+    const end = bars.length - radius;
+    const pivots: PivotLow[] = [];
+    for (let index = start; index < end; index += 1) {
+        const level = bars[index].low;
+        let isPivot = true;
+        for (let offset = 1; offset <= radius; offset += 1) {
+            if (level > bars[index - offset].low || level > bars[index + offset].low) {
+                isPivot = false;
+                break;
+            }
+        }
+        const hasStrictTurn = level < bars[index - 1].low && level < bars[index + 1].low;
+        if (isPivot && hasStrictTurn) pivots.push({ index, level });
+    }
+    return pivots;
+}
+
+function classifyPivotStructure(
+    pivots: PivotLow[],
+    atr: number
+): ComputedState['priceStructure'] {
+    if (pivots.length < 2 || atr <= 0) return 'INSUFFICIENT';
+    const previous = pivots[pivots.length - 2].level;
+    const current = pivots[pivots.length - 1].level;
+    const differenceAtr = (current - previous) / atr;
+    if (differenceAtr >= 0.25) return 'HIGHER_LOW';
+    if (differenceAtr <= -0.25) return 'LOWER_LOW';
+    return 'FLAT';
 }
 
 function average(values: number[]): number {

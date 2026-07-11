@@ -218,11 +218,14 @@ export interface ExposureTimingEvidence {
 }
 
 export interface ExposureTimingSupport {
-  label: 'MA50' | 'MA200';
+  kind: 'moving_average' | 'swing_low';
+  label: 'MA50' | 'MA200' | '前低';
   level: number;
   distance_pct: number;
+  distance_atr: number | null;
   slope_20d_pct: number | null;
   closes_held_3d: number;
+  prior_touch_count: number;
 }
 
 export interface ExposureTimingAsset {
@@ -239,6 +242,10 @@ export interface ExposureTimingAsset {
   ma20: number | null;
   ma50: number | null;
   ma200: number | null;
+  atr_20: number | null;
+  atr_pct: number | null;
+  volume_ratio_20d: number | null;
+  price_structure: 'HIGHER_LOW' | 'LOWER_LOW' | 'FLAT' | 'INSUFFICIENT';
   support: ExposureTimingSupport | null;
   evidence: ExposureTimingEvidence[];
   next_trigger: string;

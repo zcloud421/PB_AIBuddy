@@ -16,8 +16,8 @@ function historyFromCloses(closes: number[]): Array<{ date: string; close: numbe
     }));
 }
 
-const calmHistory = historyFromCloses(Array.from({ length: 60 }, (_, index) => 100 + index * 0.05));
-const choppyHistory = historyFromCloses(Array.from({ length: 60 }, (_, index) => 100 + (index % 2 === 0 ? 12 : -12)));
+const calmHistory = historyFromCloses(Array.from({ length: 220 }, (_, index) => 100 + index * 0.05));
+const choppyHistory = historyFromCloses(Array.from({ length: 220 }, (_, index) => 100 + (index % 2 === 0 ? 12 : -12)));
 
 assert.equal(computeRealizedVol(historyFromCloses([100, 101, 102]), 30), null);
 assert.equal(computeRealizedVol(historyFromCloses(Array.from({ length: 30 }, () => 100)), 30), 0);
@@ -158,6 +158,20 @@ const nvdaLikeResult = scoreAndGrade({
     strikeData: { ...strike, iv: 0.6, mid_price: 4 }
 });
 assert.equal(nvdaLikeResult.gate_decisions?.some((item) => item.type === 'GRADE_CAP_HIGH_BETA'), false);
+
+const recentIpoResult = scoreAndGrade({
+    symbol: 'SPCX',
+    symbolData: symbolData(historyFromCloses(Array.from({ length: 40 }, (_, index) => 90 + index * 0.25))),
+    tenorData: tenor,
+    strikeData: strike
+});
+assert.equal(recentIpoResult.overall_grade, 'CAUTION');
+assert.ok(recentIpoResult.flags.some((item) => item.type === 'LIMITED_LISTING_HISTORY'));
+assert.ok(recentIpoResult.gate_decisions.some((item) => item.type === 'GRADE_CAP_LISTING_HISTORY'));
+assert.equal(
+    recentIpoResult.gate_decisions.find((item) => item.type === 'GRADE_CAP_LISTING_HISTORY')?.details?.available_trading_bars,
+    40
+);
 assert.equal(scoreBufferSuitability(8), 0);
 assert.ok(scoreBufferSuitability(20) > scoreBufferSuitability(12));
 assert.equal(scoreBufferSuitability(25), 1);

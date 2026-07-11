@@ -8,6 +8,10 @@ export interface SeedUnderlying {
     themes: string[];
     tier: 1 | 2;
     active: boolean;
+    status: 'active' | 'suspended' | 'under_review' | 'deprecated';
+    status_reason?: string | null;
+    reviewed_by?: string | null;
+    reviewed_at?: string | null;
     classification: UnderlyingClassification;
     adr_risk?: boolean;
     turnaround_watch?: boolean;
@@ -17,24 +21,27 @@ export interface SeedUnderlying {
 const ADR_RISK = new Set(['BABA', 'PDD', 'JD', 'BIDU', 'NTES', 'FUTU']);
 const TURNAROUND_WATCH = new Set(['INTC', 'NKE', 'LULU', 'NVO']);
 
-function u(input: Omit<SeedUnderlying, 'currency' | 'active' | 'adr_risk' | 'turnaround_watch' | 'holdable_concern'> & {
+function u(input: Omit<SeedUnderlying, 'currency' | 'active' | 'status' | 'adr_risk' | 'turnaround_watch' | 'holdable_concern'> & {
     active?: boolean;
+    status?: SeedUnderlying['status'];
     adr_risk?: boolean;
     turnaround_watch?: boolean;
     holdable_concern?: string | null;
 }): SeedUnderlying {
+    const status = input.status ?? (input.active === false ? 'deprecated' : 'active');
     return {
+        ...input,
         currency: 'USD',
-        active: input.active ?? true,
+        active: status === 'active',
+        status,
         adr_risk: input.adr_risk ?? ADR_RISK.has(input.symbol),
         turnaround_watch: input.turnaround_watch ?? TURNAROUND_WATCH.has(input.symbol),
-        holdable_concern: input.holdable_concern ?? null,
-        ...input
+        holdable_concern: input.holdable_concern ?? null
     };
 }
 
 export const UNDERLYINGS: SeedUnderlying[] = [
-    // T1 Core PB Names (34)
+    // T1 Core PB Names (36)
     u({ symbol: 'NVDA', exchange: 'NASDAQ', sector: 'Technology', themes: ['Mega-cap Tech / AI', 'AI Infrastructure', 'Semiconductors'], tier: 1, classification: 'both' }),
     u({ symbol: 'MSFT', exchange: 'NASDAQ', sector: 'Technology', themes: ['Mega-cap Tech / AI', 'Mag7', 'AI Software'], tier: 1, classification: 'both' }),
     u({ symbol: 'AAPL', exchange: 'NASDAQ', sector: 'Technology', themes: ['Mega-cap Tech / AI', 'Mag7', 'Consumer Tech'], tier: 1, classification: 'blue_chip' }),
@@ -67,20 +74,59 @@ export const UNDERLYINGS: SeedUnderlying[] = [
     u({ symbol: 'LLY', exchange: 'NYSE', sector: 'Healthcare', themes: ['Healthcare', 'GLP-1'], tier: 1, classification: 'both' }),
     u({ symbol: 'UNH', exchange: 'NYSE', sector: 'Healthcare', themes: ['Healthcare', 'Defensive'], tier: 1, classification: 'blue_chip' }),
     u({ symbol: 'JNJ', exchange: 'NYSE', sector: 'Healthcare', themes: ['Healthcare', 'Defensive'], tier: 1, classification: 'blue_chip' }),
+    u({ symbol: 'ISRG', exchange: 'NASDAQ', sector: 'Healthcare', themes: ['Medical Robotics', 'AI-enabled Healthcare'], tier: 1, classification: 'both' }),
+    u({ symbol: 'RTX', exchange: 'NYSE', sector: 'Industrials', themes: ['Aerospace & Defense', 'Security Infrastructure'], tier: 1, classification: 'both' }),
     u({ symbol: 'XOM', exchange: 'NYSE', sector: 'Energy', themes: ['Energy', 'Macro'], tier: 1, classification: 'blue_chip' }),
     u({ symbol: 'GLD', exchange: 'NYSEARCA', sector: 'Commodities', themes: ['Gold', 'Defensive'], tier: 1, classification: 'theme' }),
 
-    // T2 Theme / Tactical (19)
+    // T2 Theme / Tactical (20)
     u({ symbol: 'PLTR', exchange: 'NYSE', sector: 'Technology', themes: ['AI Software / Government Tech'], tier: 2, classification: 'theme' }),
     u({ symbol: 'DELL', exchange: 'NYSE', sector: 'Technology', themes: ['AI Infra Beta', 'Servers'], tier: 2, classification: 'theme' }),
     u({ symbol: 'LITE', exchange: 'NASDAQ', sector: 'Technology', themes: ['AI Infra Beta', 'Optical Networking'], tier: 2, classification: 'theme' }),
     u({ symbol: 'CEG', exchange: 'NASDAQ', sector: 'Energy', themes: ['AI Power / Nuclear', 'Nuclear'], tier: 2, classification: 'theme' }),
     u({ symbol: 'VST', exchange: 'NYSE', sector: 'Utilities', themes: ['Nuclear + Power Demand + Energy'], tier: 2, classification: 'theme' }),
     u({ symbol: 'PWR', exchange: 'NYSE', sector: 'Industrials', themes: ['AI Power', 'Grid Engineering'], tier: 2, classification: 'theme' }),
+    u({ symbol: 'GDX', exchange: 'NYSEARCA', sector: 'Commodities', themes: ['Gold Miners', 'Gold Beta'], tier: 2, classification: 'theme', holdable_concern: 'Gold-miner operating leverage requires a deeper buffer than physical-gold exposure' }),
     u({ symbol: 'BABA', exchange: 'NYSE', sector: 'Consumer Discretionary', themes: ['China ADR', 'China Tech'], tier: 2, classification: 'blue_chip' }),
-    u({ symbol: 'PDD', exchange: 'NASDAQ', sector: 'Consumer Discretionary', themes: ['China ADR', 'China Tech'], tier: 2, classification: 'theme' }),
-    u({ symbol: 'JD', exchange: 'NASDAQ', sector: 'Consumer Discretionary', themes: ['China ADR', 'E-Commerce'], tier: 2, classification: 'theme' }),
-    u({ symbol: 'BIDU', exchange: 'NASDAQ', sector: 'Technology', themes: ['China ADR', 'China Tech'], tier: 2, classification: 'theme' }),
+    u({
+        symbol: 'PDD',
+        exchange: 'NASDAQ',
+        sector: 'Consumer Discretionary',
+        themes: ['China ADR', 'China Tech'],
+        tier: 2,
+        classification: 'theme',
+        status: 'under_review',
+        status_reason: 'China internet sector trend remains weak; require sector and company-specific re-confirmation',
+        reviewed_by: 'IC-2026Q3',
+        reviewed_at: '2026-07-11T00:00:00Z',
+        holdable_concern: 'Price-led competition and cross-border policy uncertainty require tighter PB suitability review'
+    }),
+    u({
+        symbol: 'JD',
+        exchange: 'NASDAQ',
+        sector: 'Consumer Discretionary',
+        themes: ['China ADR', 'E-Commerce'],
+        tier: 2,
+        classification: 'theme',
+        status: 'under_review',
+        status_reason: 'China consumer and e-commerce regime remains weak; require trend and earnings re-confirmation',
+        reviewed_by: 'IC-2026Q3',
+        reviewed_at: '2026-07-11T00:00:00Z',
+        holdable_concern: 'Margin pressure and intense e-commerce competition; search remains available for RM review'
+    }),
+    u({
+        symbol: 'BIDU',
+        exchange: 'NASDAQ',
+        sector: 'Technology',
+        themes: ['China ADR', 'China Tech'],
+        tier: 2,
+        classification: 'theme',
+        status: 'under_review',
+        status_reason: 'Legacy advertising weakness offsets AI cloud growth; require trend and earnings re-confirmation',
+        reviewed_by: 'IC-2026Q3',
+        reviewed_at: '2026-07-11T00:00:00Z',
+        holdable_concern: 'AI transition is promising but legacy advertising remains under pressure'
+    }),
     u({ symbol: 'COIN', exchange: 'NASDAQ', sector: 'Financials', themes: ['Bitcoin Proxy + High Volatility', 'Crypto'], tier: 2, classification: 'theme', holdable_concern: 'Crypto beta and regulatory volatility; size discipline required' }),
     u({ symbol: 'CRCL', exchange: 'NYSE', sector: 'Technology', themes: ['Stablecoin Infrastructure + Fintech + High Volatility'], tier: 2, classification: 'theme', holdable_concern: 'Stablecoin infrastructure beta; very high volatility' }),
     u({ symbol: 'MSTR', exchange: 'NASDAQ', sector: 'Technology', themes: ['Bitcoin Proxy + High Volatility'], tier: 2, classification: 'theme', holdable_concern: 'Bitcoin proxy; client suitability must be explicit' }),
@@ -160,7 +206,7 @@ export async function seedUnderlyingsInline(options: { skipCompanyNameFetch?: bo
             const companyName = options.skipCompanyNameFetch
                 ? null
                 : await fetchTickerCompanyName(underlying.symbol).catch(() => null);
-            const status = underlying.active ? 'active' : 'deprecated';
+            const status = underlying.status;
             await client.query(
                 `
                     INSERT INTO underlyings (
@@ -178,9 +224,16 @@ export async function seedUnderlyingsInline(options: { skipCompanyNameFetch?: bo
                         adr_risk,
                         turnaround_watch,
                         holdable_concern,
+                        status_reason,
+                        reviewed_by,
+                        reviewed_at,
                         removed_at
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7::text[], $8, $9, $10, $11, $12, $13, $14, CASE WHEN $10 = 'active' THEN NULL ELSE NOW() END)
+                    VALUES (
+                        $1, $2, $3, $4, $5, $6, $7::text[], $8, $9, $10, $11, $12, $13, $14,
+                        $15, $16, $17::timestamptz,
+                        CASE WHEN $10 = 'deprecated' THEN NOW() ELSE NULL END
+                    )
                     ON CONFLICT (symbol) DO UPDATE
                     SET exchange = EXCLUDED.exchange,
                         name = EXCLUDED.name,
@@ -195,7 +248,13 @@ export async function seedUnderlyingsInline(options: { skipCompanyNameFetch?: bo
                         adr_risk = EXCLUDED.adr_risk,
                         turnaround_watch = EXCLUDED.turnaround_watch,
                         holdable_concern = EXCLUDED.holdable_concern,
-                        removed_at = CASE WHEN EXCLUDED.status = 'active' THEN NULL ELSE COALESCE(underlyings.removed_at, NOW()) END
+                        status_reason = EXCLUDED.status_reason,
+                        reviewed_by = EXCLUDED.reviewed_by,
+                        reviewed_at = EXCLUDED.reviewed_at,
+                        removed_at = CASE
+                            WHEN EXCLUDED.status = 'deprecated' THEN COALESCE(underlyings.removed_at, NOW())
+                            ELSE NULL
+                        END
                 `,
                 [
                     underlying.symbol,
@@ -211,7 +270,10 @@ export async function seedUnderlyingsInline(options: { skipCompanyNameFetch?: bo
                     underlying.classification,
                     underlying.adr_risk ?? false,
                     underlying.turnaround_watch ?? false,
-                    underlying.holdable_concern ?? null
+                    underlying.holdable_concern ?? null,
+                    underlying.status_reason ?? null,
+                    underlying.reviewed_by ?? null,
+                    underlying.reviewed_at ?? null
                 ]
             );
         }

@@ -103,7 +103,8 @@ export type GateDecisionType =
   | 'GRADE_CAP_HIGH_BETA'
   | 'GRADE_CAP_NEWS_SHOCK'
   | 'GRADE_CAP_OVEREXTENDED'
-  | 'GRADE_CAP_ASSIGNMENT_QUALITY';
+  | 'GRADE_CAP_ASSIGNMENT_QUALITY'
+  | 'GRADE_CAP_LISTING_HISTORY';
 
 export interface GateDecision {
   type: GateDecisionType;

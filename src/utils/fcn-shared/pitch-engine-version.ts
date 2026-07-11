@@ -49,6 +49,20 @@ export function hasCompanyIntroPrepend(whyNow: string | null | undefined): boole
     return firstSentence.includes('是');
 }
 
+export function shouldAutoRepairDegradedGo(input: {
+    grade: string;
+    source_quality: NarrativeSourceQuality | null | undefined;
+    repair_attempted_at?: string | null;
+    retriable?: boolean;
+}): boolean {
+    return (
+        input.grade === 'GO' &&
+        (input.source_quality === 'go_pitch_minimal' || input.source_quality === 'go_pitch_template') &&
+        !input.repair_attempted_at &&
+        input.retriable !== false
+    );
+}
+
 export function getPitchNarrativeStaleReason(input: {
     source_quality: NarrativeSourceQuality | null | undefined;
     why_now: string | null | undefined;

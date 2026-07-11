@@ -20,6 +20,7 @@ export type FlagType =
     | 'MATERIAL_NEWS_OVERHANG'
     | 'BEARISH_STRUCTURE'
     | 'LOWER_HIGH_RISK'
+    | 'LIMITED_LISTING_HISTORY'
     | 'LOW_COUPON'
     | 'BUFFER_QUALITY'
     | 'LOW_LIQUIDITY'
@@ -64,6 +65,23 @@ export interface NarrativeOutput {
         | 'caution_pitch_template'
         | 'avoid_pitch_deterministic';
     engine_version?: string;
+    generation_diagnostics?: {
+        reason:
+            | 'HYBRID_VALIDATED'
+            | 'INVALID_TERMS_PREFLIGHT'
+            | 'INSUFFICIENT_SAFE_EVIDENCE'
+            | 'LLM_DISABLED'
+            | 'LLM_UNAVAILABLE'
+            | 'LLM_VALIDATION_FAILED'
+            | 'LLM_ERROR'
+            | 'ENGINE_NULL_FALLBACK';
+        retriable: boolean;
+        attempts: number;
+        has_financials?: boolean;
+        holding_tags?: string[];
+        timing_tags?: string[];
+        validation_reasons?: string[];
+    };
 }
 
 export interface EligibilityStatus {
@@ -131,7 +149,8 @@ export type GateDecisionType =
     | 'GRADE_CAP_HIGH_BETA'
     | 'GRADE_CAP_NEWS_SHOCK'
     | 'GRADE_CAP_OVEREXTENDED'
-    | 'GRADE_CAP_ASSIGNMENT_QUALITY';
+    | 'GRADE_CAP_ASSIGNMENT_QUALITY'
+    | 'GRADE_CAP_LISTING_HISTORY';
 
 export interface GateDecision {
     type: GateDecisionType;

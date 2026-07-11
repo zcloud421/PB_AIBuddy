@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import {
+    PITCH_ENGINE_VERSION,
     getPitchNarrativeStaleReason,
     hasCompanyIntroPrepend,
     isCurrentPitchSourceQuality,
-    narrativeSourceQualityPriority
+    narrativeSourceQualityPriority,
+    shouldAutoRepairDegradedGo
 } from './pitch-engine-version';
 
 assert.equal(isCurrentPitchSourceQuality('go_pitch_hybrid_validated'), true);
@@ -20,11 +22,24 @@ assert.ok(narrativeSourceQualityPriority('template_fallback') > narrativeSourceQ
 assert.equal(hasCompanyIntroPrepend('NVIDIA 是 AI 算力 GPU 全球龙头供应商。条款上...'), true);
 assert.equal(hasCompanyIntroPrepend('订单可见度较高，当前结构可看。'), false);
 
+assert.equal(shouldAutoRepairDegradedGo({
+    grade: 'GO', source_quality: 'go_pitch_template', repair_attempted_at: null, retriable: true
+}), true);
+assert.equal(shouldAutoRepairDegradedGo({
+    grade: 'GO', source_quality: 'go_pitch_minimal', repair_attempted_at: null, retriable: false
+}), false);
+assert.equal(shouldAutoRepairDegradedGo({
+    grade: 'GO', source_quality: 'go_pitch_template', repair_attempted_at: new Date().toISOString(), retriable: true
+}), false);
+assert.equal(shouldAutoRepairDegradedGo({
+    grade: 'CAUTION', source_quality: 'go_pitch_template', repair_attempted_at: null, retriable: true
+}), false);
+
 assert.equal(
     getPitchNarrativeStaleReason({
         source_quality: 'go_pitch_hybrid_validated',
         why_now: 'NVIDIA 是 AI 算力 GPU 全球龙头供应商。条款上...',
-        engine_version: '2026-05-25-finalcheck-v1'
+        engine_version: PITCH_ENGINE_VERSION
     }),
     null
 );
@@ -32,7 +47,7 @@ assert.match(
     getPitchNarrativeStaleReason({
         source_quality: 'go_pitch_hybrid_validated',
         why_now: 'NVIDIA 是 AI 算力 GPU 全球龙头供应商。条款上...',
-        engine_version: '2026-05-25-company-desc-v1'
+        engine_version: 'legacy-version'
     }) ?? '',
     /^stale_engine_version:/
 );
@@ -47,7 +62,7 @@ assert.match(
     getPitchNarrativeStaleReason({
         source_quality: 'caution_pitch_template',
         why_now: '订单可见度较高，当前结构可看。',
-        engine_version: '2026-05-25-finalcheck-v1'
+        engine_version: PITCH_ENGINE_VERSION
     }) ?? '',
     /^missing_company_intro:/
 );

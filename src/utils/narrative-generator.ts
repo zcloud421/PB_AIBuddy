@@ -30,6 +30,27 @@ export interface NarrativeOutput {
     key_events: string[];
     source_quality?: NarrativeSourceQuality;
     engine_version?: string;
+    generation_diagnostics?: NarrativeGenerationDiagnostics;
+}
+
+export type NarrativeGenerationReason =
+    | 'HYBRID_VALIDATED'
+    | 'INVALID_TERMS_PREFLIGHT'
+    | 'INSUFFICIENT_SAFE_EVIDENCE'
+    | 'LLM_DISABLED'
+    | 'LLM_UNAVAILABLE'
+    | 'LLM_VALIDATION_FAILED'
+    | 'LLM_ERROR'
+    | 'ENGINE_NULL_FALLBACK';
+
+export interface NarrativeGenerationDiagnostics {
+    reason: NarrativeGenerationReason;
+    retriable: boolean;
+    attempts: number;
+    has_financials?: boolean;
+    holding_tags?: string[];
+    timing_tags?: string[];
+    validation_reasons?: string[];
 }
 
 interface NarrativeNewsItem {

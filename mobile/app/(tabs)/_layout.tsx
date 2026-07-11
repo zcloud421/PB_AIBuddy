@@ -61,8 +61,8 @@ export default function TabLayout() {
       <Tabs.Screen
         name="markets"
         options={{
-          title: 'RISK',
-          tabBarIcon: ({ color }) => <Feather name="shield" size={22} color={color} />,
+          title: 'TIMING',
+          tabBarIcon: ({ color }) => <Feather name="crosshair" size={22} color={color} />,
         }}
       />
       <Tabs.Screen

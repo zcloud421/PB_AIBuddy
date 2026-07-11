@@ -44,6 +44,7 @@ import {
     getUnderlyingBySymbol,
     getActiveHouseOverrideBySymbol,
     mapTodayIdeasResponse,
+    markNarrativeRepairAttempt,
     recordDrawdownAttributionDecision,
     saveIdeaCandidate,
     updateIdeaCandidateNarrative,
@@ -58,10 +59,15 @@ import { HttpError } from '../lib/http-error';
 import { buildThemeNarrative } from './theme-narrative';
 import { generateNarrative, sanitizeNarrativeOutput } from '../utils/narrative-generator';
 import { buildNarrativeInput } from '../utils/narrative-input-builder';
-import { PITCH_ENGINE_VERSION, getPitchNarrativeStaleReason } from '../utils/fcn-shared/pitch-engine-version';
+import {
+    PITCH_ENGINE_VERSION,
+    getPitchNarrativeStaleReason,
+    shouldAutoRepairDegradedGo
+} from '../utils/fcn-shared/pitch-engine-version';
 import { getEngineMode } from '../utils/fcn-gates/engine-mode';
 import { STANDARD_TARGET_COUPON_PCT } from '../utils/fcn-gates/combo-picker';
 import { loadMacroContext } from '../utils/fcn-gates/macro-context';
+import { canAddChinaAdrExposure, chinaAdrTacticalPenalty } from '../utils/fcn-universe-policy';
 import type {
     AsyncScoringAcceptedResponse,
     AsyncScoringStatusResponse,
@@ -4294,7 +4300,11 @@ export async function getTodayIdeas(): Promise<TodayIdeasResponse> {
         getRiskFlagsByRunId(latestRun.run_id),
         getDailyBestByDate(latestRun.run_date)
     ]);
-    const normalizedIdeas = ideas.map((idea) => normalizeCommodityBetaTodayIdea(idea));
+    // A completed run is an immutable audit snapshot, but today's user-facing
+    // pool must respect current universe governance immediately.
+    const normalizedIdeas = ideas
+        .filter((idea) => idea.underlying_status === undefined || idea.underlying_status === 'active')
+        .map((idea) => normalizeCommodityBetaTodayIdea(idea));
     const flagsBySymbol = new Map<string, Flag[]>();
     for (const flag of riskFlags) {
         const existing = flagsBySymbol.get(flag.symbol) ?? [];
@@ -4306,7 +4316,7 @@ export async function getTodayIdeas(): Promise<TodayIdeasResponse> {
         flagsBySymbol.set(flag.symbol, existing);
     }
 
-    const dailyBest: DailyBestCard | null = dailyBestRow
+    const dailyBest: DailyBestCard | null = dailyBestRow && normalizedIdeas.some((idea) => idea.symbol === dailyBestRow.symbol)
         ? await mapDailyBestCard(dailyBestRow.symbol, dailyBestRow.theme ?? 'Featured', normalizedIdeas, flagsBySymbol)
         : null;
 
@@ -4386,6 +4396,7 @@ export async function selectDailyBest(candidates: ScoringResult[]): Promise<{
         const tierBonus = underlying?.tier === 1 ? 0.05 : 0;
         const freshnessPenalty = calculateFreshnessPenalty(candidate.symbol, recentHistory);
         const macroPenalty = applyMacroSensitivityPenalty(candidate, underlying, activeFocusStatuses);
+        const adrTacticalPenalty = chinaAdrTacticalPenalty(candidate, underlying);
         const latestRunDate = recentHistory[0]?.run_date ?? null;
         const wasYesterdayHero =
             latestRunDate !== null &&
@@ -4401,6 +4412,7 @@ export async function selectDailyBest(candidates: ScoringResult[]): Promise<{
             tierBonus -
             freshnessPenalty -
             macroPenalty -
+            adrTacticalPenalty -
             (wasYesterdayHero ? 0.06 : 0);
 
         if (!bestChoice || adjustedScore > bestChoice.adjustedScore) {
@@ -4460,10 +4472,12 @@ export async function selectDailyRecommendationShowcase(
     const rankedGo = [...finalCandidates].sort((left, right) => {
         const leftScore =
             adjustedShowcaseScore(left, recentHistory, dailyBestSymbol) -
-            applyMacroSensitivityPenalty(left, underlyingMap.get(left.symbol) ?? null, activeFocusStatuses);
+            applyMacroSensitivityPenalty(left, underlyingMap.get(left.symbol) ?? null, activeFocusStatuses) -
+            chinaAdrTacticalPenalty(left, underlyingMap.get(left.symbol) ?? null);
         const rightScore =
             adjustedShowcaseScore(right, recentHistory, dailyBestSymbol) -
-            applyMacroSensitivityPenalty(right, underlyingMap.get(right.symbol) ?? null, activeFocusStatuses);
+            applyMacroSensitivityPenalty(right, underlyingMap.get(right.symbol) ?? null, activeFocusStatuses) -
+            chinaAdrTacticalPenalty(right, underlyingMap.get(right.symbol) ?? null);
         return rightScore - leftScore;
     });
 
@@ -4495,11 +4509,15 @@ export async function selectDailyRecommendationShowcase(
     const usedSubsectors = new Map<string, number>();
     const usedCycleFamilies = new Map<string, number>();
     const usedThemes = new Map<string, number>();
+    let usedChinaAdrCount = 0;
 
     for (const item of showcase) {
         const subsector = inferMappedSubsector(item.symbol);
         const cycleFamily = inferSymbolCycleFamily(item.symbol);
         const theme = underlyingMap.get(item.symbol)?.themes?.[0] ?? null;
+        if (underlyingMap.get(item.symbol)?.adr_risk) {
+            usedChinaAdrCount += 1;
+        }
         if (subsector) {
             usedSubsectors.set(subsector, (usedSubsectors.get(subsector) ?? 0) + 1);
         }
@@ -4519,9 +4537,13 @@ export async function selectDailyRecommendationShowcase(
         for (let index = 0; index < remaining.length; index += 1) {
             const candidate = remaining[index];
             const underlying = underlyingMap.get(candidate.symbol) ?? null;
+            if (!canAddChinaAdrExposure(underlying, usedChinaAdrCount)) {
+                continue;
+            }
             const baseScore =
                 adjustedShowcaseScore(candidate, recentHistory, dailyBestSymbol) -
-                applyMacroSensitivityPenalty(candidate, underlying, activeFocusStatuses);
+                applyMacroSensitivityPenalty(candidate, underlying, activeFocusStatuses) -
+                chinaAdrTacticalPenalty(candidate, underlying);
             const subsector = inferMappedSubsector(candidate.symbol);
             const cycleFamily = inferSymbolCycleFamily(candidate.symbol);
             const theme = underlying?.themes?.[0] ?? null;
@@ -4555,6 +4577,9 @@ export async function selectDailyRecommendationShowcase(
         const selectedSubsector = inferMappedSubsector(selected.symbol);
         const selectedCycleFamily = inferSymbolCycleFamily(selected.symbol);
         const selectedTheme = underlyingMap.get(selected.symbol)?.themes?.[0] ?? null;
+        if (underlyingMap.get(selected.symbol)?.adr_risk) {
+            usedChinaAdrCount += 1;
+        }
         if (selectedSubsector) {
             usedSubsectors.set(selectedSubsector, (usedSubsectors.get(selectedSubsector) ?? 0) + 1);
         }
@@ -5108,6 +5133,7 @@ async function scoreSingleSymbol(symbol: string): Promise<SymbolIdeaResponse> {
                     sentimentScore: narrative?.sentiment_score ?? null,
                     sourceQuality: narrative?.source_quality ?? null,
                     narrativeEngineVersion: narrative?.engine_version ?? null,
+                    narrativeDiagnostics: narrative?.generation_diagnostics ?? null,
                     gateDecisions: scoring.gate_decisions,
                     shadowGrade: scoring.shadow_grade ?? null,
                     engineMode: scoring.engine_mode,
@@ -6456,6 +6482,115 @@ function toNullableNumber(value: number | string | null | undefined): number | n
 
     const numericValue = Number(value);
     return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+export interface NarrativeRepairSummary {
+    run_id: string | null;
+    attempted: number;
+    repaired: number;
+    remaining: Array<{
+        symbol: string;
+        source_quality: string | null;
+        reason: string;
+    }>;
+}
+
+export async function repairLatestDegradedGoNarratives(limit = 20): Promise<NarrativeRepairSummary> {
+    const latestRun = await getLatestCompletedScheduledRun();
+    if (!latestRun) return { run_id: null, attempted: 0, repaired: 0, remaining: [] };
+
+    const candidates = (await getIdeasByRunId(latestRun.run_id))
+        .filter((row) => shouldAutoRepairDegradedGo({
+            grade: row.overall_grade,
+            source_quality: row.source_quality,
+            repair_attempted_at: row.narrative_repair_attempted_at,
+            retriable: row.narrative_diagnostics?.retriable
+        }))
+        .slice(0, Math.max(0, limit));
+
+    let attempted = 0;
+    let repaired = 0;
+    const remaining: NarrativeRepairSummary['remaining'] = [];
+
+    for (const candidate of candidates) {
+        const claimed = await markNarrativeRepairAttempt(latestRun.run_id, candidate.symbol);
+        if (!claimed) continue;
+        attempted += 1;
+
+        try {
+            const cachedRow = await getIdeaBySymbolAndDate(candidate.symbol, latestRun.run_date);
+            if (!cachedRow) {
+                remaining.push({
+                    symbol: candidate.symbol,
+                    source_quality: candidate.source_quality ?? null,
+                    reason: 'CACHED_ROW_MISSING'
+                });
+                continue;
+            }
+            const [priceContext, flags] = await Promise.all([
+                getPriceContextBySymbol(candidate.symbol),
+                getRiskFlagsByRunAndSymbol(latestRun.run_id, candidate.symbol)
+            ]);
+            await refreshNarrativeInBackground(
+                candidate.symbol,
+                cachedRow,
+                priceContext,
+                flags,
+                null,
+                'auto_repair_degraded_go'
+            );
+
+            const refreshed = await getIdeaBySymbolAndDate(candidate.symbol, latestRun.run_date);
+            if (refreshed?.source_quality === 'go_pitch_hybrid_validated') {
+                repaired += 1;
+            } else {
+                remaining.push({
+                    symbol: candidate.symbol,
+                    source_quality: refreshed?.source_quality ?? candidate.source_quality ?? null,
+                    reason:
+                        refreshed?.narrative_diagnostics?.reason ??
+                        candidate.narrative_diagnostics?.reason ??
+                        'UNKNOWN'
+                });
+            }
+        } catch (error) {
+            remaining.push({
+                symbol: candidate.symbol,
+                source_quality: candidate.source_quality ?? null,
+                reason: error instanceof Error ? `REPAIR_ERROR:${error.message}` : 'REPAIR_ERROR'
+            });
+        }
+    }
+
+    // Report every degraded GO still present, including non-retriable
+    // insufficient-evidence cases that were intentionally not sent to the LLM.
+    const remainingBySymbol = new Map(remaining.map((item) => [item.symbol, item]));
+    for (const row of await getIdeasByRunId(latestRun.run_id)) {
+        if (
+            row.overall_grade === 'GO' &&
+            (row.source_quality === 'go_pitch_minimal' || row.source_quality === 'go_pitch_template')
+        ) {
+            remainingBySymbol.set(row.symbol, {
+                symbol: row.symbol,
+                source_quality: row.source_quality ?? null,
+                reason:
+                    remainingBySymbol.get(row.symbol)?.reason ??
+                    row.narrative_diagnostics?.reason ??
+                    'LEGACY_DIAGNOSTICS_MISSING'
+            });
+        }
+    }
+    const finalRemaining = [...remainingBySymbol.values()].sort((a, b) => a.symbol.localeCompare(b.symbol));
+
+    console.log(JSON.stringify({
+        tag: 'go_pitch_auto_repair_complete',
+        run_id: latestRun.run_id,
+        attempted,
+        repaired,
+        remaining: finalRemaining,
+        ts: new Date().toISOString()
+    }));
+    return { run_id: latestRun.run_id, attempted, repaired, remaining: finalRemaining };
 }
 
 async function refreshNarrativeInBackground(

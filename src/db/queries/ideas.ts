@@ -4,6 +4,7 @@ import type { DailyBestCard, DailyMarketNarrative, DrawdownAttribution, Flag, Ma
 import type { DailyPriceBar } from '../../data/massive-fetcher';
 import { PITCH_ENGINE_VERSION, narrativeSourceQualityPriority } from '../../utils/fcn-shared/pitch-engine-version';
 import type { FcnEngineMode, GateDecision } from '../../utils/fcn-gates/types';
+import { truncateLikelyTickerReuse } from '../../utils/price-history-integrity';
 
 export interface LatestCompletedRun {
     run_id: string;
@@ -187,6 +188,8 @@ export interface TodayIdeaRow {
     sentiment_score: number | null;
     source_quality: NarrativeOutput['source_quality'] | null;
     narrative_engine_version: string | null;
+    narrative_diagnostics?: NarrativeOutput['generation_diagnostics'] | null;
+    narrative_repair_attempted_at?: string | null;
     gate_decisions: GateDecision[] | null;
     shadow_grade: 'GO' | 'CAUTION' | 'AVOID' | null;
     engine_mode: FcnEngineMode | null;
@@ -207,6 +210,7 @@ export interface TodayIdeaRow {
     selected_implied_volatility: number | null;
     realized_volatility: number | null;
     volatility_risk_premium: number | null;
+    underlying_status?: 'active' | 'suspended' | 'under_review' | 'deprecated';
 }
 
 export interface RiskFlagRow {
@@ -241,6 +245,8 @@ export interface CachedIdeaRow {
     sentiment_score: number | null;
     source_quality: NarrativeOutput['source_quality'] | null;
     narrative_engine_version: string | null;
+    narrative_diagnostics?: NarrativeOutput['generation_diagnostics'] | null;
+    narrative_repair_attempted_at?: string | null;
     gate_decisions: GateDecision[] | null;
     shadow_grade: 'GO' | 'CAUTION' | 'AVOID' | null;
     engine_mode: FcnEngineMode | null;
@@ -295,6 +301,7 @@ export interface SaveIdeaCandidateInput {
     sentimentScore?: number | null;
     sourceQuality?: NarrativeOutput['source_quality'] | null;
     narrativeEngineVersion?: string | null;
+    narrativeDiagnostics?: NarrativeOutput['generation_diagnostics'] | null;
     gateDecisions?: GateDecision[] | null;
     shadowGrade?: 'GO' | 'CAUTION' | 'AVOID' | null;
     engineMode?: FcnEngineMode | null;
@@ -754,6 +761,7 @@ export async function getIdeasByRunId(runId: string): Promise<TodayIdeaRow[]> {
             u.sector,
             u.themes,
             u.tier,
+            u.status AS underlying_status,
             ic.overall_grade,
             ic.composite_score,
             ic.ranking_score,
@@ -771,6 +779,8 @@ export async function getIdeasByRunId(runId: string): Promise<TodayIdeaRow[]> {
             ic.sentiment_score,
             ic.source_quality,
             ic.narrative_engine_version,
+            ic.narrative_diagnostics,
+            ic.narrative_repair_attempted_at,
             ic.gate_decisions,
             ic.shadow_grade,
             ic.engine_mode,
@@ -895,6 +905,8 @@ export async function getIdeaBySymbolAndDate(symbol: string, date: string): Prom
             ic.sentiment_score,
             ic.source_quality,
             ic.narrative_engine_version,
+            ic.narrative_diagnostics,
+            ic.narrative_repair_attempted_at,
             ic.gate_decisions,
             ic.shadow_grade,
             ic.engine_mode,
@@ -937,6 +949,14 @@ export async function getIdeaBySymbolAndDate(symbol: string, date: string): Prom
             ORDER BY report_date ASC
             LIMIT 1
         ) ec ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT report_date
+            FROM earnings_calendar
+            WHERE symbol = ic.symbol
+              AND report_date < CURRENT_DATE
+            ORDER BY report_date DESC
+            LIMIT 1
+        ) recent_ec ON TRUE
         WHERE ic.symbol = $1
           AND ir.run_date <= $2::date
         ORDER BY
@@ -1124,7 +1144,7 @@ export async function getRecentPriceHistoryBySymbol(
         [symbol, limit]
     );
 
-    return result.rows.reverse();
+    return truncateLikelyTickerReuse(result.rows.reverse());
 }
 
 export async function upsertPriceHistory(input: UpsertPriceHistoryInput): Promise<void> {
@@ -1261,6 +1281,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             sentiment_score,
             source_quality,
             narrative_engine_version,
+            narrative_diagnostics,
             gate_decisions,
             shadow_grade,
             engine_mode,
@@ -1274,7 +1295,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             news_items,
             reasoning_text
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::date, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30::jsonb, $31, $32, $33, $34, $35, $36, $37, $38::jsonb, $39::jsonb, $40::jsonb, $41
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::date, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30::jsonb, $31::jsonb, $32, $33, $34, $35, $36, $37, $38, $39::jsonb, $40::jsonb, $41::jsonb, $42
         )
         ON CONFLICT (run_id, symbol) DO UPDATE
         SET overall_grade = EXCLUDED.overall_grade,
@@ -1304,6 +1325,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             sentiment_score = EXCLUDED.sentiment_score,
             source_quality = EXCLUDED.source_quality,
             narrative_engine_version = EXCLUDED.narrative_engine_version,
+            narrative_diagnostics = EXCLUDED.narrative_diagnostics,
             gate_decisions = EXCLUDED.gate_decisions,
             shadow_grade = EXCLUDED.shadow_grade,
             engine_mode = EXCLUDED.engine_mode,
@@ -1347,6 +1369,7 @@ export async function saveIdeaCandidate(result: SaveIdeaCandidateInput): Promise
             result.sentimentScore ?? null,
             result.sourceQuality ?? null,
             result.narrativeEngineVersion ?? (result.sourceQuality ? PITCH_ENGINE_VERSION : null),
+            JSON.stringify(result.narrativeDiagnostics ?? null),
             JSON.stringify(result.gateDecisions ?? []),
             result.shadowGrade ?? null,
             result.engineMode ?? 'weighted',
@@ -1419,6 +1442,8 @@ export async function ensureIdeaCandidatePriceColumns(): Promise<void> {
         ADD COLUMN IF NOT EXISTS news_items JSONB DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS source_quality TEXT NULL,
         ADD COLUMN IF NOT EXISTS narrative_engine_version TEXT NULL,
+        ADD COLUMN IF NOT EXISTS narrative_diagnostics JSONB,
+        ADD COLUMN IF NOT EXISTS narrative_repair_attempted_at TIMESTAMPTZ,
         ADD COLUMN IF NOT EXISTS ranking_score NUMERIC(10, 4),
         ADD COLUMN IF NOT EXISTS gate_decisions JSONB DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS shadow_grade TEXT,
@@ -1436,7 +1461,9 @@ export async function ensureSourceQualityColumn(): Promise<void> {
     await pool.query(`
         ALTER TABLE idea_candidates
         ADD COLUMN IF NOT EXISTS source_quality TEXT NULL,
-        ADD COLUMN IF NOT EXISTS narrative_engine_version TEXT NULL
+        ADD COLUMN IF NOT EXISTS narrative_engine_version TEXT NULL,
+        ADD COLUMN IF NOT EXISTS narrative_diagnostics JSONB,
+        ADD COLUMN IF NOT EXISTS narrative_repair_attempted_at TIMESTAMPTZ
     `);
 }
 
@@ -1624,6 +1651,7 @@ export async function updateIdeaCandidateNarrative(
         engine_version?: string;
         key_events: string[];
         news_items?: NewsItem[];
+        generation_diagnostics?: NarrativeOutput['generation_diagnostics'];
     }
 ): Promise<void> {
     const newSourceQuality = narrative.source_quality ?? null;
@@ -1653,7 +1681,8 @@ export async function updateIdeaCandidateNarrative(
             key_events = $6::jsonb,
             news_items = COALESCE($7::jsonb, news_items),
             source_quality = COALESCE($8::text, source_quality),
-            narrative_engine_version = $9::text
+            narrative_engine_version = $9::text,
+            narrative_diagnostics = COALESCE($11::jsonb, narrative_diagnostics)
         WHERE run_id = $1
           AND symbol = $2
           AND (
@@ -1686,7 +1715,8 @@ export async function updateIdeaCandidateNarrative(
             narrative.news_items ? JSON.stringify(narrative.news_items) : null,
             newSourceQuality,
             newEngineVersion,
-            newPriority
+            newPriority,
+            narrative.generation_diagnostics ? JSON.stringify(narrative.generation_diagnostics) : null
         ]
     );
 
@@ -1724,6 +1754,20 @@ export async function updateIdeaCandidateNarrative(
             }));
         }
     }
+}
+
+export async function markNarrativeRepairAttempt(runId: string, symbol: string): Promise<boolean> {
+    const result = await pool.query(
+        `
+        UPDATE idea_candidates
+        SET narrative_repair_attempted_at = NOW()
+        WHERE run_id = $1
+          AND symbol = $2
+          AND narrative_repair_attempted_at IS NULL
+        `,
+        [runId, symbol]
+    );
+    return (result.rowCount ?? 0) > 0;
 }
 
 export async function saveRiskFlags(runId: string, symbol: string, flags: Flag[]): Promise<void> {
@@ -1766,6 +1810,7 @@ export async function ensureRiskFlagEnumValues(): Promise<void> {
         'HIGH_COUPON_OVERRIDE',
         'BEARISH_STRUCTURE',
         'LOWER_HIGH_RISK',
+        'LIMITED_LISTING_HISTORY',
         'HIGH_BETA_THEME_CAUTION',
         'LOW_COUPON',
         'BUFFER_QUALITY',
