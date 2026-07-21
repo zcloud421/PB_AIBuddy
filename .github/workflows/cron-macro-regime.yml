@@ -34,7 +34,10 @@ jobs:
             HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
             BODY=$(echo "$RESPONSE" | sed '$d')
             echo "Attempt $i HTTP $HTTP_CODE"
-            echo "$BODY" | head -c 2000
+            # Bash substring, not `echo | head`: once the snapshot JSON outgrew the
+            # 64KB pipe buffer, head closing early SIGPIPE'd echo and failed the job
+            # under pipefail even though the snapshot succeeded.
+            printf '%s\n' "${BODY:0:2000}"
 
             [ "$HTTP_CODE" = "200" ] && break
             [ "$i" -lt 3 ] && sleep 30
