@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import {
     computeRealizedVol,
+    checkEligibility,
     evaluateComputedSpeculative,
     scoreBufferSuitability,
+    scoreListedOptionPremium,
     scoreAndGrade,
     type StrikeData,
     type SymbolData,
@@ -65,6 +67,14 @@ const tenor: TenorWindow = {
     strikes: [strike]
 };
 
+const lowListedPremiumScore = scoreListedOptionPremium({ ...strike, mid_price: 1 }, 90);
+const highListedPremiumScore = scoreListedOptionPremium({ ...strike, mid_price: 3.5 }, 90);
+const longerTenorPremiumScore = scoreListedOptionPremium({ ...strike, mid_price: 3.5 }, 180);
+assert.ok((lowListedPremiumScore ?? 1) < (highListedPremiumScore ?? 0));
+assert.ok((longerTenorPremiumScore ?? 1) < (highListedPremiumScore ?? 0));
+assert.ok((lowListedPremiumScore ?? 1) < 1, 'listed premium score must not saturate merely because premium/strike exceeds 1%');
+assert.equal(scoreListedOptionPremium({ ...strike, mid_price: null }, 90), null);
+
 const calmResult = scoreAndGrade({
     symbol: 'CALM',
     symbolData: symbolData(calmHistory),
@@ -84,6 +94,25 @@ assert.equal(typeof calmResult.composite_score, 'number');
 assert.equal(typeof calmResult.ranking_score, 'number');
 assert.ok((calmResult.ranking_score ?? 0) > (choppyResult.ranking_score ?? 0));
 assert.ok(calmResult.reasoning_text.includes('IV 50.0% vs 30d RV'));
+
+const forceCautionResult = scoreAndGrade({
+    symbol: 'HOUSECAP',
+    symbolData: { ...symbolData(calmHistory), house_override: 'FORCE_CAUTION' },
+    tenorData: tenor,
+    strikeData: strike
+});
+assert.equal(calmResult.overall_grade, 'GO');
+assert.equal(forceCautionResult.overall_grade, 'CAUTION');
+assert.ok(forceCautionResult.flags.some((item) => item.type === 'HOUSE_OVERRIDE'));
+assert.ok(
+    forceCautionResult.gate_decisions.some(
+        (item) => item.type === 'HOUSE_OVERRIDE' && item.old_grade === 'GO' && item.new_grade === 'CAUTION'
+    )
+);
+assert.equal(
+    checkEligibility({ ...symbolData(calmHistory), house_override: 'FORCE_AVOID' }).eligible,
+    false
+);
 
 const lowCouponRichVolResult = scoreAndGrade({
     symbol: 'LOWCOUPON',
@@ -191,5 +220,36 @@ const deepResult = scoreAndGrade({
 
 assert.ok((deepResult.buffer_score ?? 0) > (shallowResult.buffer_score ?? 0));
 assert.ok(deepResult.reasoning_text.includes('Buffer context'));
+
+const genericNegativeNewsResult = scoreAndGrade({
+    symbol: 'NEWS',
+    symbolData: symbolData(calmHistory),
+    tenorData: tenor,
+    strikeData: strike,
+    hasMaterialNegativeNews: true,
+    hasGuidanceCut: false
+});
+assert.equal(
+    genericNegativeNewsResult.gate_decisions.some(
+        (item) => item.type === 'FUNDAMENTAL_DETERIORATION'
+    ),
+    false,
+    'material negative news alone must not masquerade as a guidance cut'
+);
+
+const guidanceCutResult = scoreAndGrade({
+    symbol: 'GUIDECUT',
+    symbolData: symbolData(calmHistory),
+    tenorData: tenor,
+    strikeData: strike,
+    hasGuidanceCut: true
+});
+assert.ok(
+    guidanceCutResult.gate_decisions.some(
+        (item) =>
+            item.type === 'FUNDAMENTAL_DETERIORATION' &&
+            item.details?.guide_cut === true
+    )
+);
 
 console.log('scoring-engine VRP tests passed');

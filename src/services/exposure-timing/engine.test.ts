@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 
 import type { DailyPriceBar } from '../../data/massive-fetcher';
-import { buildExposureTimingSnapshot, computeAtr, computeExposureTiming } from './engine';
+import {
+    buildExposureTimingSnapshot,
+    computeAtr,
+    computeExposureTiming,
+    computeExposureTimingHealth,
+    computeRelativeStrength5d,
+    resolveExposureTimingStatus
+} from './engine';
+import type { ExposureTimingAsset, ExposureTimingSnapshot, ExposureTimingStatus } from './engine';
 
 function bars(options: {
     count?: number;
@@ -67,6 +75,24 @@ function lowerLowRetestBars(): DailyPriceBar[] {
     return result;
 }
 
+function withDateAndStatus(
+    asset: ExposureTimingAsset,
+    date: string,
+    status: ExposureTimingStatus
+): ExposureTimingAsset {
+    return {
+        ...asset,
+        status,
+        raw_status: status,
+        status_label: status,
+        data_as_of: date
+    };
+}
+
+function singleAssetSnapshot(asOf: string, asset: ExposureTimingAsset): ExposureTimingSnapshot {
+    return { as_of: asOf, macro_state: 'STABLE', assets: [asset] };
+}
+
 const atrWithGap = computeAtr([
     { date: '2026-01-01', open: 100, high: 101, low: 99, close: 100, volume: 1 },
     { date: '2026-01-02', open: 105, high: 106, low: 104, close: 105, volume: 1 }
@@ -78,6 +104,20 @@ assert.equal(stableTrend.status, 'BUILD_WINDOW');
 assert.equal(stableTrend.support?.kind, 'swing_low');
 assert.ok((stableTrend.support?.prior_touch_count ?? 0) >= 2);
 assert.match(stableTrend.next_trigger, /前低|MA/);
+
+// P0: raw BUILD requires an actual short-term reversal, not merely proximity to support.
+const noReversalBars = supportRetestBars();
+const lastNoReversal = noReversalBars.length - 1;
+noReversalBars[lastNoReversal] = {
+    ...noReversalBars[lastNoReversal],
+    open: 101.3,
+    high: 101.7,
+    low: 100.9,
+    close: 101.3
+};
+const noReversal = computeExposureTiming('SPY', '美国大盘', noReversalBars, 'STABLE');
+assert.notEqual(noReversal.status, 'BUILD_WINDOW');
+assert.ok(noReversal.evidence.some((item) => item.label === '短线反转' && item.value === '尚待确认'));
 
 const weakVolumeRetest = computeExposureTiming('SPY', '美国大盘', supportRetestBars(400_000), 'STABLE');
 assert.equal(weakVolumeRetest.status, 'WATCH_SUPPORT');
@@ -142,5 +182,86 @@ assert.deepEqual(snapshot.assets.map((asset) => asset.symbol), [
     'GDX'
 ]);
 assert.equal(snapshot.macro_state, 'STABLE');
+
+// P0: a single green trading session remains WATCH; the second confirms BUILD.
+const firstRawGreen = withDateAndStatus(stableTrend, '2026-07-10', 'BUILD_WINDOW');
+const firstDisplay = resolveExposureTimingStatus(firstRawGreen, null);
+assert.equal(firstDisplay.status, 'WATCH_SUPPORT');
+assert.equal(firstDisplay.confirmation_days, 1);
+assert.match(firstDisplay.summary, /单日反弹/);
+
+const secondRawGreen = withDateAndStatus(stableTrend, '2026-07-13', 'BUILD_WINDOW');
+const secondDisplay = resolveExposureTimingStatus(secondRawGreen, firstDisplay);
+assert.equal(secondDisplay.status, 'BUILD_WINDOW');
+assert.equal(secondDisplay.confirmation_days, 2);
+
+// Re-running on the same market close cannot manufacture an extra confirmation day.
+const sameSessionDisplay = resolveExposureTimingStatus(firstRawGreen, firstDisplay);
+assert.equal(sameSessionDisplay.status, 'WATCH_SUPPORT');
+assert.equal(sameSessionDisplay.confirmation_days, 1);
+
+// One soft reversal is buffered; two consecutive weak sessions demote the display.
+const firstRawWatch = withDateAndStatus(stableTrend, '2026-07-14', 'WATCH_SUPPORT');
+const bufferedDisplay = resolveExposureTimingStatus(firstRawWatch, secondDisplay);
+assert.equal(bufferedDisplay.status, 'BUILD_WINDOW');
+assert.equal(bufferedDisplay.deterioration_days, 1);
+const secondRawWatch = withDateAndStatus(stableTrend, '2026-07-15', 'WATCH_SUPPORT');
+const demotedDisplay = resolveExposureTimingStatus(secondRawWatch, bufferedDisplay);
+assert.equal(demotedDisplay.status, 'WATCH_SUPPORT');
+assert.equal(demotedDisplay.deterioration_days, 2);
+
+// Hard deterioration bypasses hysteresis immediately.
+const rawWait = withDateAndStatus(stableTrend, '2026-07-14', 'WAIT');
+assert.equal(resolveExposureTimingStatus(rawWait, secondDisplay).status, 'WAIT');
+
+// A materially different support reference resets the two-session confirmation clock.
+const shiftedSupport = {
+    ...secondRawGreen,
+    data_as_of: '2026-07-14',
+    support: secondRawGreen.support && secondRawGreen.atr_20
+        ? { ...secondRawGreen.support, level: secondRawGreen.support.level + secondRawGreen.atr_20 }
+        : secondRawGreen.support
+};
+const resetDisplay = resolveExposureTimingStatus(shiftedSupport, secondDisplay);
+assert.equal(resetDisplay.status, 'WATCH_SUPPORT');
+assert.equal(resetDisplay.confirmation_days, 1);
+
+// P2: 5-day relative strength is an explanatory fact, not a status gate.
+const relativeAssetBars = bars({ dailyChange: 0, lastChanges: [1, 1, 1, 1, 1, 1] });
+const relativeBenchmarkBars = bars({ dailyChange: 0, lastChanges: [0.2, 0.2, 0.2, 0.2, 0.2, 0.2] });
+const relativeStrength = computeRelativeStrength5d(relativeAssetBars, relativeBenchmarkBars, 'SPY');
+assert.ok(relativeStrength !== null && relativeStrength.change_5d_pct > 3);
+const relativeTiming = computeExposureTiming('QQQ', '科技成长', supportRetestBars(), 'STABLE', relativeStrength);
+assert.ok(relativeTiming.evidence.some((item) => item.label === '相对SPY 5日'));
+
+// P1: confirmed green transitions are evaluated after five distinct trading sessions.
+const healthBase = {
+    ...secondDisplay,
+    current_price: 101.6,
+    atr_20: 1,
+    support: secondDisplay.support
+        ? { ...secondDisplay.support, level: 101 }
+        : null
+};
+const healthSnapshots = [
+    singleAssetSnapshot('2026-07-09', withDateAndStatus(healthBase, '2026-07-09', 'WATCH_SUPPORT')),
+    singleAssetSnapshot('2026-07-10', withDateAndStatus(healthBase, '2026-07-10', 'BUILD_WINDOW')),
+    singleAssetSnapshot('2026-07-13', withDateAndStatus(healthBase, '2026-07-13', 'BUILD_WINDOW')),
+    singleAssetSnapshot('2026-07-14', withDateAndStatus(healthBase, '2026-07-14', 'WATCH_SUPPORT')),
+    // Duplicate data date emulates a weekend/app rerun and must not count as a session.
+    singleAssetSnapshot('2026-07-15', withDateAndStatus(healthBase, '2026-07-14', 'WATCH_SUPPORT')),
+    singleAssetSnapshot('2026-07-16', {
+        ...withDateAndStatus(healthBase, '2026-07-16', 'WAIT'),
+        current_price: 100.5
+    }),
+    singleAssetSnapshot('2026-07-17', withDateAndStatus(healthBase, '2026-07-17', 'WAIT')),
+    singleAssetSnapshot('2026-07-20', withDateAndStatus(healthBase, '2026-07-20', 'WATCH_SUPPORT'))
+];
+const health = computeExposureTimingHealth(healthSnapshots, 5);
+assert.equal(health.matured_confirmations, 1);
+assert.equal(health.reverted_to_watch, 1);
+assert.equal(health.support_failures, 1);
+assert.equal(health.reversion_rate_pct, 100);
+assert.equal(health.support_failure_rate_pct, 100);
 
 console.log('exposure-timing engine tests passed');

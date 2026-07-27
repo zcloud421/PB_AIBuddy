@@ -17,6 +17,7 @@ export interface StockNewsContext {
     daysSinceEarnings: number | null;
     sentimentProxy: number | null;
     hasMaterialNegativeNews: boolean;
+    hasGuidanceCut: boolean;
 }
 
 const FINNHUB_BASE_URL = 'https://finnhub.io/api/v1';
@@ -344,7 +345,8 @@ export async function fetchStockNewsContext(
             earningsWeight: effectiveEarningsWeight,
             daysSinceEarnings: earningsStatus.daysSinceEarnings,
             sentimentProxy: hasRecentEarnings ? scoreRecentEarningsHeadlines(combinedItems) : null,
-            hasMaterialNegativeNews: detectMaterialNegativeNews(combinedItems)
+            hasMaterialNegativeNews: detectMaterialNegativeNews(combinedItems),
+            hasGuidanceCut: detectGuidanceCutNews(combinedItems)
         };
     } catch {
         return {
@@ -355,7 +357,8 @@ export async function fetchStockNewsContext(
             earningsWeight: 0,
             daysSinceEarnings: null,
             sentimentProxy: null,
-            hasMaterialNegativeNews: false
+            hasMaterialNegativeNews: false,
+            hasGuidanceCut: false
         };
     }
 }
@@ -853,20 +856,30 @@ function scoreRecentEarningsHeadlines(items: NewsItem[]): number {
     return Math.min(Math.max(Number(score.toFixed(2)), 0), 1);
 }
 
-function detectMaterialNegativeNews(items: NewsItem[]): boolean {
+export function detectGuidanceCutNews(items: NewsItem[]): boolean {
+    return items.some((item) => {
+        const normalizedTitle = item.title.replace(/\s+/g, ' ').trim();
+        const isAnalystAction =
+            /\b(?:price target|rating)\b/i.test(normalizedTitle) ||
+            /\b(?:analyst|broker|strategist)\b.{0,40}\b(?:cuts?|lowers?|reduces?|slashes?)\b/i.test(normalizedTitle);
+        if (isAnalystAction) {
+            return false;
+        }
+        return (
+            /\b(?:cuts?|cut|lowers?|lowered|reduces?|reduced|slashes?|slashed)\s+(?:its\s+)?(?:full[\s-]?year\s+)?(?:revenue\s+|earnings\s+|profit\s+|sales\s+)?(?:guidance|outlook|forecast)\b/i.test(normalizedTitle) ||
+            /\b(?:guidance|outlook|forecast)\s+(?:was\s+)?(?:cut|lowered|reduced|slashed)\b/i.test(normalizedTitle) ||
+            /(下调|降低|削减)\s*(?:全年\s*)?(?:营收|盈利|利润|销售)?\s*(指引|预期|展望)/i.test(normalizedTitle)
+        );
+    });
+}
+
+export function detectMaterialNegativeNews(items: NewsItem[]): boolean {
     if (items.length === 0) {
         return false;
     }
 
-    const severePhrases = [
-        'threatens',
-        'would limit',
-        'limit rewards',
-        'reward restrictions',
+    const confirmedSeverePhrases = [
         'regulatory risk',
-        'draft bill',
-        'draft act',
-        'senate bill',
         'probe',
         'investigation',
         'lawsuit',
@@ -878,13 +891,23 @@ function detectMaterialNegativeNews(items: NewsItem[]): boolean {
         'ban',
         'sanction'
     ];
+    const policyProposal = /(draft bill|draft act|senate bill|proposed rule|proposed regulation)/;
+    const adversePolicyAction = /(would limit|restrict|restriction|prohibit|ban|sanction)/;
     const sharpMoveWords = ['plunge', 'plunges', 'slump', 'slumps', 'sink', 'sinks', 'tumble', 'tumbles', 'drop', 'drops', 'fall', 'falls'];
+    const concreteAdverseEvent = /(bill|act|regulat|investigat|lawsuit|probe|fraud|indict|ban|sanction)/;
 
     return items.slice(0, 3).some((item) => {
         const normalizedTitle = item.title.toLowerCase();
-        const hasSeverePhrase = severePhrases.some((phrase) => normalizedTitle.includes(phrase));
+        const hasConfirmedSeverePhrase = confirmedSeverePhrases.some((phrase) => normalizedTitle.includes(phrase));
+        const hasAdversePolicyProposal =
+            policyProposal.test(normalizedTitle) &&
+            adversePolicyAction.test(normalizedTitle);
         const hasShockMove = sharpMoveWords.some((word) => normalizedTitle.includes(word));
-        return hasSeverePhrase || (hasShockMove && /(bill|act|regulat|investigat|lawsuit|probe|fraud|indict)/.test(normalizedTitle));
+        return (
+            hasConfirmedSeverePhrase ||
+            hasAdversePolicyProposal ||
+            (hasShockMove && concreteAdverseEvent.test(normalizedTitle))
+        );
     });
 }
 

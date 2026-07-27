@@ -3,6 +3,7 @@ import type {
     AiCloudStressStatus,
     FundamentalState,
     MacroRegimeSnapshot,
+    RegimeVerdictState,
     RegimeSeverity,
     SideMonitorStatus
 } from '../../services/macro-regime/types';
@@ -21,6 +22,7 @@ export interface MacroGateContext {
     hy_oas_status: RegimeSeverity;
     regime_persistence_days: number;
     guardrail_applied: boolean;
+    regime_verdict_state: RegimeVerdictState | null;
     snapshot_stale: boolean;
     as_of: string | null;
 }
@@ -39,6 +41,7 @@ export const DEFAULT_MACRO_CONTEXT: MacroGateContext = {
     hy_oas_status: 'Neutral',
     regime_persistence_days: 0,
     guardrail_applied: false,
+    regime_verdict_state: null,
     snapshot_stale: true,
     as_of: null
 };
@@ -66,6 +69,7 @@ export function parseMacroSnapshot(snapshot: MacroRegimeSnapshot): MacroGateCont
         hy_oas_status: snapshot.indicators.HY_OAS.status,
         regime_persistence_days: snapshot.regime_persistence?.consecutive_days ?? 0,
         guardrail_applied: Boolean(snapshot.guardrail?.applied || snapshot.escalation_summary?.guardrail?.applied),
+        regime_verdict_state: snapshot.regime_verdict?.state ?? null,
         snapshot_stale: false,
         as_of: snapshot.as_of
     };

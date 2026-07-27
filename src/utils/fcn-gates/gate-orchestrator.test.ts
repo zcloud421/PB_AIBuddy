@@ -66,10 +66,39 @@ assert.equal(fallingKnife.grade, 'CAUTION');
 assert.equal(fallingKnife.decisions.some((d) => d.type === 'DISTRIBUTION_FALLING_KNIFE'), true);
 
 const macroCritical = runAllGates(input({
-    macro: { ...DEFAULT_MACRO_CONTEXT, snapshot_stale: false, overall: 'Critical' }
+    macro: {
+        ...DEFAULT_MACRO_CONTEXT,
+        snapshot_stale: false,
+        overall: 'Critical',
+        regime_verdict_state: 'CONFIRMED_BREAK'
+    }
 }));
 assert.equal(macroCritical.grade, 'CAUTION');
 assert.equal(macroCritical.decisions.some((d) => d.type === 'MACRO_REGIME_CRITICAL_CAP'), true);
+
+const aggregateCriticalButMechanismsStable = runAllGates(input({
+    macro: {
+        ...DEFAULT_MACRO_CONTEXT,
+        snapshot_stale: false,
+        overall: 'Critical',
+        regime_verdict_state: 'STABLE'
+    }
+}));
+assert.equal(aggregateCriticalButMechanismsStable.grade, 'GO');
+assert.equal(
+    aggregateCriticalButMechanismsStable.decisions.some((d) => d.type === 'MACRO_REGIME_CRITICAL_CAP'),
+    false
+);
+
+const formingBreak = runAllGates(input({
+    macro: {
+        ...DEFAULT_MACRO_CONTEXT,
+        snapshot_stale: false,
+        overall: 'Critical',
+        regime_verdict_state: 'BREAK_FORMING'
+    }
+}));
+assert.equal(formingBreak.grade, 'GO');
 
 const creditCrisis = runAllGates(input({
     macro: { ...DEFAULT_MACRO_CONTEXT, snapshot_stale: false, credit_funding_status: 'crisis' }

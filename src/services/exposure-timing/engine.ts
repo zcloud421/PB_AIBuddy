@@ -22,6 +22,11 @@ export interface ExposureTimingEvidence {
     value: string;
 }
 
+export interface ExposureTimingRelativeStrength {
+    benchmark: string;
+    change_5d_pct: number;
+}
+
 export interface ExposureTimingSupport {
     kind: 'moving_average' | 'swing_low';
     label: 'MA50' | 'MA200' | '前低';
@@ -56,12 +61,42 @@ export interface ExposureTimingAsset {
     next_trigger: string;
     invalidation: string;
     data_as_of: string | null;
+    /** Raw same-day model output before cross-session confirmation. */
+    raw_status?: ExposureTimingStatus;
+    /** Trading sessions for which the current raw improvement has persisted. */
+    confirmation_days?: number;
+    /** Consecutive sessions of soft deterioration while a green state is active. */
+    deterioration_days?: number;
+    /** First trading date on which the displayed status became active. */
+    status_since?: string | null;
+    /** Whether BUILD_WINDOW came from a support retest or an orderly trend. */
+    confirmation_basis?: 'SUPPORT' | 'TREND' | null;
+    relative_strength_5d_pct?: number | null;
+    relative_strength_benchmark?: string | null;
+}
+
+export interface ExposureTimingHealthBySymbol {
+    symbol: string;
+    matured_confirmations: number;
+    reverted_to_watch: number;
+    support_failures: number;
+}
+
+export interface ExposureTimingHealth {
+    horizon_sessions: number;
+    matured_confirmations: number;
+    reverted_to_watch: number;
+    reversion_rate_pct: number | null;
+    support_failures: number;
+    support_failure_rate_pct: number | null;
+    by_symbol: ExposureTimingHealthBySymbol[];
 }
 
 export interface ExposureTimingSnapshot {
     as_of: string;
     macro_state: RegimeVerdictState | null;
     assets: ExposureTimingAsset[];
+    health?: ExposureTimingHealth;
 }
 
 interface ComputedState {
@@ -86,6 +121,23 @@ interface PivotLow {
     level: number;
 }
 
+const PROMOTION_CONFIRMATION_SESSIONS = 2;
+const SOFT_DETERIORATION_SESSIONS = 2;
+const SUPPORT_INVALIDATION_ATR = 0.25;
+
+export const EXPOSURE_TIMING_BENCHMARKS: Record<string, string | null> = {
+    SPY: null,
+    QQQ: 'SPY',
+    SOXX: 'QQQ',
+    DRAM: 'SOXX',
+    XLV: 'SPY',
+    XLF: 'SPY',
+    XLE: 'SPY',
+    MCHI: 'SPY',
+    GLD: 'SPY',
+    GDX: 'GLD'
+};
+
 const STATUS_META: Record<ExposureTimingStatus, { label: string; rank: number }> = {
     WAIT: { label: '下行风险仍高', rank: 0 },
     WATCH_SUPPORT: { label: '支撑确认中', rank: 1 },
@@ -98,7 +150,8 @@ export function computeExposureTiming(
     symbol: string,
     label: string,
     rawBars: DailyPriceBar[],
-    macroState: RegimeVerdictState | null
+    macroState: RegimeVerdictState | null,
+    relativeStrength: ExposureTimingRelativeStrength | null = null
 ): ExposureTimingAsset {
     const bars = normalizeBars(rawBars);
     const dataAsOf = bars[bars.length - 1]?.date ?? null;
@@ -155,12 +208,18 @@ export function computeExposureTiming(
     const nearSupport = support !== null && support.distance_atr !== null && Math.abs(support.distance_atr) <= 1;
     const volumeConfirmsBounce = state.volumeRatio20d === null || state.volumeRatio20d >= 0.8;
     const supportTrendValid = support?.kind === 'swing_low' || (support?.slope_20d_pct ?? -1) >= 0;
+    const previousMa20 = average(bars.slice(-21, -1).map((bar) => bar.close));
+    const priorThreeCloseHigh = Math.max(...bars.slice(-4, -1).map((bar) => bar.close));
+    const shortTermReversalConfirmed =
+        state.current > priorThreeCloseHigh ||
+        (state.previous <= previousMa20 && state.current > state.ma20);
     const supportConfirmed =
         support !== null &&
         supportTrendValid &&
         support.closes_held_3d >= 2 &&
         (state.change5dPct ?? -99) > -fiveDayStabilizationThresholdPct &&
         state.current >= state.previous &&
+        shortTermReversalConfirmed &&
         volumeConfirmsBounce &&
         state.priceStructure !== 'LOWER_LOW';
     const trendConfirmed =
@@ -173,7 +232,7 @@ export function computeExposureTiming(
         distanceFromMa50Atr >= -0.5 &&
         distanceFromMa50Atr <= 2.5 &&
         (state.rsi14 ?? 50) <= 68;
-    const evidence = buildEvidence(state, support);
+    const evidence = buildEvidence(state, support, relativeStrength, shortTermReversalConfirmed);
 
     if (macroState === 'CONFIRMED_BREAK') {
         return completeResult(symbol, label, 'WAIT', state, support, evidence, dataAsOf, {
@@ -212,7 +271,8 @@ export function computeExposureTiming(
     const canFormWindow = nearSupport ? supportConfirmed : orderlyTrendWindow;
     if (canFormWindow) {
         const formingCaveat = macroState === 'BREAK_FORMING' ? '宏观风险仍在形成，本判定置信度降档。' : '';
-        return completeResult(symbol, label, 'BUILD_WINDOW', state, support, evidence, dataAsOf, {
+        return {
+            ...completeResult(symbol, label, 'BUILD_WINDOW', state, support, evidence, dataAsOf, {
             summary: (nearSupport
                 ? `${support?.label ?? '中期均线'}附近出现连续守稳，短期跌势未继续扩散。`
                 : '中期趋势向上且价格未明显偏离均线，下行压力有所缓和。') + formingCaveat,
@@ -222,7 +282,9 @@ export function computeExposureTiming(
             invalidation: support
                 ? `收盘有效跌破 ${support.label} $${formatPrice(support.level)}，下行风险重新升高。`
                 : `跌破 MA50 $${formatPrice(state.ma50)} 且均线转弱，下行风险重新升高。`
-        });
+            }),
+            confirmation_basis: nearSupport ? 'SUPPORT' : 'TREND'
+        };
     }
 
     return completeResult(symbol, label, 'WATCH_SUPPORT', state, support, evidence, dataAsOf, {
@@ -249,14 +311,215 @@ export function computeExposureTiming(
 export function buildExposureTimingSnapshot(
     asOf: string,
     macroState: RegimeVerdictState | null,
-    histories: Record<string, DailyPriceBar[]>
+    histories: Record<string, DailyPriceBar[]>,
+    previousSnapshot: ExposureTimingSnapshot | null = null,
+    recentSnapshots: ExposureTimingSnapshot[] = []
 ): ExposureTimingSnapshot {
-    return {
+    const previousBySymbol = new Map(
+        (previousSnapshot?.assets ?? []).map((asset) => [asset.symbol, asset])
+    );
+    const assets = EXPOSURE_TIMING_ASSETS.map(({ symbol, label }) => {
+        const benchmark = EXPOSURE_TIMING_BENCHMARKS[symbol];
+        // Relative strength is explanatory evidence only; it never changes the timing status.
+        const relativeStrength = benchmark
+            ? computeRelativeStrength5d(histories[symbol] ?? [], histories[benchmark] ?? [], benchmark)
+            : null;
+        const rawComputed = computeExposureTiming(
+            symbol,
+            label,
+            histories[symbol] ?? [],
+            macroState,
+            relativeStrength
+        );
+        const raw: ExposureTimingAsset = {
+            ...rawComputed,
+            relative_strength_5d_pct: relativeStrength?.change_5d_pct ?? null,
+            relative_strength_benchmark: relativeStrength?.benchmark ?? null
+        };
+        return resolveExposureTimingStatus(raw, previousBySymbol.get(symbol) ?? null);
+    });
+    const snapshot: ExposureTimingSnapshot = {
         as_of: asOf,
         macro_state: macroState,
-        assets: EXPOSURE_TIMING_ASSETS.map(({ symbol, label }) =>
-            computeExposureTiming(symbol, label, histories[symbol] ?? [], macroState)
+        assets
+    };
+    snapshot.health = computeExposureTimingHealth([...recentSnapshots, snapshot]);
+    return snapshot;
+}
+
+export function resolveExposureTimingStatus(
+    raw: ExposureTimingAsset,
+    previous: ExposureTimingAsset | null
+): ExposureTimingAsset {
+    const rawStatus = raw.raw_status ?? raw.status;
+    const previousRawStatus = previous?.raw_status ?? previous?.status ?? null;
+    const sameTradingSession = Boolean(
+        raw.data_as_of && previous?.data_as_of && raw.data_as_of === previous.data_as_of
+    );
+    const sameBasis = hasSameConfirmationBasis(raw, previous);
+
+    const confirmationDays = rawStatus === 'BUILD_WINDOW'
+        ? sameTradingSession
+            ? Math.max(1, previous?.confirmation_days ?? 1)
+            : previousRawStatus === 'BUILD_WINDOW' && sameBasis
+                ? (previous?.confirmation_days ?? 1) + 1
+                : 1
+        : 0;
+    const deteriorationDays = previous?.status === 'BUILD_WINDOW' && rawStatus === 'WATCH_SUPPORT'
+        ? sameTradingSession
+            ? Math.max(1, previous.deterioration_days ?? 1)
+            : previousRawStatus === 'WATCH_SUPPORT'
+                ? (previous.deterioration_days ?? 1) + 1
+                : 1
+        : 0;
+
+    let displayedStatus = rawStatus;
+    let copyOverride: Partial<Pick<ExposureTimingAsset, 'summary' | 'next_trigger'>> = {};
+    if (rawStatus === 'BUILD_WINDOW' && (previous?.status !== 'BUILD_WINDOW' || !sameBasis)) {
+        if (confirmationDays < PROMOTION_CONFIRMATION_SESSIONS) {
+            displayedStatus = 'WATCH_SUPPORT';
+            copyOverride = {
+                summary: '技术条件已初步改善，但目前仅确认一个交易日，仍需排除单日反弹。',
+                next_trigger: '若下一交易日继续守住支撑并维持短线反转，确认度进一步提高。'
+            };
+        }
+    } else if (
+        rawStatus === 'WATCH_SUPPORT' &&
+        previous?.status === 'BUILD_WINDOW' &&
+        deteriorationDays < SOFT_DETERIORATION_SESSIONS
+    ) {
+        displayedStatus = 'BUILD_WINDOW';
+        copyOverride = {
+            summary: '短期确认有所减弱，但支撑尚未有效失守，暂不因单日波动降级。',
+            next_trigger: '观察下一交易日能否重新恢复反转确认；连续转弱才降回支撑观察。'
+        };
+    }
+
+    const statusSince = displayedStatus === previous?.status && previous.status_since
+        ? previous.status_since
+        : raw.data_as_of;
+    const evidence = raw.evidence.filter((item) => item.label !== '确认进度' && item.label !== '状态缓冲');
+    if (rawStatus === 'BUILD_WINDOW' && displayedStatus === 'WATCH_SUPPORT') {
+        evidence.push({ label: '确认进度', value: `${confirmationDays}/${PROMOTION_CONFIRMATION_SESSIONS} 个交易日` });
+    } else if (rawStatus === 'WATCH_SUPPORT' && displayedStatus === 'BUILD_WINDOW') {
+        evidence.push({ label: '状态缓冲', value: `${deteriorationDays}/${SOFT_DETERIORATION_SESSIONS} 个交易日` });
+    }
+
+    return {
+        ...raw,
+        ...copyOverride,
+        status: displayedStatus,
+        status_label: STATUS_META[displayedStatus].label,
+        readiness_rank: STATUS_META[displayedStatus].rank,
+        raw_status: rawStatus,
+        confirmation_days: confirmationDays,
+        deterioration_days: deteriorationDays,
+        status_since: statusSince,
+        evidence
+    };
+}
+
+function hasSameConfirmationBasis(
+    current: ExposureTimingAsset,
+    previous: ExposureTimingAsset | null
+): boolean {
+    if (!previous) return false;
+    // Backward-compatible inference keeps pre-hysteresis snapshots usable on rollout.
+    const currentBasis = current.confirmation_basis ?? (current.support ? 'SUPPORT' : 'TREND');
+    const previousBasis = previous.confirmation_basis ?? (previous.support ? 'SUPPORT' : 'TREND');
+    if (currentBasis !== previousBasis) return false;
+    if (currentBasis !== 'SUPPORT') return currentBasis === 'TREND';
+    if (!current.support || !previous.support) return false;
+    if (current.support.kind !== previous.support.kind || current.support.label !== previous.support.label) {
+        return false;
+    }
+    const atr = current.atr_20 ?? previous.atr_20 ?? 0;
+    return atr > 0 && Math.abs(current.support.level - previous.support.level) <= atr * 0.5;
+}
+
+export function computeRelativeStrength5d(
+    rawAssetBars: DailyPriceBar[],
+    rawBenchmarkBars: DailyPriceBar[],
+    benchmark: string
+): ExposureTimingRelativeStrength | null {
+    const assetBars = normalizeBars(rawAssetBars);
+    const benchmarkByDate = new Map(normalizeBars(rawBenchmarkBars).map((bar) => [bar.date, bar.close]));
+    const aligned = assetBars
+        .filter((bar) => benchmarkByDate.has(bar.date))
+        .map((bar) => ({ asset: bar.close, benchmark: benchmarkByDate.get(bar.date) as number }))
+        .slice(-6);
+    if (aligned.length < 6) return null;
+    const first = aligned[0];
+    const last = aligned[aligned.length - 1];
+    return {
+        benchmark,
+        change_5d_pct: round1(
+            pctChange(last.asset, first.asset) - pctChange(last.benchmark, first.benchmark)
         )
+    };
+}
+
+export function computeExposureTimingHealth(
+    snapshots: ExposureTimingSnapshot[],
+    horizonSessions = 5
+): ExposureTimingHealth {
+    const bySymbolSeries = new Map<string, ExposureTimingAsset[]>();
+    const ordered = [...snapshots].sort((a, b) => a.as_of.localeCompare(b.as_of));
+    for (const snapshot of ordered) {
+        for (const asset of snapshot.assets) {
+            const series = bySymbolSeries.get(asset.symbol) ?? [];
+            const priorIndex = series.findIndex((item) => item.data_as_of === asset.data_as_of);
+            if (priorIndex >= 0) series[priorIndex] = asset;
+            else series.push(asset);
+            bySymbolSeries.set(asset.symbol, series);
+        }
+    }
+
+    const bySymbol: ExposureTimingHealthBySymbol[] = [];
+    for (const [symbol, series] of bySymbolSeries) {
+        let maturedConfirmations = 0;
+        let revertedToWatch = 0;
+        let supportFailures = 0;
+        for (let index = 1; index < series.length; index += 1) {
+            const current = series[index];
+            if (current.status !== 'BUILD_WINDOW' || series[index - 1].status === 'BUILD_WINDOW') continue;
+            const future = series.slice(index + 1, index + 1 + horizonSessions);
+            if (future.length < horizonSessions) continue;
+            maturedConfirmations += 1;
+            if (future.some((item) => item.status === 'WATCH_SUPPORT')) revertedToWatch += 1;
+            const anchor = current.support?.level ?? current.ma50;
+            const atr = current.atr_20;
+            if (future.some((item) =>
+                item.status === 'WAIT' ||
+                (anchor != null && atr != null && item.current_price !== null &&
+                    item.current_price < anchor - (atr * SUPPORT_INVALIDATION_ATR))
+            )) {
+                supportFailures += 1;
+            }
+        }
+        if (maturedConfirmations > 0) {
+            bySymbol.push({
+                symbol,
+                matured_confirmations: maturedConfirmations,
+                reverted_to_watch: revertedToWatch,
+                support_failures: supportFailures
+            });
+        }
+    }
+
+    const maturedConfirmations = bySymbol.reduce((sum, item) => sum + item.matured_confirmations, 0);
+    const revertedToWatch = bySymbol.reduce((sum, item) => sum + item.reverted_to_watch, 0);
+    const supportFailures = bySymbol.reduce((sum, item) => sum + item.support_failures, 0);
+    return {
+        horizon_sessions: horizonSessions,
+        matured_confirmations: maturedConfirmations,
+        reverted_to_watch: revertedToWatch,
+        reversion_rate_pct: maturedConfirmations > 0 ? round1((revertedToWatch / maturedConfirmations) * 100) : null,
+        support_failures: supportFailures,
+        support_failure_rate_pct: maturedConfirmations > 0
+            ? round1((supportFailures / maturedConfirmations) * 100)
+            : null,
+        by_symbol: bySymbol.sort((a, b) => b.support_failures - a.support_failures || a.symbol.localeCompare(b.symbol))
     };
 }
 
@@ -392,7 +655,12 @@ function buildSupport(
     };
 }
 
-function buildEvidence(state: ComputedState, support: ExposureTimingSupport | null): ExposureTimingEvidence[] {
+function buildEvidence(
+    state: ComputedState,
+    support: ExposureTimingSupport | null,
+    relativeStrength: ExposureTimingRelativeStrength | null,
+    shortTermReversalConfirmed: boolean
+): ExposureTimingEvidence[] {
     const evidence: ExposureTimingEvidence[] = [
         { label: '现价', value: `$${formatPrice(state.current)}` },
         { label: '5日', value: formatSignedPct(state.change5dPct) },
@@ -421,6 +689,13 @@ function buildEvidence(state: ComputedState, support: ExposureTimingSupport | nu
                 ? '低点下移'
                 : '低点持平';
         evidence.push({ label: '价格结构', value: structureLabel });
+    }
+    evidence.push({ label: '短线反转', value: shortTermReversalConfirmed ? '已确认' : '尚待确认' });
+    if (relativeStrength) {
+        evidence.push({
+            label: `相对${relativeStrength.benchmark} 5日`,
+            value: formatSignedPct(relativeStrength.change_5d_pct)
+        });
     }
     return evidence;
 }
@@ -466,6 +741,11 @@ function buildResult(
         status,
         status_label: STATUS_META[status].label,
         readiness_rank: STATUS_META[status].rank,
+        raw_status: status,
+        confirmation_days: status === 'BUILD_WINDOW' ? 1 : 0,
+        deterioration_days: 0,
+        status_since: rest.data_as_of,
+        confirmation_basis: null,
         ...rest
     };
 }

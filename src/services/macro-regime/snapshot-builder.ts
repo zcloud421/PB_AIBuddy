@@ -11,6 +11,7 @@
 
 import { MassiveDataFetcher } from '../../data/massive-fetcher';
 import type { DailyPriceBar } from '../../data/massive-fetcher';
+import { getRecentExposureTimingSnapshots } from '../../db/queries/macro-regime';
 import {
     buildExposureTimingSnapshot,
     EXPOSURE_TIMING_ASSETS
@@ -81,6 +82,13 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
     const startedAt = Date.now();
     const fetcher = new MassiveDataFetcher();
     const asOf = todayUtcDate();
+    const recentExposureTimingPromise = getRecentExposureTimingSnapshots(45).catch((error) => {
+        console.warn(
+            '[exposure-timing] history unavailable; confirmation state will restart:',
+            error instanceof Error ? error.message : error
+        );
+        return [];
+    });
 
     // Side monitor pre-requisites (HY OAS series in bp + Δ4w) reused for
     // indicator and Credit/Funding stress acceleration sub-signal.
@@ -221,11 +229,26 @@ export async function buildMacroRegimeSnapshot(): Promise<MacroRegimeSnapshot> {
         qqqVerdictBars,
         computeVerdictExtras(dgs30Series ?? [], hygBars ?? [], iefBars ?? [])
     );
+    const recentExposureTiming = await recentExposureTimingPromise;
+    const previousExposureTiming = recentExposureTiming[recentExposureTiming.length - 1] ?? null;
     snapshot.exposure_timing = buildExposureTimingSnapshot(
         asOf,
         snapshot.regime_verdict?.state ?? null,
-        exposureHistories
+        exposureHistories,
+        previousExposureTiming,
+        recentExposureTiming
     );
+    const timingHealth = snapshot.exposure_timing.health;
+    if (timingHealth?.matured_confirmations) {
+        console.log(JSON.stringify({
+            tag: 'exposure_timing_health',
+            as_of: asOf,
+            horizon_sessions: timingHealth.horizon_sessions,
+            matured_confirmations: timingHealth.matured_confirmations,
+            reversion_rate_pct: timingHealth.reversion_rate_pct,
+            support_failure_rate_pct: timingHealth.support_failure_rate_pct
+        }));
+    }
 
     console.log(
         `[macro-regime] snapshot built in ${Date.now() - startedAt}ms ` +

@@ -156,6 +156,7 @@ function DetailPage({ symbol }: { symbol: string }) {
     data.grade,
     data.wait_reason ?? null,
     data.price_context.days_to_earnings,
+    data.flags ?? [],
   );
   const currentGradeColor = gradePresentation.color;
   const isEarningsWait = gradePresentation.badgeText === 'WAIT';
@@ -1138,6 +1139,7 @@ function buildGradePresentation(
   grade: 'GO' | 'CAUTION' | 'AVOID' | 'NOT_RECOMMENDABLE',
   waitReason: 'WAIT_EARNINGS_RISK' | 'WAIT_POST_EARNINGS_SHOCK' | 'WAIT_SETUP_RESET' | null,
   daysToEarnings: number | null,
+  flags: Array<{ type: string }>,
 ): {
   badgeText: 'GO' | 'CAUTION' | 'AVOID' | 'WAIT' | 'NOT RECOMMENDABLE';
   color: string;
@@ -1157,7 +1159,7 @@ function buildGradePresentation(
       badgeText: 'WAIT',
       color: colors.warning,
       narrativeGrade: grade,
-      waitContext: getWaitContextMessage(waitReason, daysToEarnings),
+      waitContext: getWaitContextMessage(waitReason, flags),
     };
   }
 
@@ -1166,7 +1168,7 @@ function buildGradePresentation(
       badgeText: 'WAIT',
       color: colors.warning,
       narrativeGrade: 'AVOID',
-      waitContext: `财报临近(${daysToEarnings} 天)，建议待财报后再评估`,
+      waitContext: '财报待落地',
     };
   }
 
@@ -1179,17 +1181,21 @@ function buildGradePresentation(
 
 function getWaitContextMessage(
   waitReason: 'WAIT_EARNINGS_RISK' | 'WAIT_POST_EARNINGS_SHOCK' | 'WAIT_SETUP_RESET',
-  daysToEarnings: number | null,
+  flags: Array<{ type: string }>,
 ) {
   if (waitReason === 'WAIT_EARNINGS_RISK') {
-    return daysToEarnings !== null
-      ? `财报 ${daysToEarnings} 天后，事件风险未消化`
-      : '财报事件风险未消化';
+    return '财报待落地';
   }
   if (waitReason === 'WAIT_POST_EARNINGS_SHOCK') {
-    return '财报后 gap 未消化，等待价格企稳';
+    return '波动待消化';
   }
-  return 'Setup 重建中，等待技术面 reset';
+  if (flags.some((flag) => flag.type === 'BEARISH_STRUCTURE' || flag.type === 'BROKEN_TREND')) {
+    return '回调待企稳';
+  }
+  if (flags.some((flag) => flag.type === 'MATERIAL_NEWS_SHOCK' || flag.type === 'MATERIAL_NEWS_OVERHANG')) {
+    return '事件待明朗';
+  }
+  return '趋势待企稳';
 }
 
 function getRiskLevelTone(label: string): 'high' | 'medium' | 'low' {

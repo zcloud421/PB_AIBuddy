@@ -18,6 +18,7 @@ import {
     ensureUnderlyingCompanyNameColumn,
     ensureUnderlyingsGovernanceColumns,
     deleteRecommendationTrackerForDate,
+    getActiveHouseOverrideBySymbol,
     getUnderlyingBySymbol,
     getRecentPriceHistoryBySymbol,
     saveIdeaCandidate,
@@ -30,7 +31,7 @@ import {
     updateIdeaRunStatus
 } from '../db/queries/ideas';
 import type { PriceHistoryPointRow } from '../db/queries/ideas';
-import type { ScoringResult } from '../scoring-engine';
+import type { DataFetcherInterface, ScoringResult } from '../scoring-engine';
 import { runDailyScreener as scoreDailyScreenerSymbols } from '../scoring-engine';
 import { selectDailyBest, selectDailyRecommendationShowcase } from '../services/ideas-service';
 import { runPriceTracker } from '../services/tracker-service';
@@ -39,6 +40,7 @@ import { buildNarrativeInput } from '../utils/narrative-input-builder';
 import { loadMacroContext } from '../utils/fcn-gates/macro-context';
 import { sendDowngradeNotifications } from '../utils/push-notifications';
 import { ensureDeviceTables } from '../db/queries/devices';
+import { getRestrictedSymbols } from '../utils/symbol-governance';
 
 dotenv.config();
 
@@ -50,6 +52,8 @@ const PER_SYMBOL_DELAY_MS = 3000;
 const BATCH_COOLDOWN_MS = 15000;
 const BATCH_SIZE = 5;
 const FAILURE_COOLDOWN_MS = 60000;
+const SCORE_RETRY_DELAY_MS = 15000;
+export const MIN_DAILY_RUN_COVERAGE_PCT = 95;
 const GOLD_RELATED_NARRATIVE_SYMBOLS = new Set(['GLD', 'GDX', 'IAU', 'SLV', 'GOLD', 'NEM', 'AEM']);
 
 function todayInHongKongIsoDate(): string {
@@ -120,16 +124,56 @@ export async function runDailyScreener(): Promise<void> {
 
         const fetcher = new MassiveDataFetcher();
         const macroContext = await loadMacroContext();
+        const restrictedSymbols = getRestrictedSymbols();
         const results: ScoringResult[] = [];
         let failedSymbols = 0;
+        let governanceBlockedSymbols = 0;
 
         for (const [index, symbol] of symbols.entries()) {
             try {
-                const companyName = await fetchTickerCompanyName(symbol);
-                await upsertUnderlyingCompanyName(symbol, companyName);
-                const underlying = await getUnderlyingBySymbol(symbol);
+                const restricted = restrictedSymbols.get(symbol.toUpperCase());
+                if (restricted) {
+                    governanceBlockedSymbols += 1;
+                    console.warn(JSON.stringify({
+                        tag: 'scheduled_symbol_governance_block',
+                        symbol,
+                        reason: 'restricted',
+                        detail: restricted.reason ?? null,
+                        ts: new Date().toISOString()
+                    }));
+                    continue;
+                }
 
-                const [result] = await scoreDailyScreenerSymbols([symbol], fetcher, { macroContext });
+                const companyName = await fetchTickerCompanyName(symbol).catch(() => null);
+                if (companyName) {
+                    await upsertUnderlyingCompanyName(symbol, companyName);
+                }
+                const underlying = await getUnderlyingBySymbol(symbol);
+                const houseOverride = await getActiveHouseOverrideBySymbol(symbol);
+                const governedFetcher: DataFetcherInterface = {
+                    fetchSymbolData: async (targetSymbol) => ({
+                        ...(await fetcher.fetchSymbolData(targetSymbol)),
+                        house_override: houseOverride?.override_type
+                    }),
+                    fetchChainData: (targetSymbol, currentPrice) =>
+                        fetcher.fetchChainData(targetSymbol, currentPrice)
+                };
+
+                let scoringResults: ScoringResult[];
+                try {
+                    scoringResults = await scoreDailyScreenerSymbols([symbol], governedFetcher, { macroContext });
+                } catch (firstError) {
+                    console.warn(JSON.stringify({
+                        tag: 'daily_symbol_retry',
+                        symbol,
+                        attempt: 1,
+                        reason: firstError instanceof Error ? firstError.message : String(firstError),
+                        ts: new Date().toISOString()
+                    }));
+                    await delay(SCORE_RETRY_DELAY_MS);
+                    scoringResults = await scoreDailyScreenerSymbols([symbol], governedFetcher, { macroContext });
+                }
+                const [result] = scoringResults;
                 if (!result) {
                     throw new Error(`No scoring result returned for ${symbol}`);
                 }
@@ -172,7 +216,6 @@ export async function runDailyScreener(): Promise<void> {
                     gldFlowTrend,
                     breakevenInflationTrend
                 }));
-                results.push(result);
                 await saveIdeaCandidate({
                     runId,
                     symbol: result.symbol,
@@ -236,6 +279,7 @@ export async function runDailyScreener(): Promise<void> {
                     await deleteRecommendationTrackerForDate(result.symbol, runDate);
                 }
 
+                results.push(result);
                 console.log(
                     `[screener] ${index + 1}/${symbols.length} ${result.symbol} -> ${result.overall_grade} (${result.composite_score.toFixed(2)}) ✓`
                 );
@@ -253,6 +297,27 @@ export async function runDailyScreener(): Promise<void> {
                     await delay(BATCH_COOLDOWN_MS);
                 }
             }
+        }
+
+        const coverage = assessDailyRunCoverage(
+            results.length,
+            symbols.length - governanceBlockedSymbols
+        );
+        if (!coverage.passed) {
+            console.error(JSON.stringify({
+                tag: 'daily_run_coverage_failed',
+                run_id: runId,
+                processed: coverage.processed,
+                expected: coverage.expected,
+                coverage_pct: coverage.coverage_pct,
+                threshold_pct: MIN_DAILY_RUN_COVERAGE_PCT,
+                failed_symbols: failedSymbols,
+                governance_blocked_symbols: governanceBlockedSymbols,
+                ts: new Date().toISOString()
+            }));
+            throw new Error(
+                `Daily screener coverage ${coverage.coverage_pct.toFixed(1)}% is below ${MIN_DAILY_RUN_COVERAGE_PCT}%`
+            );
         }
 
         const totalRecommended = results.filter((result) => result.overall_grade === 'GO').length;
@@ -381,4 +446,18 @@ function calculateNarrativePriceMomentum(
 function roundPctChange(currentPrice: number, anchorPrice: number): number | null {
     if (!anchorPrice || anchorPrice <= 0) return null;
     return Math.round(((currentPrice - anchorPrice) / anchorPrice) * 1000) / 10;
+}
+
+export function assessDailyRunCoverage(
+    processed: number,
+    expected: number,
+    thresholdPct = MIN_DAILY_RUN_COVERAGE_PCT
+): { passed: boolean; processed: number; expected: number; coverage_pct: number } {
+    const coveragePct = expected <= 0 ? 0 : (processed / expected) * 100;
+    return {
+        passed: expected > 0 && coveragePct >= thresholdPct,
+        processed,
+        expected,
+        coverage_pct: Number(coveragePct.toFixed(1))
+    };
 }

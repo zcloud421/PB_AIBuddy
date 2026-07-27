@@ -59,6 +59,13 @@ export interface StrikeData {
     open_interest: number;
     mid_price: number | null;
     mid_price_source?: 'last_quote' | 'day.close' | 'none';
+    bid_price?: number | null;
+    ask_price?: number | null;
+    quote_spread_pct?: number | null;
+    day_high?: number | null;
+    day_low?: number | null;
+    day_vwap?: number | null;
+    day_range_pct?: number | null;
     expiry_date: string;
     skew?: number;
 }
@@ -1082,6 +1089,7 @@ export function scoreAndGrade(candidate: {
     daysSinceEarnings?: number | null;
     sentimentProxy?: number | null;
     hasMaterialNegativeNews?: boolean;
+    hasGuidanceCut?: boolean;
     macroContext?: MacroGateContext | null;
 }): ScoringResult {
     const { symbol, symbolData, tenorData, strikeData } = candidate;
@@ -1176,7 +1184,7 @@ export function scoreAndGrade(candidate: {
         });
     }
 
-    const premiumScore = adjustedPremiumScore(strikeData);
+    const premiumScore = scoreListedOptionPremium(strikeData, tenorData.tenor_days);
 
     const ivPremiumScore = clamp((volRichnessScore * 0.35) + ((premiumScore ?? 0.5) * 0.45) + (skewScore * 0.20), 0, 1);
     const baseCompositeScore = clamp(
@@ -1647,6 +1655,32 @@ export function scoreAndGrade(candidate: {
         });
     }
 
+    if (symbolData.house_override === 'FORCE_CAUTION') {
+        flags.push({
+            type: 'HOUSE_OVERRIDE',
+            severity: 'WARN',
+            message: 'IC house override caps this setup at CAUTION'
+        });
+
+        if (overallGrade === 'GO') {
+            const oldGrade = overallGrade;
+            compositeScore = Math.min(compositeScore, 0.64);
+            overallGrade = 'CAUTION';
+            decisions.push({
+                type: 'HOUSE_OVERRIDE',
+                failType: 'SUITABILITY_FAIL',
+                passed: false,
+                severity: 'WARN',
+                message: 'IC FORCE_CAUTION override capped GO at CAUTION',
+                details: {
+                    override_type: symbolData.house_override
+                },
+                old_grade: oldGrade,
+                new_grade: overallGrade
+            });
+        }
+    }
+
     const reasoningText = buildReasoningText(
         symbol,
         overallGrade,
@@ -1676,7 +1710,7 @@ export function scoreAndGrade(candidate: {
             tenorDays: tenorData.tenor_days,
             macroContext: candidate.macroContext ?? null,
             earningsMiss: Boolean(candidate.hasRecentEarnings && (candidate.sentimentProxy ?? 1) < 0.4),
-            guideCut: candidate.hasMaterialNegativeNews ?? false
+            guideCut: candidate.hasGuidanceCut ?? false
         });
         if (isShadowMode()) {
             decisions.push(...shadowResult.decisions.map((decision) => ({ ...decision, shadow: true })));
@@ -2143,6 +2177,7 @@ export async function runDailyScreener(
                     daysSinceEarnings: newsContext.daysSinceEarnings,
                     sentimentProxy: newsContext.sentimentProxy,
                     hasMaterialNegativeNews: newsContext.hasMaterialNegativeNews,
+                    hasGuidanceCut: newsContext.hasGuidanceCut,
                     macroContext: options.macroContext ?? null
                 });
 
@@ -2251,12 +2286,15 @@ export async function runDailyScreener(
     return results.sort((a, b) => b.composite_score - a.composite_score);
 }
 
-function adjustedPremiumScore(strikeData: StrikeData): number | null {
-    if (strikeData.mid_price === null) {
+export function scoreListedOptionPremium(strikeData: StrikeData, tenorDays: number): number | null {
+    const annualizedCouponPct = calculateAnnualizedCouponPct(strikeData, tenorDays);
+    if (annualizedCouponPct === null || !Number.isFinite(annualizedCouponPct)) {
         return null;
     }
 
-    return clamp((strikeData.mid_price / strikeData.strike) * 100, 0, 1);
+    // Preserve listed-option economics: compare the raw market-implied annualized coupon
+    // on a common scale. No dealer haircut or funding adjustment is applied here.
+    return scoreCouponAttractiveness(annualizedCouponPct);
 }
 
 export function calculateHistoricalVolatility(

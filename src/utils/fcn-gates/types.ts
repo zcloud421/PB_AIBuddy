@@ -9,6 +9,7 @@ export type GateDecisionType =
     | 'OUTSIDE_UNIVERSE'
     | 'STATUS_BLOCK'
     | 'RESTRICTED'
+    | 'HOUSE_OVERRIDE'
     | 'BEARISH_STRUCTURE'
     | 'KI_BARRIER_RISK'
     | 'PATH_RISK'

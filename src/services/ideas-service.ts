@@ -1,5 +1,3 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { fetchTickerMarketCap, fetchTickerReferenceSnapshot, MassiveDataFetcher } from '../data/massive-fetcher';
 import { getChinaGoldReserveTrend } from '../data/macro-china-fetcher';
 import { getGldFlowTrend } from '../data/spdr-gold-flow-fetcher';
@@ -43,6 +41,7 @@ import {
     getUpcomingEarningsBySymbol,
     getUnderlyingBySymbol,
     getActiveHouseOverrideBySymbol,
+    listActiveHouseOverrides,
     mapTodayIdeasResponse,
     markNarrativeRepairAttempt,
     recordDrawdownAttributionDecision,
@@ -68,6 +67,9 @@ import { getEngineMode } from '../utils/fcn-gates/engine-mode';
 import { STANDARD_TARGET_COUPON_PCT } from '../utils/fcn-gates/combo-picker';
 import { loadMacroContext } from '../utils/fcn-gates/macro-context';
 import { canAddChinaAdrExposure, chinaAdrTacticalPenalty } from '../utils/fcn-universe-policy';
+import { hasHomepageWaitContext } from '../utils/homepage-recommendation-eligibility';
+import { getRestrictedSymbol } from '../utils/symbol-governance';
+import { calculateShowcaseConcentrationPenalty } from '../utils/showcase-diversification';
 import type {
     AsyncScoringAcceptedResponse,
     AsyncScoringStatusResponse,
@@ -103,13 +105,6 @@ interface EligibilityResult {
         | 'house_override_avoid';
     message?: string;
     in_recommendation_pool: boolean;
-}
-
-interface RestrictedSymbolEntry {
-    symbol: string;
-    reason?: string;
-    added_at?: string;
-    reviewed_by?: string;
 }
 
 interface FreshSymbolAnalysis {
@@ -4225,7 +4220,7 @@ function buildDataFetcher(): DataFetcherInterface {
 
 async function checkSymbolEligibility(symbol: string): Promise<EligibilityResult> {
     const normalized = symbol.toUpperCase();
-    const restricted = getRestrictedSymbols().get(normalized);
+    const restricted = getRestrictedSymbol(normalized);
     if (restricted) {
         return {
             eligible: false,
@@ -4266,27 +4261,6 @@ function getStatusMessage(status: string): string {
     }
 }
 
-let restrictedSymbolsCache: Map<string, RestrictedSymbolEntry> | null = null;
-
-function getRestrictedSymbols(): Map<string, RestrictedSymbolEntry> {
-    if (restrictedSymbolsCache) {
-        return restrictedSymbolsCache;
-    }
-    const restrictedPath = path.join(__dirname, '../../data/restricted-symbols.json');
-    try {
-        const raw = fs.readFileSync(restrictedPath, 'utf8');
-        const parsed = JSON.parse(raw) as RestrictedSymbolEntry[];
-        restrictedSymbolsCache = new Map(
-            (Array.isArray(parsed) ? parsed : [])
-                .filter((entry) => typeof entry.symbol === 'string')
-                .map((entry) => [entry.symbol.toUpperCase(), { ...entry, symbol: entry.symbol.toUpperCase() }])
-        );
-    } catch {
-        restrictedSymbolsCache = new Map();
-    }
-    return restrictedSymbolsCache;
-}
-
 export async function getTodayIdeas(): Promise<TodayIdeasResponse> {
     const latestRun = await getActiveCompletedRun();
     console.log('[debug] getActiveCompletedRun result:', latestRun);
@@ -4295,15 +4269,30 @@ export async function getTodayIdeas(): Promise<TodayIdeasResponse> {
         throw new HttpError(503, 'SCORING_ENGINE_UNAVAILABLE', 'No completed scoring run is available.');
     }
 
-    const [ideas, riskFlags, dailyBestRow] = await Promise.all([
+    const [ideas, riskFlags, dailyBestRow, activeOverrides] = await Promise.all([
         getIdeasByRunId(latestRun.run_id),
         getRiskFlagsByRunId(latestRun.run_id),
-        getDailyBestByDate(latestRun.run_date)
+        getDailyBestByDate(latestRun.run_date),
+        listActiveHouseOverrides()
     ]);
+    const overridesBySymbol = new Map(activeOverrides.map((override) => [override.symbol, override]));
     // A completed run is an immutable audit snapshot, but today's user-facing
     // pool must respect current universe governance immediately.
     const normalizedIdeas = ideas
         .filter((idea) => idea.underlying_status === undefined || idea.underlying_status === 'active')
+        .filter((idea) => getRestrictedSymbol(idea.symbol) === null)
+        .filter((idea) => overridesBySymbol.get(idea.symbol)?.override_type !== 'FORCE_AVOID')
+        .map((idea) => {
+            const override = overridesBySymbol.get(idea.symbol);
+            if (override?.override_type === 'FORCE_CAUTION' && idea.overall_grade === 'GO') {
+                return {
+                    ...idea,
+                    overall_grade: 'CAUTION' as const,
+                    composite_score: Math.min(Number(idea.composite_score ?? 0), 0.64)
+                };
+            }
+            return idea;
+        })
         .map((idea) => normalizeCommodityBetaTodayIdea(idea));
     const flagsBySymbol = new Map<string, Flag[]>();
     for (const flag of riskFlags) {
@@ -4315,13 +4304,45 @@ export async function getTodayIdeas(): Promise<TodayIdeasResponse> {
         });
         flagsBySymbol.set(flag.symbol, existing);
     }
+    for (const override of activeOverrides) {
+        if (override.override_type !== 'FORCE_CAUTION') {
+            continue;
+        }
+        const existing = flagsBySymbol.get(override.symbol) ?? [];
+        existing.push({
+            type: 'HOUSE_OVERRIDE',
+            severity: 'WARN',
+            message: `IC FORCE_CAUTION：${override.reason}`
+        });
+        flagsBySymbol.set(override.symbol, existing);
+    }
 
-    const dailyBest: DailyBestCard | null = dailyBestRow && normalizedIdeas.some((idea) => idea.symbol === dailyBestRow.symbol)
-        ? await mapDailyBestCard(dailyBestRow.symbol, dailyBestRow.theme ?? 'Featured', normalizedIdeas, flagsBySymbol)
+    const dailyBestIdea = dailyBestRow
+        ? normalizedIdeas.find((idea) => idea.symbol === dailyBestRow.symbol)
         : null;
+    const dailyBest: DailyBestCard | null =
+        dailyBestRow &&
+        dailyBestIdea &&
+        dailyBestIdea.overall_grade === 'GO' &&
+        !hasHomepageWaitContext({
+            flags: flagsBySymbol.get(dailyBestRow.symbol) ?? []
+        })
+            ? await mapDailyBestCard(
+                  dailyBestRow.symbol,
+                  dailyBestRow.theme ?? 'Featured',
+                  normalizedIdeas,
+                  flagsBySymbol
+              )
+            : null;
 
     const prewarmSymbols = normalizedIdeas
-        .filter((idea) => idea.overall_grade === 'GO')
+        .filter(
+            (idea) =>
+                idea.overall_grade === 'GO' &&
+                !hasHomepageWaitContext({
+                    flags: flagsBySymbol.get(idea.symbol) ?? []
+                })
+        )
         .sort((left, right) => (Number(right.composite_score ?? 0) - Number(left.composite_score ?? 0)))
         .slice(0, 6)
         .map((idea) => idea.symbol);
@@ -4381,7 +4402,11 @@ export async function selectDailyBest(candidates: ScoringResult[]): Promise<{
     theme: string;
     adjustedScore: number;
 } | null> {
-    const goCandidates = candidates.filter((candidate) => candidate.overall_grade === 'GO');
+    const goCandidates = candidates.filter(
+        (candidate) =>
+            candidate.overall_grade === 'GO' &&
+            !hasHomepageWaitContext(candidate)
+    );
     if (goCandidates.length === 0) {
         return null;
     }
@@ -4441,7 +4466,11 @@ export async function selectDailyRecommendationShowcase(
 }>> {
     const recentHistory = await getRecentDailyRecommendationHistory(5);
     const activeFocusStatuses = await getActiveMacroFocusStatuses();
-    const goCandidates = candidates.filter((candidate) => candidate.overall_grade === 'GO');
+    const goCandidates = candidates.filter(
+        (candidate) =>
+            candidate.overall_grade === 'GO' &&
+            !hasHomepageWaitContext(candidate)
+    );
     const cooldownExempt = new Set<string>();
     if (dailyBestSymbol) {
         cooldownExempt.add(dailyBestSymbol);
@@ -4509,12 +4538,14 @@ export async function selectDailyRecommendationShowcase(
     const usedSubsectors = new Map<string, number>();
     const usedCycleFamilies = new Map<string, number>();
     const usedThemes = new Map<string, number>();
+    const usedSectors = new Map<string, number>();
     let usedChinaAdrCount = 0;
 
     for (const item of showcase) {
         const subsector = inferMappedSubsector(item.symbol);
         const cycleFamily = inferSymbolCycleFamily(item.symbol);
         const theme = underlyingMap.get(item.symbol)?.themes?.[0] ?? null;
+        const sector = underlyingMap.get(item.symbol)?.sector ?? null;
         if (underlyingMap.get(item.symbol)?.adr_risk) {
             usedChinaAdrCount += 1;
         }
@@ -4526,6 +4557,9 @@ export async function selectDailyRecommendationShowcase(
         }
         if (theme) {
             usedThemes.set(theme, (usedThemes.get(theme) ?? 0) + 1);
+        }
+        if (sector) {
+            usedSectors.set(sector, (usedSectors.get(sector) ?? 0) + 1);
         }
     }
 
@@ -4547,11 +4581,14 @@ export async function selectDailyRecommendationShowcase(
             const subsector = inferMappedSubsector(candidate.symbol);
             const cycleFamily = inferSymbolCycleFamily(candidate.symbol);
             const theme = underlying?.themes?.[0] ?? null;
-
-            const subsectorPenalty = subsector && (usedSubsectors.get(subsector) ?? 0) > 0 ? 0.16 : 0;
-            const cyclePenalty = cycleFamily && (usedCycleFamilies.get(cycleFamily) ?? 0) > 0 ? 0.08 : 0;
-            const themePenalty = theme && (usedThemes.get(theme) ?? 0) > 0 ? 0.03 : 0;
-            const diversifiedScore = baseScore - subsectorPenalty - cyclePenalty - themePenalty;
+            const sector = underlying?.sector ?? null;
+            const concentrationPenalty = calculateShowcaseConcentrationPenalty({
+                subsector: subsector ? usedSubsectors.get(subsector) ?? 0 : 0,
+                cycle_family: cycleFamily ? usedCycleFamilies.get(cycleFamily) ?? 0 : 0,
+                theme: theme ? usedThemes.get(theme) ?? 0 : 0,
+                sector: sector ? usedSectors.get(sector) ?? 0 : 0
+            });
+            const diversifiedScore = baseScore - concentrationPenalty.total;
 
             if (diversifiedScore > bestScore) {
                 bestScore = diversifiedScore;
@@ -4577,6 +4614,7 @@ export async function selectDailyRecommendationShowcase(
         const selectedSubsector = inferMappedSubsector(selected.symbol);
         const selectedCycleFamily = inferSymbolCycleFamily(selected.symbol);
         const selectedTheme = underlyingMap.get(selected.symbol)?.themes?.[0] ?? null;
+        const selectedSector = underlyingMap.get(selected.symbol)?.sector ?? null;
         if (underlyingMap.get(selected.symbol)?.adr_risk) {
             usedChinaAdrCount += 1;
         }
@@ -4588,6 +4626,9 @@ export async function selectDailyRecommendationShowcase(
         }
         if (selectedTheme) {
             usedThemes.set(selectedTheme, (usedThemes.get(selectedTheme) ?? 0) + 1);
+        }
+        if (selectedSector) {
+            usedSectors.set(selectedSector, (usedSectors.get(selectedSector) ?? 0) + 1);
         }
     }
 
@@ -5314,7 +5355,10 @@ function buildNotRecommendableIdeaResponse(symbol: string, eligibility: Eligibil
 async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysis> {
     const fetcher = buildDataFetcher();
     const symbolData = await fetcher.fetchSymbolData(symbol);
-    const chainData = await fetcher.fetchChainData(symbol, symbolData.current_price);
+    const houseOverride = await getActiveHouseOverrideBySymbol(symbol);
+    if (houseOverride) {
+        symbolData.house_override = houseOverride.override_type;
+    }
 
     let underlying = null as Awaited<ReturnType<typeof getUnderlyingBySymbol>>;
     try {
@@ -5367,6 +5411,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
         };
     }
 
+    const chainData = await fetcher.fetchChainData(symbol, symbolData.current_price);
     const approvedTenors = approveTenors(symbolData, chainData);
     if (approvedTenors.length === 0) {
         const daysToEarnings = symbolData.days_to_earnings ?? null;
@@ -5496,6 +5541,7 @@ async function runFreshSymbolScoring(symbol: string): Promise<FreshSymbolAnalysi
                 daysSinceEarnings: newsContext.daysSinceEarnings,
                 sentimentProxy: newsContext.sentimentProxy,
                 hasMaterialNegativeNews: newsContext.hasMaterialNegativeNews,
+                hasGuidanceCut: newsContext.hasGuidanceCut,
                 macroContext
             });
             const enhancedScoring = applyRiskRewardOverlay({

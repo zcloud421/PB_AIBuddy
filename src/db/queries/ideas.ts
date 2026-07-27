@@ -5,6 +5,7 @@ import type { DailyPriceBar } from '../../data/massive-fetcher';
 import { PITCH_ENGINE_VERSION, narrativeSourceQualityPriority } from '../../utils/fcn-shared/pitch-engine-version';
 import type { FcnEngineMode, GateDecision } from '../../utils/fcn-gates/types';
 import { truncateLikelyTickerReuse } from '../../utils/price-history-integrity';
+import { hasHomepageWaitContext } from '../../utils/homepage-recommendation-eligibility';
 
 export interface LatestCompletedRun {
     run_id: string;
@@ -2440,14 +2441,28 @@ export function mapTodayIdeasResponse(
     const isAvoidDisplayRow = (idea: TodayIdeaRow) =>
         idea.overall_grade === 'AVOID' ||
         (idea.overall_grade !== 'CAUTION' && idea.source_quality === 'avoid_pitch_deterministic');
+    const isHomepageWaitRow = (idea: TodayIdeaRow) =>
+        hasHomepageWaitContext({
+            flags: flagsBySymbol.get(idea.symbol) ?? []
+        });
+    const homepageDailyBest =
+        dailyBest &&
+        !hasHomepageWaitContext({
+            flags:
+                (flagsBySymbol.get(dailyBest.symbol) ?? []).length > 0
+                    ? flagsBySymbol.get(dailyBest.symbol)
+                    : dailyBest.flags
+        })
+            ? dailyBest
+            : null;
 
     return {
         run_date: run.run_date,
         run_id: run.run_id,
         market_context: marketContext,
-        daily_best: dailyBest,
+        daily_best: homepageDailyBest,
         recommended: ideas
-            .filter((idea) => idea.overall_grade === 'GO')
+            .filter((idea) => idea.overall_grade === 'GO' && !isHomepageWaitRow(idea))
             .map((idea) => {
                 const flags = flagsBySymbol.get(idea.symbol) ?? [];
                 return {
@@ -2495,7 +2510,12 @@ export function mapTodayIdeasResponse(
             };
             }),
         caution: ideas
-            .filter((idea) => idea.overall_grade === 'CAUTION' && !isAvoidDisplayRow(idea))
+            .filter(
+                (idea) =>
+                    idea.overall_grade === 'CAUTION' &&
+                    !isAvoidDisplayRow(idea) &&
+                    !isHomepageWaitRow(idea)
+            )
             .map((idea) => {
                 const flags = flagsBySymbol.get(idea.symbol) ?? [];
                 return {

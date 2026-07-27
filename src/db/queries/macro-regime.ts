@@ -7,6 +7,7 @@
 
 import { pool } from '../client';
 import type { CreditRegimeState, MacroRegimeSnapshot, RegimeSeverity } from '../../services/macro-regime/types';
+import type { ExposureTimingSnapshot } from '../../services/exposure-timing/engine';
 
 export async function ensureMacroRegimeSnapshotsTable(): Promise<void> {
     await pool.query(`
@@ -344,6 +345,24 @@ export async function getLatestMacroRegimeSnapshot(): Promise<MacroRegimeSnapsho
         `
     );
     return result.rows[0]?.snapshot_json ?? null;
+}
+
+export async function getRecentExposureTimingSnapshots(limit = 45): Promise<ExposureTimingSnapshot[]> {
+    const result = await pool.query<{ exposure_timing: ExposureTimingSnapshot }>(
+        `
+        SELECT snapshot_json->'exposure_timing' AS exposure_timing
+        FROM macro_regime_snapshots
+        WHERE snapshot_json ? 'exposure_timing'
+          AND snapshot_json->'exposure_timing'->'assets' IS NOT NULL
+        ORDER BY run_date DESC, created_at DESC
+        LIMIT $1
+        `,
+        [limit]
+    );
+    return result.rows
+        .map((row) => row.exposure_timing)
+        .filter((snapshot): snapshot is ExposureTimingSnapshot => Boolean(snapshot?.assets))
+        .reverse();
 }
 
 export interface VerdictHistoryRow {

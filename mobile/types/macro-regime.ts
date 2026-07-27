@@ -251,12 +251,37 @@ export interface ExposureTimingAsset {
   next_trigger: string;
   invalidation: string;
   data_as_of: string | null;
+  raw_status?: ExposureTimingStatus;
+  confirmation_days?: number;
+  deterioration_days?: number;
+  status_since?: string | null;
+  confirmation_basis?: 'SUPPORT' | 'TREND' | null;
+  relative_strength_5d_pct?: number | null;
+  relative_strength_benchmark?: string | null;
+}
+
+export interface ExposureTimingHealthBySymbol {
+  symbol: string;
+  matured_confirmations: number;
+  reverted_to_watch: number;
+  support_failures: number;
+}
+
+export interface ExposureTimingHealth {
+  horizon_sessions: number;
+  matured_confirmations: number;
+  reverted_to_watch: number;
+  reversion_rate_pct: number | null;
+  support_failures: number;
+  support_failure_rate_pct: number | null;
+  by_symbol: ExposureTimingHealthBySymbol[];
 }
 
 export interface ExposureTimingSnapshot {
   as_of: string;
   macro_state: RegimeVerdictState | null;
   assets: ExposureTimingAsset[];
+  health?: ExposureTimingHealth;
 }
 
 export interface MacroRegimeSnapshot {

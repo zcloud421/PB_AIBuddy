@@ -5,6 +5,9 @@ import { truncateLikelyTickerReuse } from '../utils/price-history-integrity';
 
 const SNAPSHOT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_SNAPSHOT_PAGES = 4;
+export const MAX_OPTION_QUOTE_SPREAD_PCT = 35;
+export const MAX_OPTION_DAY_RANGE_PCT = 50;
+export const MIN_OPTION_FALLBACK_VOLUME = 20;
 
 interface MassiveOptionChainResponse {
     next_url?: string;
@@ -63,7 +66,7 @@ export class MassiveDataFetcher implements DataFetcherInterface {
         const rows = await this.fetchOptionSnapshotPaginated(symbol, minExpiry, maxStrike);
         const eligibleTickers = new Set(eligibleContracts);
 
-        const result = rows
+        const mappedRows = rows
             .map((row) => mapOptionRow(row))
             .filter((row): row is StrikeDataWithRaw => row !== null)
             .filter((row) => {
@@ -73,12 +76,18 @@ export class MassiveDataFetcher implements DataFetcherInterface {
             .filter((row) => {
                 const dte = daysUntilExpiry(row.expiry_date);
                 return dte >= 75 && dte <= 195;
-            })
+            });
+        const quoteRejected = mappedRows.filter((row) => !evaluateOptionQuoteQuality(row).passed).length;
+        const result = mappedRows
+            .filter((row) => evaluateOptionQuoteQuality(row).passed)
             .filter((row) => row.open_interest >= 10)
             .filter((row) => row.delta >= -0.40 && row.delta <= -0.15)
             .map(({ raw: _raw, ...strike }) => strike);
 
-        console.log(`[chain] ${symbol}: eligibleContracts=${eligibleContracts.length} snapshotRows=${rows.length} passedFilters=${result.length} window=${minExpiry}..${maxExpiry} maxStrike=${maxStrike}`);
+        console.log(
+            `[chain] ${symbol}: eligibleContracts=${eligibleContracts.length} snapshotRows=${rows.length} ` +
+            `quoteRejected=${quoteRejected} passedFilters=${result.length} window=${minExpiry}..${maxExpiry} maxStrike=${maxStrike}`
+        );
         return result;
     }
 
@@ -352,6 +361,9 @@ function mapOptionRow(row: Record<string, unknown>): StrikeDataWithRaw | null {
     const ask = getNestedNumber(row, ['last_quote', 'ask']);
     const bid = getNestedNumber(row, ['last_quote', 'bid']);
     const dayClose = getNestedNumber(row, ['day', 'close']);
+    const dayHigh = getNestedNumber(row, ['day', 'high']);
+    const dayLow = getNestedNumber(row, ['day', 'low']);
+    const dayVwap = getNestedNumber(row, ['day', 'vwap']);
 
     if (
         strike === null ||
@@ -383,8 +395,63 @@ function mapOptionRow(row: Record<string, unknown>): StrikeDataWithRaw | null {
         open_interest: openInterest,
         mid_price: midPrice,
         mid_price_source: midPriceSource,
+        bid_price: bid,
+        ask_price: ask,
+        quote_spread_pct: computeQuoteSpreadPct(bid, ask),
+        day_high: dayHigh,
+        day_low: dayLow,
+        day_vwap: dayVwap,
+        day_range_pct: computeDayRangePct(dayHigh, dayLow, dayVwap ?? dayClose),
         raw: row
     };
+}
+
+export function evaluateOptionQuoteQuality(strike: StrikeData): {
+    passed: boolean;
+    reason:
+        | 'ok'
+        | 'missing_mid'
+        | 'non_positive_bid'
+        | 'crossed_quote'
+        | 'spread_too_wide'
+        | 'insufficient_day_liquidity'
+        | 'stale_close_fallback';
+    spread_pct: number | null;
+} {
+    if (strike.mid_price === null || !Number.isFinite(strike.mid_price) || strike.mid_price <= 0) {
+        return { passed: false, reason: 'missing_mid', spread_pct: strike.quote_spread_pct ?? null };
+    }
+    if (strike.mid_price_source === 'day.close') {
+        if (strike.volume < MIN_OPTION_FALLBACK_VOLUME) {
+            return { passed: false, reason: 'insufficient_day_liquidity', spread_pct: strike.day_range_pct ?? null };
+        }
+        const dayRangePct = strike.day_range_pct ?? null;
+        if (dayRangePct === null) {
+            return { passed: false, reason: 'stale_close_fallback', spread_pct: null };
+        }
+        if (dayRangePct > MAX_OPTION_DAY_RANGE_PCT) {
+            return { passed: false, reason: 'spread_too_wide', spread_pct: dayRangePct };
+        }
+        return { passed: true, reason: 'ok', spread_pct: dayRangePct };
+    }
+    if (strike.mid_price_source !== 'last_quote') {
+        return { passed: false, reason: 'stale_close_fallback', spread_pct: strike.quote_spread_pct ?? null };
+    }
+
+    const bid = strike.bid_price ?? null;
+    const ask = strike.ask_price ?? null;
+    if (bid === null || bid <= 0) {
+        return { passed: false, reason: 'non_positive_bid', spread_pct: strike.quote_spread_pct ?? null };
+    }
+    if (ask === null || ask < bid) {
+        return { passed: false, reason: 'crossed_quote', spread_pct: strike.quote_spread_pct ?? null };
+    }
+
+    const spreadPct = strike.quote_spread_pct ?? computeQuoteSpreadPct(bid, ask);
+    if (spreadPct === null || spreadPct > MAX_OPTION_QUOTE_SPREAD_PCT) {
+        return { passed: false, reason: 'spread_too_wide', spread_pct: spreadPct };
+    }
+    return { passed: true, reason: 'ok', spread_pct: spreadPct };
 }
 
 function mapPriceRow(row: Record<string, unknown>): DailyPriceBar | null {
@@ -423,6 +490,21 @@ function computeMidpoint(bid: number | null, ask: number | null): number | null 
     }
 
     return ((bid ?? 0) + (ask ?? 0)) / 2;
+}
+
+function computeQuoteSpreadPct(bid: number | null, ask: number | null): number | null {
+    if (bid === null || ask === null || bid <= 0 || ask < bid) {
+        return null;
+    }
+    const midpoint = (bid + ask) / 2;
+    return midpoint > 0 ? ((ask - bid) / midpoint) * 100 : null;
+}
+
+function computeDayRangePct(high: number | null, low: number | null, reference: number | null): number | null {
+    if (high === null || low === null || reference === null || reference <= 0 || high < low) {
+        return null;
+    }
+    return ((high - low) / reference) * 100;
 }
 
 function averageTail(values: number[], lookback: number): number {

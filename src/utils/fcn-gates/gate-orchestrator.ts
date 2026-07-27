@@ -150,15 +150,19 @@ function applyMacroOverrides(symbol: string, decisions: GateDecision[], macro: M
         }));
     }
 
-    if (macro.overall === 'Critical') {
+    // The legacy nine-indicator aggregate can reach Critical on price/crowding alone.
+    // A global suitability cap now requires a mechanism-confirmed break; BREAK_FORMING
+    // remains shadow context and does not blanket-downgrade otherwise healthy names.
+    if (macro.regime_verdict_state === 'CONFIRMED_BREAK') {
         decisions.push(decision({
             type: 'MACRO_REGIME_CRITICAL_CAP',
             failType: 'SUITABILITY_FAIL',
             severity: 'WARN',
-            message: '整体 macro regime 为 Critical,全市场 GO cap at CAUTION',
+            message: '宏观机制已确认断裂,全市场 GO cap at CAUTION',
             details: {
                 macro_overall: macro.overall,
                 base_overall: macro.base_overall,
+                regime_verdict_state: macro.regime_verdict_state,
                 regime_persistence_days: macro.regime_persistence_days
             }
         }));
