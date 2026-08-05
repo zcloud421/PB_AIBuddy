@@ -14,6 +14,10 @@ primary_region = "iad"  # US East (Polygon / FRED / CNN F&G are all US-based)
 [env]
   NODE_ENV = "production"
   PORT = "3000"
+  # 512MB 机器上 V8 默认老生代堆限太低,daily screener(53 标的全量循环)在
+  # 2026-08-04/05 连续两晨以 exit 134(JS heap OOM abort)崩死,run 卡在
+  # 'running'。显式给到 400MB,留 ~112MB 给进程其余部分。
+  NODE_OPTIONS = "--max-old-space-size=400"
 
 [http_service]
   internal_port = 3000
