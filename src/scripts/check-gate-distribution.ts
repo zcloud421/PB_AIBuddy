@@ -3,6 +3,10 @@ import dotenv from 'dotenv';
 
 import { pool } from '../db/client';
 import type { GateDecision, GateDecisionType } from '../utils/fcn-gates/types';
+import {
+    getHealthTelegramEnableEnv,
+    isHealthTelegramEnabled
+} from '../utils/health-notification-policy';
 
 dotenv.config();
 
@@ -142,11 +146,18 @@ export async function runGateDistributionCheck(): Promise<GateDistributionCheckR
     });
     const report = formatGateDistributionReport(metrics);
     console.log(report);
-    await sendTelegramMessage(report);
+    const telegramEnabled = isHealthTelegramEnabled('gate_distribution');
+    if (telegramEnabled) {
+        await sendTelegramMessage(report);
+    } else {
+        console.log(
+            `[gate-distribution] report logged only; set ${getHealthTelegramEnableEnv('gate_distribution')}=true to enable Telegram`
+        );
+    }
     return {
         status: 'ok',
         distribution: metrics,
-        alerts_fired: metrics.type_counts.length > 0
+        alerts_fired: telegramEnabled
     };
 }
 

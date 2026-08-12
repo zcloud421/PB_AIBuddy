@@ -4,6 +4,10 @@ import axios from 'axios';
 import { pool } from '../db/client';
 import { ensureSourceQualityColumn } from '../db/queries/ideas';
 import { repairLatestDegradedGoNarratives, type NarrativeRepairSummary } from '../services/ideas-service';
+import {
+    getHealthTelegramEnableEnv,
+    isHealthTelegramEnabled
+} from '../utils/health-notification-policy';
 
 dotenv.config();
 
@@ -416,11 +420,20 @@ export async function runNarrativeHealthCheck(): Promise<NarrativeMetrics> {
     const metrics = await computeNarrativeMetrics(preRepairGoCoverage, autoRepair);
     const forceReport = process.env.NARRATIVE_HEALTH_FORCE_REPORT === 'true';
     const message = formatReport(metrics, forceReport);
+    const telegramEnabled = isHealthTelegramEnabled('narrative');
 
-    console.log('[narrative-health]', JSON.stringify({ metrics, sent: Boolean(message) }, null, 2));
+    console.log('[narrative-health]', JSON.stringify({
+        metrics,
+        telegram_enabled: telegramEnabled,
+        notification_candidate: Boolean(message)
+    }, null, 2));
 
-    if (message) {
+    if (message && telegramEnabled) {
         await sendTelegramMessage(message);
+    } else if (message) {
+        console.log(
+            `[narrative-health] report logged only; set ${getHealthTelegramEnableEnv('narrative')}=true to enable Telegram`
+        );
     } else {
         console.log('[narrative-health] healthy, no alert sent');
     }

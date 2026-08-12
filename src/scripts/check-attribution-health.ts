@@ -3,6 +3,10 @@ import axios from 'axios';
 
 import { pool } from '../db/client';
 import { ensureDrawdownAttributionDecisionsTable } from '../db/queries/ideas';
+import {
+    getHealthTelegramEnableEnv,
+    isHealthTelegramEnabled
+} from '../utils/health-notification-policy';
 
 dotenv.config();
 
@@ -274,12 +278,6 @@ function formatReport(metrics: HealthMetrics, issues: string[], forceReport: boo
 }
 
 export async function runAttributionHealthCheck(): Promise<void> {
-    const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
-    const chatId = process.env.TELEGRAM_CHAT_ID?.trim();
-    if (!botToken || !chatId) {
-        throw new Error('TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required');
-    }
-
     // Ensure table exists before querying. The table is normally created lazily by
     // recordDrawdownAttributionDecision() when the first episode is attributed in
     // production, but if the cron fires before any attribution has run (e.g. fresh
@@ -291,15 +289,30 @@ export async function runAttributionHealthCheck(): Promise<void> {
     const issues = evaluateAlerts(metrics);
     const forceReport = process.env.ATTRIB_HEALTH_FORCE_REPORT === 'true';
     const message = formatReport(metrics, issues, forceReport);
+    const telegramEnabled = isHealthTelegramEnabled('attribution');
 
-    console.log('[attrib-health]', JSON.stringify({ metrics, issues, sent: Boolean(message) }, null, 2));
+    console.log('[attrib-health]', JSON.stringify({
+        metrics,
+        issues,
+        telegram_enabled: telegramEnabled,
+        notification_candidate: Boolean(message)
+    }, null, 2));
 
-    if (message) {
+    if (message && telegramEnabled) {
+        const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
+        const chatId = process.env.TELEGRAM_CHAT_ID?.trim();
+        if (!botToken || !chatId) {
+            throw new Error('TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required when attribution health Telegram is enabled');
+        }
         await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             chat_id: chatId,
             text: message
         });
         console.log('[attrib-health] telegram alert sent');
+    } else if (message) {
+        console.log(
+            `[attrib-health] report logged only; set ${getHealthTelegramEnableEnv('attribution')}=true to enable Telegram`
+        );
     } else {
         console.log('[attrib-health] healthy, no alert sent');
     }
